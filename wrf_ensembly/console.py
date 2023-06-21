@@ -39,6 +39,9 @@ def get_logger(cfg: LoggerConfig | None) -> Tuple[logging.Logger, Path | None]:
         handlers.append(logging.FileHandler(log_dir / "wrf_ensembly.log"))
 
     logging.basicConfig(
-        level="NOTSET", format="%(message)s", datefmt="[%X]", handlers=handlers
+        level="NOTSET",
+        format="%(asctime)s: %(message)s",
+        datefmt="[%X]",
+        handlers=handlers,
     )
     return logging.getLogger("rich"), log_dir
