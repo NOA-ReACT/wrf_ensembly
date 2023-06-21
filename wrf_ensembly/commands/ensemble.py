@@ -8,7 +8,15 @@ import numpy as np
 app = typer.Typer()
 
 from wrf_ensembly.console import console, get_logger, LoggerConfig
-from wrf_ensembly import config, cycling, namelist, wrf, utils, pertubations
+from wrf_ensembly import (
+    config,
+    cycling,
+    namelist,
+    wrf,
+    utils,
+    pertubations,
+    member_info,
+)
 
 
 @app.command()
@@ -78,6 +86,13 @@ def setup(experiment_path: Path):
             member_dir / "wrfbdy_d01",
         )
         logger.info(f"Member {i}: Copied wrfbdy_d01_cycle_0")
+
+        # Create member info file
+        minfo = member_info.MemberInfo(
+            metadata=cfg.metadata, member={"i": i, "current_cycle": 0}
+        )
+        member_info.write_member_info(member_dir / "member_info.toml", minfo)
+        logger.info(f"Member {i}: Wrote info to {member_dir / 'member_info.toml'}")
 
 
 @app.command()

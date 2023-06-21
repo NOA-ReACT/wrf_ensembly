@@ -1,9 +1,10 @@
 from pathlib import Path
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 import os
 
 import tomli
+import tomli_w
 from pydantic import BaseModel
 import rich
 
@@ -182,7 +183,7 @@ def write_config(path: Path, cfg: Config):
         cfg: Config object to write
     """
     with open(path, "wb") as f:
-        tomli.dump(cfg.dict(), f)
+        tomli_w.dump(cfg.dict(), f)
 
 
 def inspect(cfg: Config):
