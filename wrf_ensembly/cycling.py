@@ -11,6 +11,9 @@ class CycleInformation:
     cycle_offset: timedelta
     index: int
 
+    def __str__(self):
+        return f"Cycle #{self.index}: {self.start} -> {self.end}, Offset: {self.cycle_offset.seconds // 60 // 60}h"
+
 
 def get_cycle_information(cfg: config.Config) -> list[CycleInformation]:
     """

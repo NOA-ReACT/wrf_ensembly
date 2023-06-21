@@ -29,8 +29,8 @@ class DirectoriesConfig(BaseModel):
     wps_root: Path
     """Root directory to the WPS. Should contain the `geogrid.exe`, `metgrid.exe` and `ungrib.exe` executables."""
 
-    # wrfda_root: Path
-    # """Root directory of the WRFDA. Should contain a `run` directory, w/ WRFDA compiled."""
+    wrfda_root: Path
+    """Root directory of the WRFDA. Should contain a `run` directory, w/ WRFDA compiled."""
 
     dart_root: Path
     """Root directory of the DART. Should contain a `models/wrf` directory, compiled."""
@@ -113,6 +113,17 @@ class AssimilationConfig(BaseModel):
     """Number of ensemble members."""
 
 
+class PertubationVariableConfig(BaseModel):
+    mean: float = 1.0
+    """Mean of the pertubation field"""
+
+    sd: float = 1.0
+    """Standard deviation of the pertubation field"""
+
+    rounds: int = 10
+    """Number of rounds of smoothing to apply to the pertubation field"""
+
+
 class Config(BaseModel):
     metadata: MetadataConfig
     """Metadata about the experiment (name, ...)"""
@@ -134,6 +145,9 @@ class Config(BaseModel):
 
     assimilation: AssimilationConfig
     """Configuration related to assimilation."""
+
+    pertubations: dict[str, PertubationVariableConfig] = {}
+    """Configuration related to pertubation of the initial conditions."""
 
     wrf_namelist: dict[str, dict[str, Any]]
     """Overrides for the WRF namelist"""
