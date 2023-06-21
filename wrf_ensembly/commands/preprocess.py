@@ -335,6 +335,19 @@ def real(experiment_path: Path, force=False):
 
     logger.info("real finished successfully")
 
+    data_dir = preprocessing_dir / "initial_coundary_nc"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    shutil.move(
+        wrf_dir / "wrfinput_d01",
+        data_dir / "wrfinput_d01",
+    )
+    logger.info(f"Moved wrfinput_d01 to {data_dir}")
+    shutil.move(
+        wrf_dir / "wrfbdy_d01",
+        data_dir / "wrfbdy_d01",
+    )
+    logger.info(f"Moved wrfbdy_d01 to {data_dir}")
+
 
 @app.command()
 def split_wrfbdy(
@@ -347,9 +360,9 @@ def split_wrfbdy(
     logger, _ = get_logger(LoggerConfig(experiment_path, "preprocess-split-wrfbdy"))
     cfg = config.read_config(experiment_path / "config.toml")
     preprocessing_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
-    wrf_dir = preprocessing_dir / "WRF"
+    data_dir = preprocessing_dir / "initial_boundary_nc"
 
-    wrfbdy_path = wrf_dir / "wrfbdy_d01"
+    wrfbdy_path = data_dir / "wrfbdy_d01"
     if not wrfbdy_path.is_file():
         logger.error("[red]Could not find wrfbdy_d01 at[/red] {wrfbdy_path}")
         return 1
@@ -384,7 +397,7 @@ def split_wrfbdy(
                 )
                 continue
 
-            output_path = wrfbdy_path.parent / f"{wrfbdy_path.name}_cycle_{cycle.index}"
+            output_path = data_dir / f"{wrfbdy_path.name}_cycle_{cycle.index}"
             logger.info(f"Writing wrfbdy file for cycle {cycle.index} to {output_path}")
             with netCDF4.Dataset(output_path, "w") as ds_out:
                 for name, dim in ds_in.dimensions.items():
