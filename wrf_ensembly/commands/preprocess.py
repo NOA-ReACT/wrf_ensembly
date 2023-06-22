@@ -411,3 +411,6 @@ def split_wrfbdy(
                     ds_out[name][:] = var[time_mask]
                     for attr_name in var.ncattrs():
                         ds_out[name].setncattr(attr_name, var.getncattr(attr_name))
+
+                for attr_name in ds_in.ncattrs():
+                    ds_out.setncattr(attr_name, ds_in.getncattr(attr_name))
