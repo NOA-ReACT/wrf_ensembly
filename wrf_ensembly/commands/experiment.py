@@ -24,21 +24,10 @@ def create(
             help="Path to the config file to use for the experiment. If not specified, the default config file will be used.",
         ),
     ] = None,
-    exists_ok: Annotated[
-        bool,
-        typer.Option(
-            default=False,
-            help="If set, do not raise an error if the experiment path already exists.",
-        ),
-    ] = False,
 ):
     """Create a new experiment directory."""
 
     logger, _ = get_logger(LoggerConfig(experiment_path, "experiment-create"))
-
-    if not exists_ok and experiment_path.exists():
-        logger.error(f"Experiment path {experiment_path} already exists")
-        raise typer.Exit(code=1)
 
     # Create directory tree, add config file
     root = experiment_path

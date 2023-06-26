@@ -132,7 +132,7 @@ def setup(experiment_path: Path):
 
 
 @app.command()
-def geogrid(experiment_path: Path, force=False):
+def geogrid(experiment_path: Path):
     """
     Runs geogrid.exe for the experiment.
     """
@@ -142,7 +142,7 @@ def geogrid(experiment_path: Path, force=False):
     preprocessing_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
     wps_dir = preprocessing_dir / "WPS"
 
-    if (wps_dir / "geo_em.d01.nc").exists() and not force:
+    if (wps_dir / "geo_em.d01.nc").exists():
         logger.warning("geo_em.d01.nc already exists, skipping geogrid.exe")
         return 0
 
@@ -235,7 +235,7 @@ def ungrib(experiment_path: Path, force=False):
 
 
 @app.command()
-def metgrid(experiment_path: Path, force=False):
+def metgrid(experiment_path: Path):
     """
     Run metgrid.exe to produce the `met_em*.nc` files.
     """
@@ -245,7 +245,7 @@ def metgrid(experiment_path: Path, force=False):
     preprocessing_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
     wps_dir = preprocessing_dir / "WPS"
 
-    if len(list(wps_dir.glob("met_em*.nc"))) > 0 and not force:
+    if len(list(wps_dir.glob("met_em*.nc"))) > 0:
         logger.warning("met_em files seem to exist, skipping metgrid.exe")
         return 0
 
