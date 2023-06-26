@@ -34,7 +34,7 @@ def create(
 ):
     """Create a new experiment directory."""
 
-    logger, _ = get_logger()
+    logger, _ = get_logger(LoggerConfig(experiment_path, "experiment-create"))
 
     if not exists_ok and experiment_path.exists():
         logger.error(f"Experiment path {experiment_path} already exists")
@@ -58,7 +58,6 @@ def create(
     (root / cfg.directories.output_sub).mkdir(parents=True, exist_ok=True)
     (root / cfg.directories.observations_sub).mkdir(parents=True, exist_ok=True)
     (root / cfg.directories.work_sub).mkdir(parents=True, exist_ok=True)
-    (root / cfg.directories.log_sub).mkdir(parents=True, exist_ok=True)
 
     (root / cfg.directories.work_sub / "preprocessing").mkdir()
 
@@ -66,13 +65,10 @@ def create(
     for i in range(len(cycles)):
         cycle_dir = root / cfg.directories.output_sub / f"cycle_T{i}"
         cycle_dir.mkdir()
-        cycle_log_dir = root / cfg.directories.log_sub / f"cycle_T{i}"
-        cycle_log_dir.mkdir()
 
         for j in range(cfg.assimilation.n_members):
             (cycle_dir / f"member_{j}").mkdir()
-            (cycle_dir / "mean").mkdir()
-            (cycle_log_dir / f"member_{j}").mkdir()
+        (cycle_dir / "mean").mkdir()
 
     for j in range(cfg.assimilation.n_members):
         member_path = (root / cfg.directories.work_sub) / "ensemble" / f"member_{j}"

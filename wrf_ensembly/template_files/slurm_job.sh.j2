@@ -1,0 +1,12 @@
+#!/bin/bash
+
+{% for key, val in slurm_args.items() -%}
+#SBATCH --{{key}}={{val}}
+{% endfor %}
+
+module purge
+{% for name in env_modules -%}
+module load {{name}}
+{% endfor %}
+
+{{ commands | join('\n') }}

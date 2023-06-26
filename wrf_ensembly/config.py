@@ -150,6 +150,12 @@ class Config(BaseModel):
     pertubations: dict[str, PertubationVariableConfig] = {}
     """Configuration related to pertubation of the initial conditions."""
 
+    slurm: dict[str, Any] = {}
+    """
+    Arguments passed to slurm jobfiles. A special variable "env_modules" can be used
+    for loading environment modules at the start of the job.
+    """
+
     wrf_namelist: dict[str, dict[str, Any]]
     """Overrides for the WRF namelist"""
 
