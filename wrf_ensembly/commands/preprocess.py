@@ -2,6 +2,8 @@ from pathlib import Path
 import shutil
 import datetime
 from itertools import chain
+from typing import Optional
+from typing_extensions import Annotated
 
 import typer
 import netCDF4
@@ -64,19 +66,37 @@ def wps_namelist(experiment_path: Path):
 
 
 @app.command()
-def wrf_namelist(experiment_path: Path):
-    """Generates the WRF namelist for the whole experiment period, for use by real.exe
-    for creating initial and boundary conditions."""
+def wrf_namelist(
+    experiment_path: Path, cycle: Annotated[Optional[int], typer.Argument()] = None
+):
+    """
+    Generates the WRF namelist, for use by real.exe for creating initial and boundary conditions.
+    If cycle is specified, the namelist will be generated for that cycle only.
+    """
 
     logger, _ = get_logger(LoggerConfig(experiment_path, "preprocess-wrf-namelist"))
     cfg = config.read_config(experiment_path / "config.toml")
+
+    if cycle is None:
+        start = cfg.time_control.start
+        end = cfg.time_control.end
+
+        logger.info("Generating WRF namelist for whole experiment")
+    else:
+        cycles = cycling.get_cycle_information(cfg)
+        cur_cycle = cycles[cycle]
+        start = cur_cycle.start
+        end = cur_cycle.end
+
+        logger.info(f"Generating WRF namelist for cycle {cycle}")
+
+    logger.info(f"From {start.isoformat()} until {end.isoformat()}")
+
     wrf_namelist = {
         "time_control": {
-            **wrf.timedelta_to_namelist_items(
-                cfg.time_control.end - cfg.time_control.start
-            ),
-            **wrf.datetime_to_namelist_items(cfg.time_control.start, "start"),
-            **wrf.datetime_to_namelist_items(cfg.time_control.end, "end"),
+            **wrf.timedelta_to_namelist_items(end - start),
+            **wrf.datetime_to_namelist_items(start, "start"),
+            **wrf.datetime_to_namelist_items(end, "end"),
             "interval_seconds": cfg.time_control.boundary_update_interval * 60,
             "history_interval": cfg.time_control.output_interval,
         },
@@ -273,26 +293,21 @@ def metgrid(experiment_path: Path):
 
 
 @app.command()
-def real(experiment_path: Path, force=False):
+def real(experiment_path: Path, cycle: int):
     """
-    Run real.exe to produce the initial (wrfinput) and boundary (wrfbdy) conditions.
-    These are produces for the whole experiment duration (all cycles).
-    You should split the wrfbdy file for each cycle using `split-wrfbdy`.
+    Run real.exe to produce the initial (wrfinput) and boundary (wrfbdy) conditions for
+    one cycle. You should run this for all cycles to have initial/boundary conditions for
+    your experiment.
     """
 
-    logger, log_dir = get_logger(LoggerConfig(experiment_path, "preprocess-real"))
+    logger, log_dir = get_logger(
+        LoggerConfig(experiment_path, f"preprocess-real-cycle_{cycle}")
+    )
+
     cfg = config.read_config(experiment_path / "config.toml")
     preprocessing_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
     wps_dir = preprocessing_dir / "WPS"
     wrf_dir = preprocessing_dir / "WRF"
-
-    if (
-        (wrf_dir / "wrfinput_d01").exists()
-        and (wrf_dir / "wrfbdy_d01").exists()
-        and not force
-    ):
-        logger.warning("wrfinput and wrfbdy files seem to exist, skipping real.exe")
-        return 0
 
     # Clean WRF dir from old met_em files
     for p in wrf_dir.glob("met_em*nc"):
@@ -317,6 +332,9 @@ def real(experiment_path: Path, force=False):
 
     logger.info(f"Linked {count} met_em files to {wrf_dir}")
 
+    # Generate namelist
+    wrf_namelist(experiment_path, cycle)
+
     # Run real
     real_path = wrf_dir / "real.exe"
     if not real_path.is_file():
@@ -329,88 +347,22 @@ def real(experiment_path: Path, force=False):
         shutil.copy(log_file, log_dir / log_file.name)
     (log_dir / "real.log").write_text(res.stdout)
 
-    if not res.success or "SUCCESS COMPLETE REAL_EM INIT" not in res.stdout:
+    rsl = (wrf_dir / "rsl.out.0000").read_text()
+    if "SUCCESS COMPLETE REAL_EM INIT" not in rsl:
         logger.error("real.exe could not complete, check logs.")
         return 1
 
     logger.info("real finished successfully")
 
-    data_dir = preprocessing_dir / "initial_coundary_nc"
+    data_dir = preprocessing_dir / "initial_boundary"
     data_dir.mkdir(parents=True, exist_ok=True)
     shutil.move(
         wrf_dir / "wrfinput_d01",
-        data_dir / "wrfinput_d01",
+        data_dir / f"wrfinput_d01_cycle_{cycle}",
     )
     logger.info(f"Moved wrfinput_d01 to {data_dir}")
     shutil.move(
         wrf_dir / "wrfbdy_d01",
-        data_dir / "wrfbdy_d01",
+        data_dir / f"wrfbdy_d01_cycle_{cycle}",
     )
     logger.info(f"Moved wrfbdy_d01 to {data_dir}")
-
-
-@app.command()
-def split_wrfbdy(
-    experiment_path: Path,
-):
-    """
-    Split the wrfbdy file into multiple files, one for each assimilation cycle.
-    """
-
-    logger, _ = get_logger(LoggerConfig(experiment_path, "preprocess-split-wrfbdy"))
-    cfg = config.read_config(experiment_path / "config.toml")
-    preprocessing_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
-    data_dir = preprocessing_dir / "initial_boundary_nc"
-
-    wrfbdy_path = data_dir / "wrfbdy_d01"
-    if not wrfbdy_path.is_file():
-        logger.error("[red]Could not find wrfbdy_d01 at[/red] {wrfbdy_path}")
-        return 1
-
-    cycles = cycling.get_cycle_information(cfg)
-    if len(cycles) == 0:
-        logger.error("[time_control] configuration is invalid, no cycles found")
-        return 1
-    logger.info(f"Working for {len(cycles)} assimilation cycles")
-
-    with netCDF4.Dataset(wrfbdy_path, "r") as ds_in:
-        bdy_times = ds_in["Times"][:]
-        bdy_times = [
-            datetime.datetime.strptime(
-                t.tobytes().decode(), "%Y-%m-%d_%H:%M:%S"
-            ).replace(tzinfo=datetime.timezone.utc)
-            for t in bdy_times.data
-        ]
-
-        for cycle in cycles:
-            logger.info(
-                f"Cycle {cycle.index}, start {cycle.start.isoformat()} end {cycle.end.isoformat()}"
-            )
-
-            time_mask = np.zeros(len(bdy_times), dtype=bool)
-            for j, t in enumerate(bdy_times):
-                time_mask[j] = cycle.start <= t <= cycle.end
-
-            if not np.any(time_mask):
-                logger.error(
-                    f"No boundary data in wrfbdy found for cycle {cycle.index}!"
-                )
-                continue
-
-            output_path = data_dir / f"{wrfbdy_path.name}_cycle_{cycle.index}"
-            logger.info(f"Writing wrfbdy file for cycle {cycle.index} to {output_path}")
-            with netCDF4.Dataset(output_path, "w") as ds_out:
-                for name, dim in ds_in.dimensions.items():
-                    size = dim.size
-                    if name == "Time":
-                        size = np.sum(time_mask)
-                    ds_out.createDimension(name, size)
-
-                for name, var in ds_in.variables.items():
-                    ds_out.createVariable(name, var.dtype, var.dimensions)
-                    ds_out[name][:] = var[time_mask]
-                    for attr_name in var.ncattrs():
-                        ds_out[name].setncattr(attr_name, var.getncattr(attr_name))
-
-                for attr_name in ds_in.ncattrs():
-                    ds_out.setncattr(attr_name, ds_in.getncattr(attr_name))

@@ -35,7 +35,7 @@ def setup(experiment_path: Path):
         experiment_path
         / cfg.directories.work_sub
         / "preprocessing"
-        / "initial_boundary_nc"
+        / "initial_boundary"
     )  # Where the wrfinput/wrfbdy are stored
 
     # WRF namelist for the first cycle
@@ -79,7 +79,7 @@ def setup(experiment_path: Path):
 
         # Copy initial and boundary conditions
         shutil.copy(
-            data_path / f"wrfinput_d01",
+            data_path / f"wrfinput_d01_cycle_0",
             member_dir / "wrfinput_d01",
         )
         logger.info(f"Member {i}: Copied wrfinput_d01")
