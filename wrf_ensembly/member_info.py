@@ -21,6 +21,18 @@ class CycleSection(BaseModel):
     walltime_s: int
     """Walltime in seconds"""
 
+    advanced: bool
+    """Whether the cycle was advanced or not"""
+
+    prior_postprocessed: bool
+    """Whether the prior was postprocessed or not"""
+
+    filter: bool
+    """Whether the filter was run or not"""
+
+    posterior_postprocessed: bool
+    """Whether the posterior was postprocessed or not"""
+
 
 class MemberInfo(BaseModel):
     metadata: dict[str, str] = {}
@@ -53,5 +65,8 @@ def write_member_info(path: Path, minfo: MemberInfo):
         path: Path to the TOML configuration file
         minfo: MemberInfo object to write
     """
+
+    cycle = {str(k): v.dict() for k, v in minfo.cycle.items()}
+
     with open(path, "wb") as f:
-        tomli_w.dump(minfo.dict(), f)
+        tomli_w.dump(minfo.dict() | {"cycle": cycle}, f)

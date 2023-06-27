@@ -36,7 +36,7 @@ class DirectoriesConfig(BaseModel):
     dart_root: Path
     """Root directory of the DART. Should contain a `models/wrf` directory, compiled."""
 
-    output_sub: Path = Path("./analysis")
+    output_sub: Path = Path("./data")
     """Where to store the output analysis files, relative to the experiment root."""
 
     observations_sub: Path = Path("./obs")
@@ -112,6 +112,12 @@ class AssimilationConfig(BaseModel):
 
     n_members: int
     """Number of ensemble members."""
+
+    cycled_variables: list[str]
+    """Which variables to carry forward from the previous cycle"""
+
+    extract_variables: list[str]
+    """Which variables to extract from the WRF output into the statistics"""
 
 
 class PertubationVariableConfig(BaseModel):

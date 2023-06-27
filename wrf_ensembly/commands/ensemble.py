@@ -193,6 +193,14 @@ def advance_member(
         experiment_path / cfg.directories.work_sub / "ensemble" / f"member_{member}"
     )
     minfo = member_info.read_member_info(member_dir / "member_info.toml")
+    if (
+        minfo.member.current_cycle in minfo.cycle
+        and minfo.cycle[minfo.member.current_cycle].advanced
+    ):
+        logger.info(
+            f"Member {member} is already advanced to cycle {minfo.member.current_cycle}"
+        )
+        return 0
 
     logger.info(f"Advancing member {member} to cycle {minfo.member.current_cycle + 1}")
 
@@ -214,8 +222,11 @@ def advance_member(
     minfo.cycle[minfo.member.current_cycle] = member_info.CycleSection(
         runtime=start_time,
         walltime_s=(end_time - start_time).total_seconds(),
+        advanced=True,
+        prior_postprocessed=False,
+        filter=False,
+        posterior_postprocessed=False,
     )
-    minfo.member.current_cycle += 1
     member_info.write_member_info(member_dir / "member_info.toml", minfo)
 
 
@@ -278,104 +289,277 @@ def advance_members_slurm(
 
 
 @app.command()
-def compute_cycle_statistics(experiment_path: Path):
-    logger, _ = get_logger(
-        LoggerConfig(experiment_path, f"ensemble-advance-members-slurm")
+def postprocess_prior(experiment_path: Path, member: int):
+    """
+    After a forward run has completed, converts the WRF output files into input ones
+    by copying cycling variables into the next initial condition files.
+    """
+
+    logger, log_dir = get_logger(
+        LoggerConfig(experiment_path, f"postprocess-prior-member_{member}")
     )
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
-    ensemble_dir = experiment_path / cfg.directories.work_sub / "ensemble"
+    data_dir = experiment_path / cfg.directories.output_sub
 
-    # Verify that all members are at the same point in time (cycle)
+    member_dir = (
+        experiment_path / cfg.directories.work_sub / "ensemble" / f"member_{member}"
+    )
+    minfo = member_info.read_member_info(member_dir / "member_info.toml")
+    current_cycle = minfo.member.current_cycle
+    next_cycle = current_cycle + 1
+    if current_cycle not in minfo.cycle:
+        logger.error(f"Member {member} has not been advanced to cycle {current_cycle}")
+        logger.error("Did `advance` run successfully?")
+        return 1
+    minfo_cycle = minfo.cycle[current_cycle]
+    if minfo_cycle.prior_postprocessed:
+        logger.info(
+            f"Member {member} is already postprocessed for cycle {current_cycle}"
+        )
+        return 0
+
+    cycle_info = cycling.get_cycle_information(cfg)[current_cycle]
+
+    # Copy wrfout to the forecasts directory
+    forecasts_dir = (
+        data_dir / "forecasts" / f"cycle_{current_cycle}" / f"member_{member}"
+    )
+    forecasts_dir.mkdir(parents=True, exist_ok=True)
+    for wrfout in member_dir.glob("wrfout*"):
+        # TODO move files instead of copying
+        logger.info(f"Member {member}: Copying {wrfout} to {forecasts_dir}")
+        shutil.copy(wrfout, forecasts_dir / wrfout.name)
+
+    # Copy initial/boundary for the next cycle to the prior directory, then copy the
+    # cycled variables
+    prior_dir = data_dir / "prior" / f"cycle_{current_cycle}" / f"member_{member}"
+    prior_dir.mkdir(parents=True, exist_ok=True)
+
+    initial_c = data_dir / "initial_boundary" / f"wrfinput_d01_cycle_{next_cycle}"
+    boundary_c = data_dir / "initial_boundary" / f"wrfbdy_d01_cycle_{next_cycle}"
+    logger.info(f"Member {member}: Copying {initial_c} to {prior_dir}")
+    shutil.copy(initial_c, prior_dir / "wrfinput_d01")
+    logger.info(f"Member {member}: Copying {boundary_c} to {prior_dir}")
+    shutil.copy(boundary_c, prior_dir / "wrfbdy_d01")
+
+    wrfout_name = "wrfout_d01_" + cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
+
+    logger.info("Copying cycled variables to initial conditions")
+    with (
+        netCDF4.Dataset(initial_c, "r+") as nc_prior_initial,
+        netCDF4.Dataset(forecasts_dir / wrfout_name, "r") as nc_prior_wrfout,
+    ):
+        for name in cfg.assimilation.cycled_variables:
+            logger.info(f"Member {member}: Copying {name} from {wrfout_name}")
+            nc_prior_initial[name][:] = nc_prior_wrfout[name][:]
+
+    # Update boundary conditions to match
+    cwd = experiment_path / cfg.directories.work_sub / "update_bc"
+
+    logger.info(f"Member {member}: Running bc_update.exe")
+    bc_update_namelist = {
+        "control_param": {
+            "da_file": prior_dir / "wrfinput_d01",
+            "wrf_bdy_file": prior_dir / "wrfbdy_d01",
+            "domain_id": 1,
+            "debug": True,
+            "update_lateral_bdy": True,
+            "update_low_bdy": False,
+            "update_lsm": False,
+            "iswater": 16,
+            "var4d_lbc": False,
+        }
+    }
+    namelist.write_namelist(bc_update_namelist, cwd / "parame.in")
+    logger.info(f"Member {member}: Wrote da_update_bc namelist to {cwd / 'parame.in'}")
+
+    cmd = [str((cwd / "da_update_bc.exe").resolve())]
+    res = utils.call_external_process(cmd, cwd, logger)
+    (log_dir / f"da_update_bc_member_{member}.log").write_text(res.stdout)
+    if not res.success or "Update_bc completed successfully" not in res.stdout:
+        logger.error(
+            f"Member {member}: bc_update.exe failed with exit code {res.returncode}"
+        )
+        return 1
+    logger.info(f"Member {member}: bc_update.exe finished successfully")
+
+    minfo.cycle[current_cycle].prior_postprocessed = True
+    member_info.write_member_info(member_dir / "member_info.toml", minfo)
+
+
+@app.command()
+def filter(experiment_path: Path):
+    """
+    Runs the assimilation filter for the current cycle
+    """
+
+    logger, log_dir = get_logger(LoggerConfig(experiment_path, f"filter"))
+    experiment_path = experiment_path.resolve()
+    cfg = config.read_config(experiment_path / "config.toml")
+    data_dir = experiment_path / cfg.directories.output_sub
+
+    # Establish which cycle we are running and that all member priors are pre-processed
     minfos = [
-        member_info.read_member_info(ensemble_dir / f"member_{i}" / "member_info.toml")
+        member_info.read_member_info(
+            experiment_path
+            / cfg.directories.work_sub
+            / "ensemble"
+            / f"member_{i}"
+            / "member_info.toml"
+        )
         for i in range(cfg.assimilation.n_members)
     ]
-    current_cycle = [minfo.member.current_cycle for minfo in minfos]
-    for c in current_cycle[1:]:
-        if c != current_cycle[0]:
+    current_cycle = minfos[0].member.current_cycle
+    for minfo in minfos:
+        if minfo.member.current_cycle != current_cycle:
             logger.error(
-                f"Member {current_cycle.index(c)} has a different current cycle than member 0"
+                f"Member {minfo.member.i} has a different current cycle than member 0"
+            )
+            return 1
+        if current_cycle not in minfo.cycle:
+            logger.error(
+                f"Member {minfo.member.i} has not been advanced to cycle {current_cycle}"
+            )
+            return 1
+        if minfo.cycle[current_cycle].prior_postprocessed is False:
+            logger.error(
+                f"Member {minfo.member.i} has not been postprocessed for cycle {current_cycle}"
             )
             return 1
 
-    # Use member 0 as a reference to check how many files we should have
-    files = set([f.name for f in (ensemble_dir / "member_0").glob("wrfout_d01_*")])
-    for i in range(1, cfg.assimilation.n_members):
-        for f in (ensemble_dir / f"member_{i}").glob("wrfout_d01_*"):
-            if f.name not in files:
-                logger.error(
-                    f"Member 0 is missing file {f.name} that exists in member {i}"
-                )
-                return 1
+    # Write input/output file lists
+    priors = list(
+        (data_dir / "prior" / f"cycle_{current_cycle}").glob("member_*/wrfinput_d01")
+    )
 
-    # Move files to analysis directory
-    analysis_dir = experiment_path / "analysis" / f"cycle_{current_cycle[0] - 1}"
-    analysis_dir.mkdir(parents=True, exist_ok=True)
+    dart_dir = cfg.directories.dart_root / "models" / "wrf" / "work"
+    dart_dir = dart_dir.resolve()
+    dart_input_txt = dart_dir / "input_list.txt"
+    dart_input_txt.write_text("\n".join([str(prior) for prior in priors]))
+    logger.info(f"Wrote input_list.txt")
 
-    prior_dir = analysis_dir / "prior"
-    prior_dir.mkdir(parents=True, exist_ok=True)
-    # for i in range(cfg.assimilation.n_members):
-    #     member_dir = prior_dir / f"member_{i}"
-    #     member_dir.mkdir(exist_ok=True)
-    #     for f in files:
-    #         source = ensemble_dir / f"member_{i}" / f
-    #         logger.info(f"Moving {source} to {member_dir}")
-    #         shutil.copy(source, member_dir)  # TODO Change to move?
+    dart_output_txt = dart_dir / "output_list.txt"
+    dart_output_txt.write_text(
+        "\n".join([f"dart_member_{i}.nc" for i in range(cfg.assimilation.n_members)])
+    )
+    logger.info(f"Wrote output_list.txt")
 
-    # Compute statistics
-    times = [f.replace("wrfout_d01_", "") for f in files]
-    times = sorted(times)
-    times = [times[-1]]
-    for t in times:
-        logger.info(f"Computing ensemble mean/SD for {t}...")
-        with netCDF4.Dataset(prior_dir / "wrfout_ensemble", "w") as nc_ensemble:
-            member_ncs = [
-                netCDF4.Dataset(prior_dir / f"member_{i}" / f"wrfout_d01_{t}", "r")
-                for i in range(cfg.assimilation.n_members)
-            ]
-            for name, dim in member_ncs[0].dimensions.items():
-                nc_ensemble.createDimension(name, dim.size)
+    # Run filter
+    cmd = ["./filter"]
+    res = utils.call_external_process(cmd, dart_dir, logger)
+    (log_dir / f"filter.log").write_text(res.stdout)
+    if not res.success or "Finished ... at" not in res.stdout:
+        logger.error(f"filter failed with exit code {res.returncode}")
+        return 1
 
-            for v in member_ncs[0].variables:
-                if v == "Times":
-                    nc_ensemble.createVariable(
-                        "Times",
-                        "S1",
-                        member_ncs[0].variables["Times"].dimensions,
-                    )
-                    nc_ensemble.variables["Times"][:] = member_ncs[0]["Times"][:]
-                    for attr in member_ncs[0].variables["Times"].ncattrs():
-                        nc_ensemble.variables["Times"].setncattr(
-                            attr,
-                            getattr(member_ncs[0].variables["Times"], attr),
-                        )
-                    continue
+    # Copy output to posterior directory
+    posterior_dir = data_dir / "posterior" / f"cycle_{current_cycle}"
+    posterior_dir.mkdir(parents=True, exist_ok=True)
+    for f in dart_dir.glob("dart_member_*.nc"):
+        shutil.copy(f, posterior_dir / f.name)
+        logger.info(f"Copied {f} to {posterior_dir}")
 
-                if v not in nc_ensemble.variables:
-                    nc_ensemble.createVariable(
-                        f"{v}_mean",
-                        member_ncs[0].variables[v].dtype,
-                        member_ncs[0].variables[v].dimensions,
-                    )
-                    nc_ensemble.createVariable(
-                        f"{v}_sd",
-                        member_ncs[0].variables[v].dtype,
-                        member_ncs[0].variables[v].dimensions,
-                    )
-                    # Copy attributes
-                    for attr in member_ncs[0].variables[v].ncattrs():
-                        nc_ensemble.variables[f"{v}_mean"].setncattr(
-                            attr,
-                            getattr(member_ncs[0].variables[v], attr),
-                        )
-                        nc_ensemble.variables[f"{v}_sd"].setncattr(
-                            attr,
-                            getattr(member_ncs[0].variables[v], attr),
-                        )
-                stack = np.stack([nc.variables[v][:] for nc in member_ncs])
-                nc_ensemble.variables[f"{v}_mean"][:] = stack.mean(axis=0)
-                nc_ensemble.variables[f"{v}_sd"][:] = stack.std(axis=0)
 
-            for nc in member_ncs:
-                nc.close()
+# @app.command()
+# def compute_cycle_statistics(experiment_path: Path):
+#     logger, _ = get_logger(
+#         LoggerConfig(experiment_path, f"ensemble-advance-members-slurm")
+#     )
+#     experiment_path = experiment_path.resolve()
+#     cfg = config.read_config(experiment_path / "config.toml")
+#     ensemble_dir = experiment_path / cfg.directories.work_sub / "ensemble"
+
+#     # Verify that all members are at the same point in time (cycle)
+#     minfos = [
+#         member_info.read_member_info(ensemble_dir / f"member_{i}" / "member_info.toml")
+#         for i in range(cfg.assimilation.n_members)
+#     ]
+#     current_cycle = [minfo.member.current_cycle for minfo in minfos]
+#     for c in current_cycle[1:]:
+#         if c != current_cycle[0]:
+#             logger.error(
+#                 f"Member {current_cycle.index(c)} has a different current cycle than member 0"
+#             )
+#             return 1
+
+#     # Use member 0 as a reference to check how many files we should have
+#     files = set([f.name for f in (ensemble_dir / "member_0").glob("wrfout_d01_*")])
+#     for i in range(1, cfg.assimilation.n_members):
+#         for f in (ensemble_dir / f"member_{i}").glob("wrfout_d01_*"):
+#             if f.name not in files:
+#                 logger.error(
+#                     f"Member 0 is missing file {f.name} that exists in member {i}"
+#                 )
+#                 return 1
+
+#     # Move files to analysis directory
+#     analysis_dir = experiment_path / "analysis" / f"cycle_{current_cycle[0] - 1}"
+#     analysis_dir.mkdir(parents=True, exist_ok=True)
+
+#     prior_dir = analysis_dir / "prior"
+#     prior_dir.mkdir(parents=True, exist_ok=True)
+#     # for i in range(cfg.assimilation.n_members):
+#     #     member_dir = prior_dir / f"member_{i}"
+#     #     member_dir.mkdir(exist_ok=True)
+#     #     for f in files:
+#     #         source = ensemble_dir / f"member_{i}" / f
+#     #         logger.info(f"Moving {source} to {member_dir}")
+#     #         shutil.copy(source, member_dir)  # TODO Change to move?
+
+#     # Compute statistics
+#     times = [f.replace("wrfout_d01_", "") for f in files]
+#     times = sorted(times)
+#     times = [times[-1]]
+#     for t in times:
+#         logger.info(f"Computing ensemble mean/SD for {t}...")
+#         with netCDF4.Dataset(prior_dir / "wrfout_ensemble", "w") as nc_ensemble:
+#             member_ncs = [
+#                 netCDF4.Dataset(prior_dir / f"member_{i}" / f"wrfout_d01_{t}", "r")
+#                 for i in range(cfg.assimilation.n_members)
+#             ]
+#             for name, dim in member_ncs[0].dimensions.items():
+#                 nc_ensemble.createDimension(name, dim.size)
+
+#             for v in member_ncs[0].variables:
+#                 if v == "Times":
+#                     nc_ensemble.createVariable(
+#                         "Times",
+#                         "S1",
+#                         member_ncs[0].variables["Times"].dimensions,
+#                     )
+#                     nc_ensemble.variables["Times"][:] = member_ncs[0]["Times"][:]
+#                     for attr in member_ncs[0].variables["Times"].ncattrs():
+#                         nc_ensemble.variables["Times"].setncattr(
+#                             attr,
+#                             getattr(member_ncs[0].variables["Times"], attr),
+#                         )
+#                     continue
+
+#                 if v not in nc_ensemble.variables:
+#                     nc_ensemble.createVariable(
+#                         f"{v}_mean",
+#                         member_ncs[0].variables[v].dtype,
+#                         member_ncs[0].variables[v].dimensions,
+#                     )
+#                     nc_ensemble.createVariable(
+#                         f"{v}_sd",
+#                         member_ncs[0].variables[v].dtype,
+#                         member_ncs[0].variables[v].dimensions,
+#                     )
+#                     # Copy attributes
+#                     for attr in member_ncs[0].variables[v].ncattrs():
+#                         nc_ensemble.variables[f"{v}_mean"].setncattr(
+#                             attr,
+#                             getattr(member_ncs[0].variables[v], attr),
+#                         )
+#                         nc_ensemble.variables[f"{v}_sd"].setncattr(
+#                             attr,
+#                             getattr(member_ncs[0].variables[v], attr),
+#                         )
+#                 stack = np.stack([nc.variables[v][:] for nc in member_ncs])
+#                 nc_ensemble.variables[f"{v}_mean"][:] = stack.mean(axis=0)
+#                 nc_ensemble.variables[f"{v}_sd"][:] = stack.std(axis=0)
+
+#             for nc in member_ncs:
+#                 nc.close()
