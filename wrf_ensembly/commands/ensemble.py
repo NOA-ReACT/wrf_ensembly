@@ -115,7 +115,7 @@ def apply_pertubations(
     cwd = experiment_path / cfg.directories.work_sub / "update_bc"
     cwd.mkdir(parents=True, exist_ok=True)
 
-    (cwd / "da_update_bc.exe").unlink()
+    (cwd / "da_update_bc.exe").unlink(missing_ok=True)
     (cwd / "da_update_bc.exe").symlink_to(wrfda_dir / "var" / "da" / "da_update_bc.exe")
     logger.info("Linked da_update_bc.exe")
 
