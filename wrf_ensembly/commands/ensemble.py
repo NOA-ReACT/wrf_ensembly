@@ -289,7 +289,7 @@ def advance_members_slurm(
 
 
 @app.command()
-def postprocess_prior(experiment_path: Path, member: int):
+def postprocess_prior(experiment_path: Path, member: int, force: bool = False):
     """
     After a forward run has completed, converts the WRF output files into input ones
     by copying cycling variables into the next initial condition files.
@@ -313,7 +313,7 @@ def postprocess_prior(experiment_path: Path, member: int):
         logger.error("Did `advance` run successfully?")
         return 1
     minfo_cycle = minfo.cycle[current_cycle]
-    if minfo_cycle.prior_postprocessed:
+    if not force and minfo_cycle.prior_postprocessed:
         logger.info(
             f"Member {member} is already postprocessed for cycle {current_cycle}"
         )
