@@ -15,11 +15,12 @@ EM_CORE = "1"
 wrf_root = "/mnt/scratch-1/wrf-dart-intro/WRF"
 wps_root = "/mnt/scratch-1/wrf-dart-intro/WPS"
 dart_root = "/mnt/scratch-1/wrf-dart-intro/DART"
+wrfda_root = "/mnt/scratch-1/wrf-dart-intro/WRFDA"
 
 
 [domain_control]
 xy_resolution = [26, 26] # km
-xy_size = [70, 70]       # grid points
+xy_size = [60, 60]       # grid points
 
 projection = "lambert"
 ref_lat = 26.0
@@ -31,13 +32,13 @@ stand_lon = -22.0
 [time_control]
 # Start-end times for the whole experiment (all assimilation cycles)
 start = 2021-09-01T00:00:00Z
-end = 2021-09-03T00:00:00Z
+end = 2021-09-02T00:00:00Z
 # Corresponds to interval_seconds in WRF, but in minutes
 boundary_update_interval = 360 # 6h
 # Output file interval, in minutes (WRF history_interval)
-output_interval = 60
+output_interval = 120
 # How often the analysis is run, in minutes
-analysis_interval = 1440 # 24h
+analysis_interval = 720 # 12h
 
 
 [data]
@@ -45,8 +46,76 @@ wps_geog = "/mnt/scratch-1/wrf-dart-intro/data/WPS_GEOG"
 meteorology = "/mnt/scratch-1/wrf-dart-intro/data/ERA5_CDS_September_2021"
 meteorology_vtable = "Vtable.ERA-interim.pl"
 
+[pertubations.T]
+mean = 1
+sd = 1
+rounds = 5
+
+[pertubations.U]
+mean = 1
+sd = 4
+rounds = 10
+
 [assimilation]
 n_members = 4
+# Which variables to carry forward from the previous cycle
+cycled_variables = [
+  'U',
+  'V',
+  'PH',
+  'T',
+  'MU',
+  'QVAPOR',
+  'QCLOUD',
+  'QRAIN',
+  'QICE',
+  'QSNOW',
+  'QGRAUP',
+  'QNICE',
+  'QNRAIN',
+  'U10',
+  'V10',
+  'T2',
+  'Q2',
+  'PSFC',
+  'TSLB',
+  'SMOIS',
+  'TSK',
+]
+# Which variables to extract from the WRF output into the statistics files
+extract_variables = [
+  'U',
+  'V',
+  'PH',
+  'T',
+  'MU',
+  'QVAPOR',
+  'QCLOUD',
+  'QRAIN',
+  'QICE',
+  'QSNOW',
+  'QGRAUP',
+  'QNICE',
+  'QNRAIN',
+  'U10',
+  'V10',
+  'T2',
+  'Q2',
+  'PSFC',
+  'TSLB',
+  'SMOIS',
+  'TSK',
+  'RAINC',
+  'RAINNC',
+  'GRAUPELNC',
+]
+
+[slurm]
+partition = "cascadelake"
+nodes = 1
+ntasks-per-node = 40
+cpus-per-task = 1
+env_modules = ["mpi/mpich-x86_64", "netCDF/4.9.0-gnu"]
 
 # -- WRF NAMELIST OPTIONS --
 [wrf_namelist]
@@ -172,7 +241,7 @@ sst_skin = 1
 
 [wrf_namelist.dynamics]
 zdamp = [5000, 5000, 5000]
-non_hydrostatic = [true, true]
+non_hydrostatic = [true]
 w_damping = 1
 diff_opt = 1
 km_opt = 4
@@ -184,121 +253,10 @@ diff_6th_opt = [2, 2]
 diff_6th_factor = [0.25, 0.12]
 epssm = 0.1
 
-[wrf_namelist.bdy_control]
-specified = [true, false]
-nested = [false, true]
-
 [wrf_namelist.namelist_quilt]
-spec_bdy_width = 5
-spec_zone = 1
-relax_zone = 4
-nio_tasks_per_group = 2
+nio_tasks_per_group = 0
 nio_groups = 1
 
-[wrf_namelist.wrfvar1]
-check_max_iv_print = false
-write_increments = false
-
-[wrf_namelist.wrfvar2]
-
-[wrf_namelist.wrfvar3]
-
-[wrf_namelist.wrfvar4]
-use_synopobs = false
-use_shipsobs = false
-use_metarobs = false
-use_soundobs = false
-use_pilotobs = false
-use_airepobs = false
-use_geoamvobs = false
-use_polaramvobs = false
-use_bogusobs = false
-use_buoyobs = false
-use_profilerobs = false
-use_satemobs = false
-use_gpspwobs = false
-use_gpsrefobs = false
-use_qscatobs = false
-use_radarobs = false
-use_radar_rv = false
-use_radar_rf = false
-use_airsretobs = false
-
-[wrf_namelist.wrfvar5]
-check_max_iv = false
-put_rand_seed = true
-
-[wrf_namelist.wrfvar6]
-max_ext_its = 1
-ntmax = 200
-eps = 0.01
-
-[wrf_namelist.wrfvar7]
-cv_options = 3
-# Set by the [pertubation_bank] group
-#as1 = [PERT_SCALING, 2.0, 1.5]
-#as2 = [PERT_SCALING, 2.0, 1.5]
-#as3 = [PERT_SCALING, 2.0, 1.5]
-#as4 = [PERT_SCALING, 2.0, 1.5]
-#as5 = [PERT_SCALING, 2.0, 1.5]
-rf_passes = 6
-var_scaling1 = 1.0
-var_scaling2 = 1.0
-var_scaling3 = 1.0
-var_scaling4 = 1.0
-var_scaling5 = 1.0
-len_scaling1 = 1.0
-len_scaling2 = 1.0
-len_scaling3 = 1.0
-len_scaling4 = 1.0
-len_scaling5 = 1.0
-je_factor = 1.0
-
-[wrf_namelist.wrfvar8]
-
-[wrf_namelist.wrfvar9]
-trace_use = false
-trace_memory = false
-trace_all_pes = false
-trace_csv = false
-use_html = false
-
-[wrf_namelist.wrfvar10]
-
-[wrf_namelist.wrfvar11]
-cv_options_hum = 1
-check_rh = 1
-set_omb_rand_fac = 1.0
-seed_array1 = 1
-seed_array2 = 1
-
-[wrf_namelist.wrfvar12]
-
-[wrf_namelist.wrfvar13]
-vert_corr = 2
-vertical_ip = 0
-vert_evalue = 1
-max_vert_var1 = 99.0
-max_vert_var2 = 99.0
-max_vert_var3 = 99.0
-max_vert_var4 = 99.0
-max_vert_var5 = 0.0
-
-[wrf_namelist.wrfvar14]
-
-[wrf_namelist.wrfvar15]
-num_pseudo = 0
-
-[wrf_namelist.wrfvar16]
-
-[wrf_namelist.wrfvar17]
-analysis_type = 'RANDOMCV'
-
-[wrf_namelist.wrfvar18]
-analysis_date = 'yyyy-mm-dd_hh:mm:ss.0000'
-
-[wrf_namelist.wrfvar19]
-[wrf_namelist.wrfvar20]
-[wrf_namelist.wrfvar21]
-[wrf_namelist.wrfvar22]
-[wrf_namelist.wrfvar23]
+[wrf_namelist.bdy_control]
+spec_bdy_width = 5
+specified = [true]
