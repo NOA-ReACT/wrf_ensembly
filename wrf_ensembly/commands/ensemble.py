@@ -432,6 +432,16 @@ def filter(experiment_path: Path):
     priors = list(
         (data_dir / "prior" / f"cycle_{current_cycle}").glob("member_*/wrfinput_d01")
     )
+    analysis = [
+        data_dir
+        / "analysis"
+        / f"cycle_{current_cycle}"
+        / f"analysis_{prior.parent.name}.nc"
+        for prior in priors
+    ]
+    (data_dir / "analysis" / f"cycle_{current_cycle}").mkdir(
+        parents=True, exist_ok=True
+    )
 
     dart_dir = cfg.directories.dart_root / "models" / "wrf" / "work"
     dart_dir = dart_dir.resolve()
@@ -440,9 +450,7 @@ def filter(experiment_path: Path):
     logger.info(f"Wrote input_list.txt")
 
     dart_output_txt = dart_dir / "output_list.txt"
-    dart_output_txt.write_text(
-        "\n".join([f"dart_member_{i}.nc" for i in range(cfg.assimilation.n_members)])
-    )
+    dart_output_txt.write_text("\n".join([str(f) for f in analysis]))
     logger.info(f"Wrote output_list.txt")
 
     # Run filter
