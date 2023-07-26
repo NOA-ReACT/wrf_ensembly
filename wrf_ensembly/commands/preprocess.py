@@ -253,7 +253,9 @@ def ungrib(experiment_path: Path):
 
 
 @app.command()
-def metgrid(experiment_path: Path):
+def metgrid(
+    experiment_path: Path, force: Annotated[Optional[bool], typer.Option()] = False
+):
     """
     Run metgrid.exe to produce the `met_em*.nc` files.
     """
@@ -264,8 +266,13 @@ def metgrid(experiment_path: Path):
     wps_dir = preprocessing_dir / "WPS"
 
     if len(list(wps_dir.glob("met_em*.nc"))) > 0:
-        logger.warning("met_em files seem to exist, skipping metgrid.exe")
-        return 0
+        if not force:
+            logger.warning("met_em files seem to exist, skipping metgrid.exe")
+            return 0
+        else:
+            for f in wps_dir.glob("met_em*.nc"):
+                logger.debug(f"Removing old met_em file {f}")
+                f.unlink()
 
     shutil.copy(
         preprocessing_dir / "namelist.wps",
