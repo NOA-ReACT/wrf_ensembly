@@ -190,7 +190,7 @@ def geogrid(experiment_path: Path):
 
 
 @app.command()
-def ungrib(experiment_path: Path, force=False):
+def ungrib(experiment_path: Path):
     """
     Runs ungrib.exe for the experiment, after linking the grib files into the WPS directory
     """
@@ -201,8 +201,10 @@ def ungrib(experiment_path: Path, force=False):
     wps_dir = preprocessing_dir / "WPS"
     data_dir = cfg.data.meteorology.resolve()
 
-    for f in chain(wps_dir.glob("FILE:*"), wps_dir.glob("PFILE:*")):
-        logger.debug(f"Removing old WPS intermediate file {f}")
+    for f in chain(
+        wps_dir.glob("FILE:*"), wps_dir.glob("PFILE:*"), wps_dir.glob("GRIBFILE.*")
+    ):
+        logger.debug(f"Removing old WPS intermediate file/link {f}")
         f.unlink()
 
     # Add namelist
@@ -217,23 +219,19 @@ def ungrib(experiment_path: Path, force=False):
     else:
         vtable_path = (
             wps_dir / "ungrib" / "Variable_Tables" / cfg.data.meteorology_vtable
-        )
+        ).resolve()
     if not vtable_path.is_file() or vtable_path.is_symlink():
         logger.error(f"Vtable {vtable_path} does not exist")
         return 1
-    console.print(f"[green]Linking Vtable[/green] {vtable_path}")
+    logger.info(f"[green]Linking Vtable[/green] {vtable_path}")
     (wps_dir / "Vtable").unlink(missing_ok=True)
     (wps_dir / "Vtable").symlink_to(vtable_path)
 
     # Make symlinks for grib files
     for i, grib_file in enumerate(data_dir.glob(cfg.data.meteorology_glob)):
         link_path = wps_dir / f"GRIBFILE.{utils.int_to_letter_numeral(i + 1)}"
-        if not link_path.is_symlink():
-            if link_path.exists():
-                link_path.unlink()
-            link_path.symlink_to(grib_file)
-
-            logger.debug(f"Created symlink for {grib_file} at {link_path}")
+        link_path.symlink_to(grib_file)
+        logger.debug(f"Created symlink for {grib_file} at {link_path}")
     logger.info(f"Linked {i+1} GRIB files to {wps_dir} from {data_dir}")
 
     # Run ungrib.exe
