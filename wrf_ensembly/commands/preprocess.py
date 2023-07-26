@@ -346,16 +346,21 @@ def real(experiment_path: Path, cycle: int):
         logger.error("[red]Could not find real.exe at[/red] {real_path}")
         return 1
 
-    cmd = ["srun", real_path]  # TODO Make slurm configurable!
+    cmd = ["mpirun", real_path]  # TODO Make srun/mpirun configurable!
     res = utils.call_external_process(cmd, wrf_dir, logger)
     for log_file in wrf_dir.glob("rsl.*"):
         shutil.copy(log_file, log_dir / log_file.name)
     (log_dir / "real.log").write_text(res.stdout)
 
-    rsl = (wrf_dir / "rsl.out.0000").read_text()
-    if "SUCCESS COMPLETE REAL_EM INIT" not in rsl:
-        logger.error("real.exe could not complete, check logs.")
+    rsl_path = wrf_dir / "rsl.out.0000"
+    if not rsl_path.is_file():
+        logger.error("Could not find rsl.out.0000, wrf did not execute probably.")
         return 1
+    else:
+        rsl = rsl_path.read_text()
+        if "SUCCESS COMPLETE REAL_EM INIT" not in rsl:
+            logger.error("real.exe could not complete, check logs.")
+            return 1
 
     logger.info("real finished successfully")
 
