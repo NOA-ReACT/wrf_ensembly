@@ -19,6 +19,7 @@ from wrf_ensembly import (
     pertubations,
     member_info,
     templates,
+    update_bc,
 )
 
 
@@ -111,24 +112,16 @@ def apply_pertubations(
     )
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
-    wrfda_dir = cfg.directories.wrfda_root
-    cwd = experiment_path / cfg.directories.work_sub / "update_bc"
-    cwd.mkdir(parents=True, exist_ok=True)
 
-    (cwd / "da_update_bc.exe").unlink(missing_ok=True)
-    (cwd / "da_update_bc.exe").symlink_to(wrfda_dir / "var" / "da" / "da_update_bc.exe")
-    logger.info("Linked da_update_bc.exe")
+    ensemble_dir = experiment_path / cfg.directories.work_sub / "ensemble"
 
     if len(cfg.pertubations) == 0:
         logger.info("No pertubations configured.")
         return 0
 
     for i in range(cfg.assimilation.n_members):
-        member_dir = (
-            experiment_path / cfg.directories.work_sub / "ensemble" / f"member_{i}"
-        )
-
-        wrfinput_path = member_dir / "wrfinput_d01"
+        wrfinput_path = ensemble_dir / f"member_{i}" / "wrfinput_d01"
+        wrfbdy_path = ensemble_dir / f"member_{i}" / "wrfbdy_d01"
 
         # Modify wrfinput accoarding to pertubation configuration
         logger.info(f"Member {i}: Applying pertubations to {wrfinput_path}")
@@ -141,29 +134,10 @@ def apply_pertubations(
                 )
                 ds[variable][:] += field
 
-        # Run bc_update.exe to update the boundary conditions file so that there are
-        # no discontinuities between the initial and boundary conditions
-        logger.info(f"Member {i}: Running bc_update.exe")
-        bc_update_namelist = {
-            "control_param": {
-                "da_file": wrfinput_path.resolve(),
-                "wrf_bdy_file": (member_dir / "wrfbdy_d01").resolve(),
-                "domain_id": 1,
-                "debug": True,
-                "update_lateral_bdy": True,
-                "update_low_bdy": False,
-                "update_lsm": False,
-                "iswater": 16,
-                "var4d_lbc": False,
-            }
-        }
-        namelist.write_namelist(bc_update_namelist, cwd / "parame.in")
-        logger.info(f"Member {i}: Wrote da_update_bc namelist to {cwd / 'parame.in'}")
-
-        cmd = [str((cwd / "da_update_bc.exe").resolve())]
-        res = utils.call_external_process(cmd, cwd, logger)
+        # Update BC to match
+        res = update_bc.update_wrf_bc(cfg, logger, wrfinput_path, wrfbdy_path)
         (log_dir / f"da_update_bc_member_{i}.log").write_text(res.stdout)
-        if not res.success or "Update_bc completed successfully" not in res.stdout:
+        if not res.success or "update_wrf_bc Finished successfully" not in res.stdout:
             logger.error(
                 f"Member {i}: bc_update.exe failed with exit code {res.returncode}"
             )

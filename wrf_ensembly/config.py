@@ -30,9 +30,6 @@ class DirectoriesConfig(BaseModel):
     wps_root: Path
     """Root directory to the WPS. Should contain the `geogrid.exe`, `metgrid.exe` and `ungrib.exe` executables."""
 
-    wrfda_root: Path
-    """Root directory of the WRFDA. Should contain a `run` directory, w/ WRFDA compiled."""
-
     dart_root: Path
     """Root directory of the DART. Should contain a `models/wrf` directory, compiled."""
 
