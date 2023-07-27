@@ -318,17 +318,12 @@ def real(experiment_path: Path, cycle: int):
     for p in wrf_dir.glob("met_em*nc"):
         p.unlink()
 
-    shutil.copy(
-        preprocessing_dir / "namelist.input",
-        wrf_dir / "namelist.input",
-    )
-
     # Link met_em files to WRF directory
     count = 0
     for p in wps_dir.glob("met_em*nc"):
         count += 1
         target = wrf_dir / p.name
-        target.symlink_to(p)
+        target.symlink_to(p.resolve())
         logger.debug(f"Created symlink for {p} at {target}")
 
     if count == 0:
@@ -339,6 +334,10 @@ def real(experiment_path: Path, cycle: int):
 
     # Generate namelist
     wrf_namelist(experiment_path, cycle)
+    shutil.copy(
+        preprocessing_dir / "namelist.input",
+        wrf_dir / "namelist.input",
+    )
 
     # Run real
     real_path = wrf_dir / "real.exe"
@@ -346,7 +345,12 @@ def real(experiment_path: Path, cycle: int):
         logger.error("[red]Could not find real.exe at[/red] {real_path}")
         return 1
 
-    cmd = ["mpirun", real_path]  # TODO Make srun/mpirun configurable!
+    cmd = [
+        "mpirun",
+        "-n",
+        "1",
+        str(real_path.resolve()),
+    ]  # TODO Make srun/mpirun configurable!
     res = utils.call_external_process(cmd, wrf_dir, logger)
     for log_file in wrf_dir.glob("rsl.*"):
         shutil.copy(log_file, log_dir / log_file.name)
@@ -376,3 +380,7 @@ def real(experiment_path: Path, cycle: int):
         data_dir / f"wrfbdy_d01_cycle_{cycle}",
     )
     logger.info(f"Moved wrfbdy_d01 to {data_dir}")
+
+    shutil.copyfile(
+        wrf_dir / "namelist.input", data_dir / f"namelist.input_cycle_{cycle}"
+    )
