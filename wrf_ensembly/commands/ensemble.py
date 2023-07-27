@@ -2,6 +2,8 @@ from pathlib import Path
 import shutil
 import time
 import datetime
+from typing import Optional
+from typing_extensions import Annotated
 
 import typer
 import netCDF4
@@ -152,9 +154,15 @@ def apply_pertubations(
 def advance_member(
     experiment_path: Path,
     member: int,
+    skip_wrf: Annotated[Optional[bool], typer.Option()] = False,
 ):
     """
     Advances the given member 1 cycle by running the model
+
+    Args:
+        experiment_path: Path to the experiment directory
+        member: The member to advance
+        skip_wrf: If True, skips the WRF run and assumes it has already been run. Useful when something goes wrong with wrf-ensembly but you know everything is OK with the model.
     """
 
     logger, log_dir = get_logger(
@@ -179,17 +187,26 @@ def advance_member(
     logger.info(f"Advancing member {member} to cycle {minfo.member.current_cycle + 1}")
 
     wrf_exe_path = (member_dir / "wrf.exe").resolve()
-    cmd = ["srun", wrf_exe_path]  # TODO make slurm configurable here
+    cmd = ["mpirun", wrf_exe_path]  # TODO make slurm configurable here
 
     start_time = datetime.datetime.now()
-    res = utils.call_external_process(cmd, member_dir, logger)
+    if skip_wrf:
+        res = utils.ExternalProcessResult(0, True, "", "")
+    else:
+        res = utils.call_external_process(cmd, member_dir, logger)
     end_time = datetime.datetime.now()
 
     for log_file in member_dir.glob("rsl.*"):
         shutil.copy(log_file, log_dir / log_file.name)
     (log_dir / f"wrf.log").write_text(res.stdout)
 
-    if "SUCCESS COMPLETE WRF" not in res.stdout:
+    rsl_file = member_dir / "rsl.out.0000"
+    if not rsl_file.exists():
+        logger.error(f"Member {member}: rsl.out.0000 does not exist")
+        return 1
+    rsl_content = rsl_file.read_text()
+
+    if "SUCCESS COMPLETE WRF" not in rsl_content:
         logger.error(f"Member {member}: wrf.exe failed with exit code {res.returncode}")
         return 1
 
