@@ -346,29 +346,9 @@ def postprocess_prior(experiment_path: Path, member: int, force: bool = False):
             nc_prior_initial[name][:] = nc_prior_wrfout[name][:]
 
     # Update boundary conditions to match
-    cwd = experiment_path / cfg.directories.work_sub / "update_bc"
-
-    logger.info(f"Member {member}: Running bc_update.exe")
-    bc_update_namelist = {
-        "control_param": {
-            "da_file": prior_dir / "wrfinput_d01",
-            "wrf_bdy_file": prior_dir / "wrfbdy_d01",
-            "domain_id": 1,
-            "debug": True,
-            "update_lateral_bdy": True,
-            "update_low_bdy": False,
-            "update_lsm": False,
-            "iswater": 16,
-            "var4d_lbc": False,
-        }
-    }
-    namelist.write_namelist(bc_update_namelist, cwd / "parame.in")
-    logger.info(f"Member {member}: Wrote da_update_bc namelist to {cwd / 'parame.in'}")
-
-    cmd = [str((cwd / "da_update_bc.exe").resolve())]
-    res = utils.call_external_process(cmd, cwd, logger)
+    res = update_bc.update_wrf_bc(cfg, logger, initial_c, boundary_c)
     (log_dir / f"da_update_bc_member_{member}.log").write_text(res.stdout)
-    if not res.success or "Update_bc completed successfully" not in res.stdout:
+    if not res.success or "update_wrf_bc Finished successfully" not in res.stdout:
         logger.error(
             f"Member {member}: bc_update.exe failed with exit code {res.returncode}"
         )
