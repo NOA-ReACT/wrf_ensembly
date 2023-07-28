@@ -1,13 +1,10 @@
 from pathlib import Path
-import shutil
-import time
 import datetime
 from typing import Optional
 from typing_extensions import Annotated
 
 import typer
 import netCDF4
-import numpy as np
 
 app = typer.Typer()
 
@@ -81,13 +78,13 @@ def setup(experiment_path: Path):
         logger.info(f"Member {i}: Wrote namelist to {namelist_path}")
 
         # Copy initial and boundary conditions
-        shutil.copy(
+        utils.copy(
             data_path / f"wrfinput_d01_cycle_0",
             member_dir / "wrfinput_d01",
         )
         logger.info(f"Member {i}: Copied wrfinput_d01")
 
-        shutil.copy(
+        utils.copy(
             data_path / f"wrfbdy_d01_cycle_0",
             member_dir / "wrfbdy_d01",
         )
@@ -213,7 +210,7 @@ def advance_member(
     end_time = datetime.datetime.now()
 
     for log_file in member_dir.glob("rsl.*"):
-        shutil.copy(log_file, log_dir / log_file.name)
+        utils.copy(log_file, log_dir / log_file.name)
     (log_dir / f"wrf.log").write_text(res.stdout)
 
     rsl_file = member_dir / "rsl.out.0000"
@@ -336,7 +333,7 @@ def postprocess_prior(experiment_path: Path, member: int, force: bool = False):
     for wrfout in member_dir.glob("wrfout*"):
         # TODO move files instead of copying
         logger.info(f"Member {member}: Copying {wrfout} to {forecasts_dir}")
-        shutil.copy(wrfout, forecasts_dir / wrfout.name)
+        utils.copy(wrfout, forecasts_dir / wrfout.name)
 
     # Copy initial/boundary for the next cycle to the prior directory, then copy the
     # cycled variables
@@ -346,15 +343,15 @@ def postprocess_prior(experiment_path: Path, member: int, force: bool = False):
     initial_c = data_dir / "initial_boundary" / f"wrfinput_d01_cycle_{next_cycle}"
     boundary_c = data_dir / "initial_boundary" / f"wrfbdy_d01_cycle_{next_cycle}"
     logger.info(f"Member {member}: Copying {initial_c} to {prior_dir}")
-    shutil.copy(initial_c, prior_dir / "wrfinput_d01")
+    utils.copy(initial_c, prior_dir / "wrfinput_d01")
     logger.info(f"Member {member}: Copying {boundary_c} to {prior_dir}")
-    shutil.copy(boundary_c, prior_dir / "wrfbdy_d01")
+    utils.copy(boundary_c, prior_dir / "wrfbdy_d01")
 
     wrfout_name = "wrfout_d01_" + cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
 
     logger.info("Copying cycled variables to initial conditions")
     with (
-        netCDF4.Dataset(initial_c, "r+") as nc_prior_initial,
+        netCDF4.Dataset(prior_dir / "wrfinput_d01", "r+") as nc_prior_initial,
         netCDF4.Dataset(forecasts_dir / wrfout_name, "r") as nc_prior_wrfout,
     ):
         for name in cfg.assimilation.cycled_variables:
@@ -452,7 +449,7 @@ def filter(experiment_path: Path):
     posterior_dir = data_dir / "posterior" / f"cycle_{current_cycle}"
     posterior_dir.mkdir(parents=True, exist_ok=True)
     for f in dart_dir.glob("dart_member_*.nc"):
-        shutil.copy(f, posterior_dir / f.name)
+        utils.copy(f, posterior_dir / f.name)
         logger.info(f"Copied {f} to {posterior_dir}")
 
 

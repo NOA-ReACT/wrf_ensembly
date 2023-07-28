@@ -166,7 +166,7 @@ def geogrid(experiment_path: Path):
         logger.warning("geo_em.d01.nc already exists, skipping geogrid.exe")
         return 0
 
-    shutil.copy(
+    utils.copy(
         preprocessing_dir / "namelist.wps",
         wps_dir / "namelist.wps",
     )
@@ -208,7 +208,7 @@ def ungrib(experiment_path: Path):
         f.unlink()
 
     # Add namelist
-    shutil.copy(
+    utils.copy(
         preprocessing_dir / "namelist.wps",
         wps_dir / "namelist.wps",
     )
@@ -274,7 +274,7 @@ def metgrid(
                 logger.debug(f"Removing old met_em file {f}")
                 f.unlink()
 
-    shutil.copy(
+    utils.copy(
         preprocessing_dir / "namelist.wps",
         wps_dir / "namelist.wps",
     )
@@ -334,7 +334,7 @@ def real(experiment_path: Path, cycle: int):
 
     # Generate namelist
     wrf_namelist(experiment_path, cycle)
-    shutil.copy(
+    utils.copy(
         preprocessing_dir / "namelist.input",
         wrf_dir / "namelist.input",
     )
@@ -353,7 +353,7 @@ def real(experiment_path: Path, cycle: int):
     ]  # TODO Make srun/mpirun configurable!
     res = utils.call_external_process(cmd, wrf_dir, logger)
     for log_file in wrf_dir.glob("rsl.*"):
-        shutil.copy(log_file, log_dir / log_file.name)
+        utils.copy(log_file, log_dir / log_file.name)
     (log_dir / "real.log").write_text(res.stdout)
 
     rsl_path = wrf_dir / "rsl.out.0000"

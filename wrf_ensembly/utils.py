@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from logging import Logger
+import logging
+import shutil
 from pathlib import Path
 import subprocess
 
@@ -41,7 +42,7 @@ class ExternalProcessResult:
 
 
 def call_external_process(
-    command: list[str], cwd: Path, logger: Logger, log_failure=True
+    command: list[str], cwd: Path, logger: logging.Logger, log_failure=True
 ):
     """
     Calls an external process and handles failures gracefully.
@@ -100,3 +101,17 @@ def int_to_letter_numeral(i: int, length=3) -> str:
         letters.append(chr(ord("A") + remainder))
 
     return "".join(reversed(letters)).rjust(length, "A")
+
+
+def copy(src: Path, dest: Path):
+    """
+    Copies the file from `src` to `dest` using `shutil.copy` and logs the operation.
+
+    Args:
+        src: Source file
+        dest: Destination file
+    """
+
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Copying {src} to {dest}")
+    shutil.copy(src, dest)

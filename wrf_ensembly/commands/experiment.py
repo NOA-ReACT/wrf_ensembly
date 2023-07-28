@@ -6,7 +6,7 @@ from typing import Optional
 import typer
 
 from wrf_ensembly.console import console, get_logger, LoggerConfig
-from wrf_ensembly import config, cycling
+from wrf_ensembly import config, cycling, utils
 
 app = typer.Typer()
 
@@ -35,7 +35,7 @@ def create(
 
     if config_path is not None:
         cfg = config.read_config(config_path)
-        shutil.copyfile(config_path, experiment_path / "config.toml")
+        utils.copy(config_path, experiment_path / "config.toml")
     else:
         # TODO Fix this, doesn't work like that
         # We gotta create a default config file
