@@ -451,3 +451,132 @@ def filter(experiment_path: Path):
     for f in dart_dir.glob("dart_member_*.nc"):
         utils.copy(f, posterior_dir / f.name)
         logger.info(f"Copied {f} to {posterior_dir}")
+
+
+@app.command()
+def postprocess_analysis(experiment_path: Path):
+    """
+    Postprocesses the analysis files from the filter, by running bc_update again
+    and moving them to the appropriate directory to re-run the model.
+    """
+
+    logger, log_dir = get_logger(LoggerConfig(experiment_path, f"postprocess_analysis"))
+    experiment_path = experiment_path.resolve()
+    cfg = config.read_config(experiment_path / "config.toml")
+    data_dir = experiment_path / cfg.directories.output_sub
+    icbc_dir = data_dir / "initial_boundary"
+
+    # Establish which cycle we are running and that all member priors are pre-processed
+    minfos = [
+        member_info.read_member_info(
+            experiment_path
+            / cfg.directories.work_sub
+            / "ensemble"
+            / f"member_{i}"
+            / "member_info.toml"
+        )
+        for i in range(cfg.assimilation.n_members)
+    ]
+    current_cycle = minfos[0].member.current_cycle
+    analysis_dir = data_dir / "analysis" / f"cycle_{current_cycle}"
+    for minfo in minfos:
+        if minfo.member.current_cycle != current_cycle:
+            logger.error(
+                f"Member {minfo.member.i} has a different current cycle than member 0"
+            )
+            return 1
+        if current_cycle not in minfo.cycle:
+            logger.error(
+                f"Member {minfo.member.i} has not been advanced to cycle {current_cycle}"
+            )
+            return 1
+        if minfo.cycle[current_cycle].prior_postprocessed is False:
+            logger.error(
+                f"Member {minfo.member.i} has not been postprocessed for cycle {current_cycle}"
+            )
+            return 1
+    next_cycle = current_cycle + 1
+
+    # Prepare namelist contents
+    cycles = cycling.get_cycle_information(cfg)
+    cycle = cycles[next_cycle]
+    logger.info(f"Configuring members for cycle {next_cycle}: {str(cycle)}")
+
+    wrf_namelist = {
+        "time_control": {
+            **wrf.timedelta_to_namelist_items(cycle.end - cycle.start),
+            **wrf.datetime_to_namelist_items(cycle.start, "start"),
+            **wrf.datetime_to_namelist_items(cycle.end, "end"),
+            "interval_seconds": cfg.time_control.boundary_update_interval * 60,
+            "history_interval": cfg.time_control.output_interval,
+        },
+        "domains": {
+            "e_we": cfg.domain_control.xy_size[0],
+            "e_sn": cfg.domain_control.xy_size[1],
+            "dx": cfg.domain_control.xy_resolution[0] * 1000,
+            "dy": cfg.domain_control.xy_resolution[1] * 1000,
+            "grid_id": 1,
+            "parent_id": 0,
+            "max_dom": 1,
+        },
+    }
+    for name, group in cfg.wrf_namelist.items():
+        if name in wrf_namelist:
+            wrf_namelist[name] |= group
+        else:
+            wrf_namelist[name] = group
+
+    # Postprocess analysis files
+    for member in range(cfg.assimilation.n_members):
+        member_dir = (
+            experiment_path / cfg.directories.work_sub / "ensemble" / f"member_{member}"
+        )
+        analysis_file = analysis_dir / f"analysis_member_{member}.nc"
+        if not analysis_file.exists():
+            logger.error(f"Member {member}: {analysis_file} does not exist")
+            return 1
+
+        target_wrfinput = member_dir / "wrfinput_d01"
+        target_wrfbdy = member_dir / "wrfbdy_d01"
+
+        utils.copy(icbc_dir / f"wrfinput_d01_cycle_{next_cycle}", target_wrfinput)
+        utils.copy(icbc_dir / f"wrfbdy_d01_cycle_{next_cycle}", target_wrfbdy)
+
+        logger.info(f"Member {member}: Copying cycled variables to initial conditions")
+        with (
+            netCDF4.Dataset(analysis_file, "r") as nc_analysis,
+            netCDF4.Dataset(target_wrfinput, "r+") as nc_wrfinput,
+        ):
+            for name in cfg.assimilation.cycled_variables:
+                if name not in nc_analysis.variables:
+                    logger.warning(f"Member {member}: {name} not in analysis file")
+                    continue
+                logger.info(f"Member {member}: Copying {name}")
+                nc_wrfinput[name][:] = nc_analysis[name][:]
+
+        logger.info(f"Member {member}: Postprocessing analysis file")
+        res = update_bc.update_wrf_bc(cfg, logger, target_wrfinput, target_wrfbdy)
+        (log_dir / f"da_update_bc_analysis_member_{member}.log").write_text(res.stdout)
+        if not res.success or "update_wrf_bc Finished successfully" not in res.stdout:
+            logger.error(
+                f"Member {member}: bc_update.exe failed with exit code {res.returncode}"
+            )
+            logger.error(res.stdout)
+            continue
+
+        # Write namelist
+        namelist_path = member_dir / "namelist.input"
+        namelist.write_namelist(wrf_namelist, namelist_path)
+        logger.info(f"Member {member}: Wrote namelist to {namelist_path}")
+
+        # Update member info
+        minfos[member].cycle[current_cycle].posterior_postprocessed = True
+        minfos[member].member.current_cycle = next_cycle
+        member_info.write_member_info(
+            experiment_path
+            / cfg.directories.work_sub
+            / "ensemble"
+            / f"member_{member}"
+            / "member_info.toml",
+            minfos[member],
+        )
