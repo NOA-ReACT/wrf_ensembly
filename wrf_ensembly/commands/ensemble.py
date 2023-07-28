@@ -136,6 +136,22 @@ def apply_pertubations(
                 )
                 ds[variable][:] += field
 
+                # Store pertubation field in netcdf file
+                if f"{variable}_pert" in ds.variables:
+                    field_var = ds[f"{variable}_pert"]
+                else:
+                    field_var = ds.createVariable(
+                        f"{variable}_pert", var.dtype, var.dimensions
+                    )
+                field_var[:] = field
+                field_var.units = var.units
+                field_var.description = (
+                    f"wrf-ensembly: Pertubation field for {variable}"
+                )
+                field_var.mean = pertubation.mean
+                field_var.sd = pertubation.sd
+                field_var.rounds = pertubation.rounds
+
         # Update BC to match
         res = update_bc.update_wrf_bc(cfg, logger, wrfinput_path, wrfbdy_path)
         (log_dir / f"da_update_bc_member_{i}.log").write_text(res.stdout)
