@@ -42,5 +42,6 @@ def get_cycle_information(cfg: config.Config) -> list[CycleInformation]:
             index=i,
         )
         cycles.append(cycle)
+    cycles = sorted(cycles, key=lambda c: c.index)
 
     return cycles
