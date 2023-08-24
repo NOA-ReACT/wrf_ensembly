@@ -9,4 +9,6 @@ module purge
 module load {{name}}
 {% endfor %}
 
+ulimit -s unlimited
+
 {{ commands | join('\n') }}
