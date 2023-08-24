@@ -129,6 +129,9 @@ class PertubationVariableConfig(BaseModel):
 
 
 class Config(BaseModel):
+    _experiment_path: Path
+    """Experiment path, assumed to be the parent of the config file location"""
+
     metadata: MetadataConfig
     """Metadata about the experiment (name, ...)"""
 
@@ -162,6 +165,24 @@ class Config(BaseModel):
     wrf_namelist: dict[str, dict[str, Any]]
     """Overrides for the WRF namelist"""
 
+    def get_member_dir(self, id: int) -> Path:
+        """
+        Get the work directory for given ensemble member
+
+        Args:
+            id: ID of the ensemble member
+
+        Returns:
+            Path to the work directory for that member
+        """
+
+        return (
+            self._experiment_path
+            / self.directories.work_sub
+            / "ensemble"
+            / f"member_{id:02d}"
+        ).resolve()
+
 
 def read_config(path: Path, inject_environment=True) -> Config:
     """
@@ -179,6 +200,8 @@ def read_config(path: Path, inject_environment=True) -> Config:
     if inject_environment:
         for k, v in cfg.environment.items():
             os.environ[k] = str(v)
+
+    cfg._experiment_path = path.parent
 
     return cfg
 

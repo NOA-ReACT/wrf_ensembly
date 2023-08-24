@@ -68,9 +68,7 @@ def setup(experiment_path: Path):
             wrf_namelist[name] = group
 
     for i in range(cfg.assimilation.n_members):
-        member_dir = (
-            experiment_path / cfg.directories.work_sub / "ensemble" / f"member_{i}"
-        )
+        member_dir = cfg.get_member_dir(i)
         member_dir.mkdir(parents=True, exist_ok=True)
 
         namelist_path = member_dir / "namelist.input"
@@ -94,8 +92,17 @@ def setup(experiment_path: Path):
         minfo = member_info.MemberInfo(
             metadata=cfg.metadata, member={"i": i, "current_cycle": 0}
         )
-        member_info.write_member_info(member_dir / "member_info.toml", minfo)
-        logger.info(f"Member {i}: Wrote info to {member_dir / 'member_info.toml'}")
+        for c in cycles:
+            minfo.cycle[c.i] = member_info.CycleSection(
+                runtime=None,
+                walltime_s=None,
+                advanced=False,
+                prior_postprocessed=False,
+                filter=False,
+                posterior_postprocessed=False,
+            )
+        toml_path = member_info.write_member_info(experiment_path, minfo)
+        logger.info(f"Member {i}: Wrote info file to {toml_path}")
 
 
 @app.command()
@@ -184,14 +191,9 @@ def advance_member(
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
 
-    member_dir = (
-        experiment_path / cfg.directories.work_sub / "ensemble" / f"member_{member}"
-    )
-    minfo = member_info.read_member_info(member_dir / "member_info.toml")
-    if (
-        minfo.member.current_cycle in minfo.cycle
-        and minfo.cycle[minfo.member.current_cycle].advanced
-    ):
+    member_dir = cfg.get_member_dir(member)
+    minfo = member_info.read_member_info(experiment_path, member)
+    if minfo.get_current_cycle().advanced:
         logger.info(
             f"Member {member} is already advanced to cycle {minfo.member.current_cycle}"
         )
@@ -223,15 +225,17 @@ def advance_member(
         logger.error(f"Member {member}: wrf.exe failed with exit code {res.returncode}")
         return 1
 
-    minfo.cycle[minfo.member.current_cycle] = member_info.CycleSection(
-        runtime=start_time,
-        walltime_s=(end_time - start_time).total_seconds(),
-        advanced=True,
-        prior_postprocessed=False,
-        filter=False,
-        posterior_postprocessed=False,
+    minfo.set_current_cycle(
+        member_info.CycleSection(
+            runtime=start_time,
+            walltime_s=(end_time - start_time).total_seconds(),
+            advanced=True,
+            prior_postprocessed=False,
+            filter=False,
+            posterior_postprocessed=False,
+        )
     )
-    member_info.write_member_info(member_dir / "member_info.toml", minfo)
+    member_info.write_member_info(experiment_path, minfo)
 
 
 @app.command()
@@ -251,24 +255,8 @@ def advance_members_slurm(
     jobfile_directory = experiment_path / "jobfiles"
     jobfile_directory.mkdir(parents=True, exist_ok=True)
 
-    minfos = [
-        member_info.read_member_info(
-            experiment_path
-            / cfg.directories.work_sub
-            / "ensemble"
-            / f"member_{i}"
-            / "member_info.toml"
-        )
-        for i in range(cfg.assimilation.n_members)
-    ]
-
-    current_cycle = [minfo.member.current_cycle for minfo in minfos]
-    for c in current_cycle[1:]:
-        if c != current_cycle[0]:
-            logger.error(
-                f"Member {current_cycle.index(c)} has a different current cycle than member 0"
-            )
-            return 1
+    minfos = member_info.read_all_member_info(experiment_path)
+    member_info.ensure_same_cycle(minfos)
 
     slurm_args = cfg.slurm
     env_modules = []
@@ -306,16 +294,11 @@ def postprocess_prior(experiment_path: Path, member: int, force: bool = False):
     cfg = config.read_config(experiment_path / "config.toml")
     data_dir = experiment_path / cfg.directories.output_sub
 
-    member_dir = (
-        experiment_path / cfg.directories.work_sub / "ensemble" / f"member_{member}"
-    )
-    minfo = member_info.read_member_info(member_dir / "member_info.toml")
+    member_dir = cfg.get_member_dir(member)
+    minfo = member_info.read_member_info(experiment_path, member)
     current_cycle = minfo.member.current_cycle
     next_cycle = current_cycle + 1
-    if current_cycle not in minfo.cycle:
-        logger.error(f"Member {member} has not been advanced to cycle {current_cycle}")
-        logger.error("Did `advance` run successfully?")
-        return 1
+
     minfo_cycle = minfo.cycle[current_cycle]
     if not force and minfo_cycle.prior_postprocessed:
         logger.info(
@@ -384,33 +367,13 @@ def filter(experiment_path: Path):
     data_dir = experiment_path / cfg.directories.output_sub
 
     # Establish which cycle we are running and that all member priors are pre-processed
-    minfos = [
-        member_info.read_member_info(
-            experiment_path
-            / cfg.directories.work_sub
-            / "ensemble"
-            / f"member_{i}"
-            / "member_info.toml"
-        )
-        for i in range(cfg.assimilation.n_members)
-    ]
+    minfos = member_info.read_all_member_info(experiment_path)
+    member_info.ensure_same_cycle(minfos)
+    member_info.ensure_current_cycle_state(
+        minfos, {"advanced": True, "prior_postprocessed": True}
+    )
+
     current_cycle = minfos[0].member.current_cycle
-    for minfo in minfos:
-        if minfo.member.current_cycle != current_cycle:
-            logger.error(
-                f"Member {minfo.member.i} has a different current cycle than member 0"
-            )
-            return 1
-        if current_cycle not in minfo.cycle:
-            logger.error(
-                f"Member {minfo.member.i} has not been advanced to cycle {current_cycle}"
-            )
-            return 1
-        if minfo.cycle[current_cycle].prior_postprocessed is False:
-            logger.error(
-                f"Member {minfo.member.i} has not been postprocessed for cycle {current_cycle}"
-            )
-            return 1
 
     # Write input/output file lists
     priors = list(
@@ -467,35 +430,14 @@ def postprocess_analysis(experiment_path: Path):
     icbc_dir = data_dir / "initial_boundary"
 
     # Establish which cycle we are running and that all member priors are pre-processed
-    minfos = [
-        member_info.read_member_info(
-            experiment_path
-            / cfg.directories.work_sub
-            / "ensemble"
-            / f"member_{i}"
-            / "member_info.toml"
-        )
-        for i in range(cfg.assimilation.n_members)
-    ]
+    minfos = member_info.read_all_member_info(experiment_path)
+    member_info.ensure_current_cycle_state(
+        minfos, {"advanced": True, "prior_postprocessed": True, "filter": True}
+    )
+
     current_cycle = minfos[0].member.current_cycle
-    analysis_dir = data_dir / "analysis" / f"cycle_{current_cycle}"
-    for minfo in minfos:
-        if minfo.member.current_cycle != current_cycle:
-            logger.error(
-                f"Member {minfo.member.i} has a different current cycle than member 0"
-            )
-            return 1
-        if current_cycle not in minfo.cycle:
-            logger.error(
-                f"Member {minfo.member.i} has not been advanced to cycle {current_cycle}"
-            )
-            return 1
-        if minfo.cycle[current_cycle].prior_postprocessed is False:
-            logger.error(
-                f"Member {minfo.member.i} has not been postprocessed for cycle {current_cycle}"
-            )
-            return 1
     next_cycle = current_cycle + 1
+    analysis_dir = data_dir / "analysis" / f"cycle_{current_cycle}"
 
     # Prepare namelist contents
     cycles = cycling.get_cycle_information(cfg)
@@ -528,9 +470,7 @@ def postprocess_analysis(experiment_path: Path):
 
     # Postprocess analysis files
     for member in range(cfg.assimilation.n_members):
-        member_dir = (
-            experiment_path / cfg.directories.work_sub / "ensemble" / f"member_{member}"
-        )
+        member_dir = cfg.get_member_dir(member)
         analysis_file = analysis_dir / f"analysis_member_{member}.nc"
         if not analysis_file.exists():
             logger.error(f"Member {member}: {analysis_file} does not exist")
@@ -580,3 +520,9 @@ def postprocess_analysis(experiment_path: Path):
             / "member_info.toml",
             minfos[member],
         )
+
+        # Remove forecast files
+        logger.info(f"Removing forecast files from member directory {member_dir}")
+        for f in member_dir.glob("wrfout*"):
+            logger.debug(f"Removing forecast file {f}")
+            f.unlink()

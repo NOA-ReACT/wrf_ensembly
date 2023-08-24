@@ -41,8 +41,66 @@ class MemberInfo(BaseModel):
 
     cycle: dict[int, CycleSection] = {}
 
+    def get_current_cycle(self) -> CycleSection:
+        """
+        Returns the current cycle of the member.
 
-def read_member_info(path: Path) -> MemberInfo:
+        Returns:
+            CycleSection object
+        """
+        if self.member.current_cycle not in self.cycle:
+            raise ValueError(
+                f"Member {self.member.i} has no cycle {self.member.current_cycle}, but current_cycle is set to it."
+            )
+
+        return self.cycle[self.member.current_cycle]
+
+    def set_current_cycle(self, cycle: CycleSection):
+        """
+        Sets the current cycle of the member.
+
+        Args:
+            cycle: CycleSection object
+        """
+
+        self.cycle[self.member.current_cycle] = cycle
+
+
+def read_member_info(experiment_path: Path, member_id: int) -> MemberInfo:
+    """
+    Reads the member info file for a given member.
+
+    Args:
+        experiment_path: Path to the experiment directory
+        member_id: ID of the member
+
+    Returns:
+        MemberInfo object
+    """
+
+    toml_path = experiment_path / "work" / "ensemble" / f"member_{member_id:02d}.toml"
+    return read_member_info_toml(toml_path)
+
+
+def read_all_member_info(experiment_path: Path) -> dict[int, MemberInfo]:
+    """
+    Reads all member info files for a given experiment.
+
+    Args:
+        experiment_path: Path to the experiment directory
+
+    Returns:
+        Dictionary of member info objects ({id: MemberInfo})
+    """
+
+    member_info = {}
+    for member_path in (experiment_path / "work" / "ensemble").glob("member_*.toml"):
+        member_id = int(member_path.stem.split("_")[1])
+        member_info[member_id] = read_member_info_toml(member_path)
+    return member_info
+
+
+def read_member_info_toml(path: Path) -> MemberInfo:
     """
     Reads a TOML member info file and returns a MemberInfo object.
 
@@ -57,7 +115,26 @@ def read_member_info(path: Path) -> MemberInfo:
     return minfo
 
 
-def write_member_info(path: Path, minfo: MemberInfo):
+def write_member_info(experiment_path: Path, minfo: MemberInfo) -> Path:
+    """
+    Writes a MemberInfo object to a TOML file.
+
+    Args:
+        experiment_path: Path to the experiment directory
+        minfo: MemberInfo object to write
+
+    Returns:
+        Path to the member info file
+    """
+
+    toml_path = (
+        experiment_path / "work" / "ensemble" / f"member_{minfo.member.i:02d}.toml"
+    )
+    write_member_info_toml(toml_path, minfo)
+    return toml_path
+
+
+def write_member_info_toml(path: Path, minfo: MemberInfo):
     """
     Writes a MemberInfo object to a TOML file.
 
@@ -70,3 +147,34 @@ def write_member_info(path: Path, minfo: MemberInfo):
 
     with open(path, "wb") as f:
         tomli_w.dump(minfo.dict() | {"cycle": cycle}, f)
+
+
+def ensure_same_cycle(minfos: dict[int, MemberInfo]):
+    """
+    Ensures that all members have the same current cycle. Raises a ValueError otherwise.
+
+    Args:
+        minfos: Dictionary of MemberInfo objects
+    """
+
+    current_cycle = None
+    for minfo in minfos.values():
+        if current_cycle is None:
+            current_cycle = minfo.member.current_cycle
+        elif current_cycle != minfo.member.current_cycle:
+            raise ValueError(
+                f"Member {minfo.member.i} has a different current cycle than member 0"
+            )
+
+
+def ensure_current_cycle_state(minfos: dict[int, MemberInfo], state: dict[str, any]):
+    """
+    Ensures that all member infos are at the given state.
+    """
+
+    for minfo in minfos.values():
+        for k, v in state.items():
+            if minfo.__getattribute__(k) != v:
+                raise ValueError(
+                    f"Member {minfo.member.i} has a different {k} than expected"
+                )
