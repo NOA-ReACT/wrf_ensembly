@@ -44,20 +44,16 @@ def create(
         config.write_config(config_path, cfg)
 
     # Create sub-directories
-    (root / cfg.directories.output_sub).mkdir(parents=True, exist_ok=True)
     (root / cfg.directories.observations_sub).mkdir(parents=True, exist_ok=True)
     (root / cfg.directories.work_sub).mkdir(parents=True, exist_ok=True)
-
     (root / cfg.directories.work_sub / "preprocessing").mkdir()
 
-    cycles = cycling.get_cycle_information(cfg)
-    for i in range(len(cycles)):
-        cycle_dir = root / cfg.directories.output_sub / f"cycle_T{i}"
-        cycle_dir.mkdir()
-
-        for j in range(cfg.assimilation.n_members):
-            (cycle_dir / f"member_{j}").mkdir()
-        (cycle_dir / "mean").mkdir()
+    output_dir = root / cfg.directories.output_sub
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "analysis").mkdir()
+    (output_dir / "forecasts").mkdir()
+    (output_dir / "prior").mkdir()
+    (output_dir / "initial_boundary").mkdir()
 
     for j in range(cfg.assimilation.n_members):
         member_path = (root / cfg.directories.work_sub) / "ensemble" / f"member_{j}"
