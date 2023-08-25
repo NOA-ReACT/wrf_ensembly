@@ -122,3 +122,14 @@ def copy(src: Path, dest: Path):
 
     logger.debug(f"Copying {src} to {dest}")
     shutil.copy(src, dest)
+
+
+def filter_none_from_dict(dict: dict) -> dict:
+    """
+    Returns a new dictionary that does not contain any keys with a value of None.
+
+    Args:
+        dict: Dictionary to filter
+    """
+
+    return {k: v for k, v in dict.items() if v is not None}

@@ -5,6 +5,8 @@ from pydantic import BaseModel
 import tomli
 import tomli_w
 
+from wrf_ensembly.utils import filter_none_from_dict
+
 
 class MemberSection(BaseModel):
     i: int
@@ -15,10 +17,10 @@ class MemberSection(BaseModel):
 
 
 class CycleSection(BaseModel):
-    runtime: datetime
+    runtime: datetime | None
     """When the cycle was processed"""
 
-    walltime_s: int
+    walltime_s: int | None
     """Walltime in seconds"""
 
     advanced: bool
@@ -143,7 +145,7 @@ def write_member_info_toml(path: Path, minfo: MemberInfo):
         minfo: MemberInfo object to write
     """
 
-    cycle = {str(k): v.dict() for k, v in minfo.cycle.items()}
+    cycle = {str(k): filter_none_from_dict(v.dict()) for k, v in minfo.cycle.items()}
 
     with open(path, "wb") as f:
         tomli_w.dump(minfo.dict() | {"cycle": cycle}, f)
