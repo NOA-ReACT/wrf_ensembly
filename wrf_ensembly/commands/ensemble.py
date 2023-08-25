@@ -32,10 +32,7 @@ def setup(experiment_path: Path):
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
     data_path = (
-        experiment_path
-        / cfg.directories.work_sub
-        / "preprocessing"
-        / "initial_boundary"
+        experiment_path / cfg.directories.output_sub / "initial_boundary"
     )  # Where the wrfinput/wrfbdy are stored
 
     # WRF namelist for the first cycle

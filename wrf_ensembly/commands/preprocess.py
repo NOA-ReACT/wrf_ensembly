@@ -368,7 +368,7 @@ def real(experiment_path: Path, cycle: int):
 
     logger.info("real finished successfully")
 
-    data_dir = preprocessing_dir / "initial_boundary"
+    data_dir = experiment_path / cfg.directories.output_sub / "initial_boundary"
     data_dir.mkdir(parents=True, exist_ok=True)
     shutil.move(
         wrf_dir / "wrfinput_d01",
