@@ -121,8 +121,9 @@ def apply_pertubations(
         return 0
 
     for i in range(cfg.assimilation.n_members):
-        wrfinput_path = ensemble_dir / f"member_{i}" / "wrfinput_d01"
-        wrfbdy_path = ensemble_dir / f"member_{i}" / "wrfbdy_d01"
+        member_dir = cfg.get_member_dir(i)
+        wrfinput_path = member_dir / "wrfinput_d01"
+        wrfbdy_path = member_dir / "wrfbdy_d01"
 
         # Modify wrfinput accoarding to pertubation configuration
         logger.info(f"Member {i}: Applying pertubations to {wrfinput_path}")

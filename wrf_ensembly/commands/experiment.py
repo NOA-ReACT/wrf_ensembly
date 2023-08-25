@@ -56,8 +56,8 @@ def create(
     (output_dir / "initial_boundary").mkdir()
 
     for j in range(cfg.assimilation.n_members):
-        member_path = (root / cfg.directories.work_sub) / "ensemble" / f"member_{j}"
-        member_path.mkdir(parents=True)
+        member_dir = cfg.get_member_dir(j)
+        member_dir.mkdir(parents=True)
 
     logger.info("Experiment created successfully!")
 
@@ -82,6 +82,6 @@ def copy_model(experiment_path: Path):
     logger.info(f"Copied WPS to {work_dir / 'WPS'}")
 
     for j in range(cfg.assimilation.n_members):
-        member_path = work_dir / "ensemble" / f"member_{j}"
-        shutil.copytree(work_dir / "WRF", member_path, dirs_exist_ok=True)
-        logger.info(f"Copied WRF to {member_path}")
+        member_dir = cfg.get_member_dir(j)
+        shutil.copytree(work_dir / "WRF", member_dir, dirs_exist_ok=True)
+        logger.info(f"Copied WRF to {member_dir}")
