@@ -10,8 +10,8 @@ console = Console()
 
 
 class Logger:
-    experiment_path: Path
-    command_name: str
+    experiment_path: Path = None
+    command_name: str = None
     logger: logging.Logger
     log_dir: Path | None = None
     logger = logging.getLogger("rich")
@@ -30,6 +30,9 @@ class Logger:
         self.logger = logging.getLogger("rich")
 
     def setup(self, command_name: str, experiment_path: Path):
+        if self.command_name is not None:
+            return
+
         self.command_name = command_name
         self.experiment_path = experiment_path
 
@@ -42,10 +45,22 @@ class Logger:
         self.logger.addHandler(logging.FileHandler(log_dir / "wrf_ensembly.log"))
 
     def write_log_file(self, filename: str, contents: str):
+        if self.log_dir is None:
+            self.logger.warning(
+                f"write_log_file(): No log directory set, cannot write log file {filename}"
+            )
+            return
+
         log_path = self.log_dir / filename
         log_path.write_text(contents)
 
     def add_log_file(self, source: Path, filename: str = None):
+        if self.log_dir is None:
+            self.logger.warning(
+                f"add_log_file(): No log directory set, cannot write log file {source}"
+            )
+            return
+
         if filename is None:
             filename = source.name
         shutil.copyfile(source, self.log_dir / filename)
