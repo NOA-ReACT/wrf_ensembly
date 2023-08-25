@@ -38,11 +38,11 @@ class Logger:
 
         # Create logger and log directory
         now = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        log_dir = experiment_path / "logs" / f"{now}-{command_name}"
-        log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir = experiment_path / "logs" / f"{now}-{command_name}"
+        self.log_dir.mkdir(parents=True, exist_ok=True)
 
         # Add file handler to logger
-        self.logger.addHandler(logging.FileHandler(log_dir / "wrf_ensembly.log"))
+        self.logger.addHandler(logging.FileHandler(self.log_dir / "wrf_ensembly.log"))
 
     def write_log_file(self, filename: str, contents: str):
         if self.log_dir is None:
