@@ -90,7 +90,7 @@ def setup(experiment_path: Path):
             metadata=cfg.metadata, member={"i": i, "current_cycle": 0}
         )
         for c in cycles:
-            minfo.cycle[c.i] = member_info.CycleSection(
+            minfo.cycle[c.index] = member_info.CycleSection(
                 runtime=None,
                 walltime_s=None,
                 advanced=False,
