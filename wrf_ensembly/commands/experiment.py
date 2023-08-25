@@ -5,8 +5,8 @@ from typing import Optional
 
 import typer
 
-from wrf_ensembly.console import console, get_logger, LoggerConfig
-from wrf_ensembly import config, cycling, utils
+from wrf_ensembly.console import logger
+from wrf_ensembly import config, utils
 
 app = typer.Typer()
 
@@ -27,7 +27,7 @@ def create(
 ):
     """Create a new experiment directory."""
 
-    logger, _ = get_logger(LoggerConfig(experiment_path, "experiment-create"))
+    logger.setup("experiment-create", experiment_path)
 
     # Create directory tree, add config file
     root = experiment_path
@@ -66,7 +66,7 @@ def create(
 def copy_model(experiment_path: Path):
     """Setup the experiment (i.e., copy WRF/WPS, generate namelists, ...)"""
 
-    logger, _ = get_logger(LoggerConfig(experiment_path, "experiment-copy-model"))
+    logger.setup("experiment-copy-model", experiment_path)
     cfg = config.read_config(experiment_path / "config.toml")
     work_dir = experiment_path / cfg.directories.work_sub
 

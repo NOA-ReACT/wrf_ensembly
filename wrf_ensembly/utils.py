@@ -4,6 +4,8 @@ import shutil
 from pathlib import Path
 import subprocess
 
+from wrf_ensembly.console import logger
+
 
 def rm_tree(p: Path):
     """
@@ -41,16 +43,14 @@ class ExternalProcessResult:
     """Standard error of the process"""
 
 
-def call_external_process(
-    command: list[str], cwd: Path, logger: logging.Logger, log_failure=True
-):
+def call_external_process(command: list[str], cwd: Path, log_filename: str = None):
     """
     Calls an external process and handles failures gracefully.
 
     Args:
         command: Command to run as an array of strings
         cwd: Working directory to run the command in
-        log_failure: Whether to log a failure message if the process fails, defaults to True
+        log_filename: Filename to log the stdout and stderr to, inside logger's directory
 
     Returns:
         ExternalProcessResult object containing the result of the process (stdout, stderr, code)
@@ -69,12 +69,20 @@ def call_external_process(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
-    if proc.returncode != 0 and log_failure:
+    if proc.returncode != 0:
         logger.error(
             f"External process failed with return code {proc.returncode}: {command_str}"
         )
         if len(proc.stdout) > 0:
             logger.error(f"stdout:\n{proc.stdout.strip()}")
+
+    # Write stdout/err to this command's log directory
+    if log_filename is None:
+        if isinstance(command[0], Path):
+            log_filename = str(command[0].resolve().name) + ".log"
+        else:
+            log_filename = command[0].split("/")[-1] + ".log"
+    logger.write_log_file(log_filename, proc.stdout)
 
     return ExternalProcessResult(
         returncode=proc.returncode,
@@ -112,6 +120,5 @@ def copy(src: Path, dest: Path):
         dest: Destination file
     """
 
-    logger = logging.getLogger(__name__)
     logger.debug(f"Copying {src} to {dest}")
     shutil.copy(src, dest)

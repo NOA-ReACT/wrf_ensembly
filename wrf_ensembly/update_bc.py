@@ -4,13 +4,17 @@ to match the initial conditions, that might be modified.
 """
 
 from pathlib import Path
-import logging
 
 from wrf_ensembly.config import Config
 from wrf_ensembly.utils import call_external_process
 
 
-def update_wrf_bc(cfg: Config, logger: logging.Logger, wrfinput: Path, wrfbdy: Path):
+def update_wrf_bc(
+    cfg: Config,
+    wrfinput: Path,
+    wrfbdy: Path,
+    log_filename: str = None,
+):
     """
     Updates the given `wrfbdy` file to match the `wrfinput` file, using `update_wrf_bc`.
     Required if you have modified the `wrfinput` file.
@@ -22,6 +26,8 @@ def update_wrf_bc(cfg: Config, logger: logging.Logger, wrfinput: Path, wrfbdy: P
         cfg: The configuration object.
         wrfinput: The wrfinput file to update from.
         wrfbdy: The wrfbdy file to update. Will be mutated.
+        log_dir: The directory to log the stdout and stderr of the process to.
+        log_filename: The filename inside `log_dir` to log the stdout and stderr
 
     Returns:
         The result of the external process call (see `ExternalProcessResult`).
@@ -43,5 +49,9 @@ def update_wrf_bc(cfg: Config, logger: logging.Logger, wrfinput: Path, wrfbdy: P
             "update_wrf_bc executable not found in DART/wrf/work directory"
         )
 
-    res = call_external_process([str(command.resolve())], cwd=work_dir, logger=logger)
+    res = call_external_process(
+        [str(command.resolve())],
+        cwd=work_dir,
+        log_filename=log_filename,
+    )
     return res

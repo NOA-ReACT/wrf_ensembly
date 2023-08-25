@@ -1,8 +1,7 @@
 import logging
 from datetime import datetime
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
+import shutil
 
 from rich.console import Console
 from rich.logging import RichHandler
@@ -10,38 +9,58 @@ from rich.logging import RichHandler
 console = Console()
 
 
-@dataclass
-class LoggerConfig:
+class Logger:
     experiment_path: Path
     command_name: str
+    logger: logging.Logger
+    log_dir: Path | None = None
+    logger = logging.getLogger("rich")
 
+    def __init__(self) -> None:
+        logging.basicConfig(
+            level="NOTSET",
+            format="%(asctime)s: %(message)s",
+            datefmt="[%X]",
+            handlers=[
+                RichHandler(
+                    console=console, markup=console.is_terminal, rich_tracebacks=True
+                )
+            ],
+        )
+        self.logger = logging.getLogger("rich")
 
-def get_logger(cfg: LoggerConfig | None) -> Tuple[logging.Logger, Path | None]:
-    """
-    Get a logger with a rich (console) handler and, optionally, a file handler.
+    def setup(self, command_name: str, experiment_path: Path):
+        self.command_name = command_name
+        self.experiment_path = experiment_path
 
-    If you know the experiment directory, pass the `cfg` argument to create an directory
-    inside `experiment/logs` that corresponds to the current date/time/command name.
-    The logs will be kept automatically. You can also store any other files
-    (i.e., stdout, rsl.*, ...) in the same directory.
-
-    Returns:
-        The logger and the log directory (if `cfg` is not None).
-    """
-    handlers = [
-        RichHandler(console=console, markup=console.is_terminal, rich_tracebacks=True)
-    ]
-    log_dir = None
-    if cfg is not None:
+        # Create logger and log directory
         now = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        log_dir = cfg.experiment_path / "logs" / f"{now}-{cfg.command_name}"
+        log_dir = experiment_path / "logs" / f"{now}-{command_name}"
         log_dir.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(log_dir / "wrf_ensembly.log"))
 
-    logging.basicConfig(
-        level="NOTSET",
-        format="%(asctime)s: %(message)s",
-        datefmt="[%X]",
-        handlers=handlers,
-    )
-    return logging.getLogger("rich"), log_dir
+        # Add file handler to logger
+        self.logger.addHandler(logging.FileHandler(log_dir / "wrf_ensembly.log"))
+
+    def write_log_file(self, filename: str, contents: str):
+        log_path = self.log_dir / filename
+        log_path.write_text(contents)
+
+    def add_log_file(self, source: Path, filename: str = None):
+        if filename is None:
+            filename = source.name
+        shutil.copyfile(source, self.log_dir / filename)
+
+    def info(self, msg: str):
+        self.logger.info(msg)
+
+    def debug(self, msg: str):
+        self.logger.debug(msg)
+
+    def error(self, msg: str):
+        self.logger.error(msg)
+
+    def warning(self, msg: str):
+        self.logger.warning(msg)
+
+
+logger = Logger()

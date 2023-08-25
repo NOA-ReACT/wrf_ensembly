@@ -8,7 +8,7 @@ import netCDF4
 
 app = typer.Typer()
 
-from wrf_ensembly.console import console, get_logger, LoggerConfig
+from wrf_ensembly.console import logger
 from wrf_ensembly import (
     config,
     cycling,
@@ -28,7 +28,7 @@ def setup(experiment_path: Path):
     Generates namelists and copies initial/boundary conditions for each member.
     """
 
-    logger, _ = get_logger(LoggerConfig(experiment_path, "ensemble-setup"))
+    logger.setup("ensemble-setup", experiment_path)
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
     data_path = (
@@ -110,9 +110,7 @@ def apply_pertubations(
     Applies the configured pertubations to the initial conditions of each ensemble member
     """
 
-    logger, log_dir = get_logger(
-        LoggerConfig(experiment_path, "ensemble-apply-pertubations")
-    )
+    logger.setup("ensemble-apply-pertubations", experiment_path)
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
 
@@ -154,8 +152,12 @@ def apply_pertubations(
                 field_var.rounds = pertubation.rounds
 
         # Update BC to match
-        res = update_bc.update_wrf_bc(cfg, logger, wrfinput_path, wrfbdy_path)
-        (log_dir / f"da_update_bc_member_{i}.log").write_text(res.stdout)
+        res = update_bc.update_wrf_bc(
+            cfg,
+            wrfinput_path,
+            wrfbdy_path,
+            log_filename=f"da_update_bc_member_{i}.log",
+        )
         if not res.success or "update_wrf_bc Finished successfully" not in res.stdout:
             logger.error(
                 f"Member {i}: bc_update.exe failed with exit code {res.returncode}"
@@ -182,9 +184,7 @@ def advance_member(
         skip_wrf: If True, skips the WRF run and assumes it has already been run. Useful when something goes wrong with wrf-ensembly but you know everything is OK with the model.
     """
 
-    logger, log_dir = get_logger(
-        LoggerConfig(experiment_path, f"ensemble-advance-member_{member}")
-    )
+    logger.setup(f"ensemble-advance-member_{member}", experiment_path)
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
 
@@ -205,12 +205,11 @@ def advance_member(
     if skip_wrf:
         res = utils.ExternalProcessResult(0, True, "", "")
     else:
-        res = utils.call_external_process(cmd, member_dir, logger)
+        res = utils.call_external_process(cmd, member_dir, log_filename=f"wrf.log")
     end_time = datetime.datetime.now()
 
-    for log_file in member_dir.glob("rsl.*"):
-        utils.copy(log_file, log_dir / log_file.name)
-    (log_dir / f"wrf.log").write_text(res.stdout)
+    for f in member_dir.glob("rsl.*"):
+        logger.add_log_file(f)
 
     rsl_file = member_dir / "rsl.out.0000"
     if not rsl_file.exists():
@@ -243,9 +242,7 @@ def advance_members_slurm(
     Creates a SLURM jobfile to advance each member 1 cycle
     """
 
-    logger, _ = get_logger(
-        LoggerConfig(experiment_path, f"ensemble-advance-members-slurm")
-    )
+    logger.setup(f"ensemble-advance-members-slurm", experiment_path)
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
 
@@ -263,6 +260,7 @@ def advance_members_slurm(
     for i in range(cfg.assimilation.n_members):
         jobfile = jobfile_directory / f"advance_member_{i}.job.sh"
 
+        # TODO Conda environment is hard-coded here
         jobfile.write_text(
             templates.generate(
                 "slurm_job.sh.j2",
@@ -284,9 +282,7 @@ def postprocess_prior(experiment_path: Path, member: int, force: bool = False):
     by copying cycling variables into the next initial condition files.
     """
 
-    logger, log_dir = get_logger(
-        LoggerConfig(experiment_path, f"postprocess-prior-member_{member}")
-    )
+    logger.setup(f"postprocess-prior-member_{member}", experiment_path)
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
     data_dir = experiment_path / cfg.directories.output_sub
@@ -339,8 +335,9 @@ def postprocess_prior(experiment_path: Path, member: int, force: bool = False):
             nc_prior_initial[name][:] = nc_prior_wrfout[name][:]
 
     # Update boundary conditions to match
-    res = update_bc.update_wrf_bc(cfg, logger, initial_c, boundary_c)
-    (log_dir / f"da_update_bc_member_{member}.log").write_text(res.stdout)
+    res = update_bc.update_wrf_bc(
+        cfg, initial_c, boundary_c, log_filename=f"da_update_bc_member_{member}.log"
+    )
     if not res.success or "update_wrf_bc Finished successfully" not in res.stdout:
         logger.error(
             f"Member {member}: bc_update.exe failed with exit code {res.returncode}"
@@ -358,7 +355,7 @@ def filter(experiment_path: Path):
     Runs the assimilation filter for the current cycle
     """
 
-    logger, log_dir = get_logger(LoggerConfig(experiment_path, f"filter"))
+    logger.setup("filter", experiment_path)
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
     data_dir = experiment_path / cfg.directories.output_sub
@@ -399,8 +396,7 @@ def filter(experiment_path: Path):
 
     # Run filter
     cmd = ["./filter"]
-    res = utils.call_external_process(cmd, dart_dir, logger)
-    (log_dir / f"filter.log").write_text(res.stdout)
+    res = utils.call_external_process(cmd, dart_dir, log_filename="filter.log")
     if not res.success or "Finished ... at" not in res.stdout:
         logger.error(f"filter failed with exit code {res.returncode}")
         return 1
@@ -420,7 +416,7 @@ def postprocess_analysis(experiment_path: Path):
     and moving them to the appropriate directory to re-run the model.
     """
 
-    logger, log_dir = get_logger(LoggerConfig(experiment_path, f"postprocess_analysis"))
+    logger.setup("postprocess_analysis", experiment_path)
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
     data_dir = experiment_path / cfg.directories.output_sub
@@ -492,8 +488,12 @@ def postprocess_analysis(experiment_path: Path):
                 nc_wrfinput[name][:] = nc_analysis[name][:]
 
         logger.info(f"Member {member}: Postprocessing analysis file")
-        res = update_bc.update_wrf_bc(cfg, logger, target_wrfinput, target_wrfbdy)
-        (log_dir / f"da_update_bc_analysis_member_{member}.log").write_text(res.stdout)
+        res = update_bc.update_wrf_bc(
+            cfg,
+            target_wrfinput,
+            target_wrfbdy,
+            log_filename=f"da_update_bc_analysis_member_{member}.log",
+        )
         if not res.success or "update_wrf_bc Finished successfully" not in res.stdout:
             logger.error(
                 f"Member {member}: bc_update.exe failed with exit code {res.returncode}"

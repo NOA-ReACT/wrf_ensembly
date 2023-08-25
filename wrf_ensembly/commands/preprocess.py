@@ -1,15 +1,12 @@
 from pathlib import Path
 import shutil
-import datetime
 from itertools import chain
 from typing import Optional
 from typing_extensions import Annotated
 
 import typer
-import netCDF4
-import numpy as np
 
-from wrf_ensembly.console import console, get_logger, LoggerConfig
+from wrf_ensembly.console import logger
 from wrf_ensembly import config, cycling, namelist, wrf, utils
 
 app = typer.Typer()
@@ -19,7 +16,7 @@ app = typer.Typer()
 def wps_namelist(experiment_path: Path):
     """Generates the WPS namelist for the whole experiment period."""
 
-    logger, _ = get_logger(LoggerConfig(experiment_path, "preprocess-wps-namelist"))
+    logger.setup("preprocess-wps-namelist", experiment_path)
     cfg = config.read_config(experiment_path / "config.toml")
 
     wps_namelist = {
@@ -74,7 +71,7 @@ def wrf_namelist(
     If cycle is specified, the namelist will be generated for that cycle only.
     """
 
-    logger, _ = get_logger(LoggerConfig(experiment_path, "preprocess-wrf-namelist"))
+    logger.setup("preprocess-wrf-namelist", experiment_path)
     cfg = config.read_config(experiment_path / "config.toml")
 
     if cycle is None:
@@ -130,7 +127,7 @@ def setup(experiment_path: Path):
     generating their namelists.
     """
 
-    logger, _ = get_logger(LoggerConfig(experiment_path, "preprocess-setup"))
+    logger.setup("preprocess-setup", experiment_path)
     cfg = config.read_config(experiment_path / "config.toml")
     preprocess_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
 
@@ -157,7 +154,7 @@ def geogrid(experiment_path: Path):
     Runs geogrid.exe for the experiment.
     """
 
-    logger, log_dir = get_logger(LoggerConfig(experiment_path, "preprocess-geogrid"))
+    logger.setup("preprocess-geogrid", experiment_path)
     cfg = config.read_config(experiment_path / "config.toml")
     preprocessing_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
     wps_dir = preprocessing_dir / "WPS"
@@ -173,12 +170,10 @@ def geogrid(experiment_path: Path):
 
     geogrid_path = wps_dir / "geogrid.exe"
     if not geogrid_path.is_file():
-        console.log("Could not find geogrid.exe at {geogrid_path}")
+        logger.error("Could not find geogrid.exe at {geogrid_path}")
         return 1
 
-    cmd = [geogrid_path]
-    res = utils.call_external_process(cmd, wps_dir, logger)
-    (log_dir / "geogrid.log").write_text(res.stdout)
+    res = utils.call_external_process([geogrid_path], wps_dir)
     if not res.success:
         logger.error("Error is fatal")
         return 1
@@ -195,7 +190,7 @@ def ungrib(experiment_path: Path):
     Runs ungrib.exe for the experiment, after linking the grib files into the WPS directory
     """
 
-    logger, log_dir = get_logger(LoggerConfig(experiment_path, "preprocess-ungrib"))
+    logger.setup("preprocess-ungrib", experiment_path)
     cfg = config.read_config(experiment_path / "config.toml")
     preprocessing_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
     wps_dir = preprocessing_dir / "WPS"
@@ -237,12 +232,10 @@ def ungrib(experiment_path: Path):
     # Run ungrib.exe
     ungrib_path = wps_dir / "ungrib.exe"
     if not ungrib_path.is_file():
-        console.log("Could not find ungrib.exe at {ungrib_path}")
+        logger.error("Could not find ungrib.exe at {ungrib_path}")
         return 1
 
-    cmd = [ungrib_path]
-    res = utils.call_external_process(cmd, wps_dir, logger)
-    (log_dir / "ungrib.log").write_text(res.stdout)
+    res = utils.call_external_process([ungrib_path], wps_dir)
     if not res.success or "Successful completion of ungrib" not in res.stdout:
         logger.error("Ungrib could not finish successfully")
         logger.error("Check the `ungrib.log` file for more info.")
@@ -260,7 +253,7 @@ def metgrid(
     Run metgrid.exe to produce the `met_em*.nc` files.
     """
 
-    logger, log_dir = get_logger(LoggerConfig(experiment_path, "preprocess-metgrid"))
+    logger.setup("preprocess-metgrid", experiment_path)
     cfg = config.read_config(experiment_path / "config.toml")
     preprocessing_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
     wps_dir = preprocessing_dir / "WPS"
@@ -281,12 +274,10 @@ def metgrid(
 
     metgrid_path = wps_dir / "metgrid.exe"
     if not metgrid_path.is_file():
-        console.log("Could not find metgrid.exe at {metgrid_path}")
+        logger.error("Could not find metgrid.exe at {metgrid_path}")
         return 1
 
-    cmd = [metgrid_path]
-    res = utils.call_external_process(cmd, wps_dir, logger)
-    (log_dir / "metgrid.log").write_text(res.stdout)
+    res = utils.call_external_process([metgrid_path], wps_dir)
     if not res.success or "Successful completion of metgrid" not in res.stdout:
         logger.error("Metgrid could not finish successfully")
         logger.error("Check the `metgrid.log` file for more info.")
@@ -305,9 +296,7 @@ def real(experiment_path: Path, cycle: int):
     your experiment.
     """
 
-    logger, log_dir = get_logger(
-        LoggerConfig(experiment_path, f"preprocess-real-cycle_{cycle}")
-    )
+    logger.setup(f"preprocess-real-cycle_{cycle}", experiment_path)
 
     cfg = config.read_config(experiment_path / "config.toml")
     preprocessing_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
@@ -353,8 +342,7 @@ def real(experiment_path: Path, cycle: int):
     ]  # TODO Make srun/mpirun configurable!
     res = utils.call_external_process(cmd, wrf_dir, logger)
     for log_file in wrf_dir.glob("rsl.*"):
-        utils.copy(log_file, log_dir / log_file.name)
-    (log_dir / "real.log").write_text(res.stdout)
+        logger.add_log_file(log_file)
 
     rsl_path = wrf_dir / "rsl.out.0000"
     if not rsl_path.is_file():

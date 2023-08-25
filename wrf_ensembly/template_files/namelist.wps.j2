@@ -1,0 +1,33 @@
+&share
+wrf_core = 'ARW',
+max_dom = 1,
+start_date = '2021_09_01_06:00:00',
+end_date = '2021_09_01_12:00:00',
+interval_seconds = 21600,
+/
+&geogrid
+parent_id = 1,
+parent_grid_ratio = 1,
+i_parent_start = 1,
+j_parent_start = 1,
+e_we = 553,
+e_sn = 240,
+geog_data_res = 'default',
+dx = 26000,
+dy = 26000,
+map_proj = 'lambert',
+ref_lat = 26.0,
+ref_lon = -30.0,
+truelat1 = 33.0,
+truelat2 = 33.0,
+stand_lon = -22,
+geog_data_path = '/work2/pr005/ageorg/wrf/WPS_GEOG',
+/
+&ungrib
+out_format = 'WPS',
+prefix = 'FILE',
+/
+&metgrid
+fg_name = 'FILE',
+io_form_metgrid = 2,
+/
