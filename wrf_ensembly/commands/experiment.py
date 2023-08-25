@@ -34,8 +34,8 @@ def create(
     root.mkdir(parents=True, exist_ok=True)
 
     if config_path is not None:
-        cfg = config.read_config(config_path)
         utils.copy(config_path, experiment_path / "config.toml")
+        cfg = config.read_config(experiment_path / "config.toml")
     else:
         # TODO Fix this, doesn't work like that
         # We gotta create a default config file

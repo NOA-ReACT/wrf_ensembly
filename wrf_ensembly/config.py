@@ -129,7 +129,7 @@ class PertubationVariableConfig(BaseModel):
 
 
 class Config(BaseModel):
-    _experiment_path: Path
+    experiment_path: Path | None
     """Experiment path, assumed to be the parent of the config file location"""
 
     metadata: MetadataConfig
@@ -177,7 +177,7 @@ class Config(BaseModel):
         """
 
         return (
-            self._experiment_path
+            self.experiment_path
             / self.directories.work_sub
             / "ensemble"
             / f"member_{id:02d}"
@@ -201,7 +201,7 @@ def read_config(path: Path, inject_environment=True) -> Config:
         for k, v in cfg.environment.items():
             os.environ[k] = str(v)
 
-    cfg._experiment_path = path.parent
+    cfg.experiment_path = path.parent
 
     return cfg
 
