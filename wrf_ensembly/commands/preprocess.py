@@ -340,7 +340,7 @@ def real(experiment_path: Path, cycle: int):
         "1",
         str(real_path.resolve()),
     ]  # TODO Make srun/mpirun configurable!
-    res = utils.call_external_process(cmd, wrf_dir, logger)
+    utils.call_external_process(cmd, wrf_dir, "real.log")
     for log_file in wrf_dir.glob("rsl.*"):
         logger.add_log_file(log_file)
 
