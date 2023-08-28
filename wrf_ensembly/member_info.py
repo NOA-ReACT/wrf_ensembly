@@ -174,9 +174,15 @@ def ensure_current_cycle_state(minfos: dict[int, MemberInfo], state: dict[str, a
     Ensures that all member infos are at the given state.
     """
 
+    curr_cycles = {i: minfo.member.current_cycle for i, minfo in minfos.items()}
+    if len(set(curr_cycles.values())) != 1:
+        raise ValueError("Not all members are at the same current cycle", curr_cycles)
+
+    c = curr_cycles[0]
     for minfo in minfos.values():
+        cycle_info = minfo.cycle[c].dict()
         for k, v in state.items():
-            if minfo.__getattribute__(k) != v:
+            if k not in cycle_info or cycle_info[k] != v:
                 raise ValueError(
                     f"Member {minfo.member.i} has a different {k} than expected"
                 )
