@@ -347,7 +347,7 @@ def postprocess_prior(experiment_path: Path, member: int, force: bool = False):
     logger.info(f"Member {member}: bc_update.exe finished successfully")
 
     minfo.cycle[current_cycle].prior_postprocessed = True
-    member_info.write_member_info(member_dir / "member_info.toml", minfo)
+    member_info.write_member_info(experiment_path, minfo)
 
 
 @app.command()
