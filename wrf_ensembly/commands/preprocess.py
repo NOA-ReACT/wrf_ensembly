@@ -7,7 +7,7 @@ from typing_extensions import Annotated
 import typer
 
 from wrf_ensembly.console import logger
-from wrf_ensembly import config, cycling, namelist, wrf, utils
+from wrf_ensembly import config, cycling, namelist, wrf, utils, templates
 
 app = typer.Typer()
 
@@ -372,3 +372,45 @@ def real(experiment_path: Path, cycle: int):
     shutil.copyfile(
         wrf_dir / "namelist.input", data_dir / f"namelist.input_cycle_{cycle}"
     )
+
+
+@app.command()
+def jobfile(experiment_path: Path):
+    """Creates a jobfile for running all preprocessing steps. Useful if you want to run WPS and real on your processing nodes."""
+
+    logger.setup(f"preprocess-jobfile", experiment_path)
+    experiment_path = experiment_path.resolve()
+    cfg = config.read_config(experiment_path / "config.toml")
+
+    experiment_name = cfg.metadata.name
+    cycles = cycling.get_cycle_information(cfg)
+
+    # Write jobfile
+    slurm_args = cfg.slurm
+    env_modules = []
+    if "env_modules" in slurm_args:
+        env_modules = slurm_args["env_modules"]
+        del slurm_args["env_modules"]
+    slurm_args |= {"job-name": f"{experiment_name}__preprocess"}
+
+    commands = [
+        f"conda run -n wrf python -m wrf_ensembly preprocess geogrid {experiment_path}",
+        f"conda run -n wrf python -m wrf_ensembly preprocess ungrib {experiment_path}",
+        f"conda run -n wrf python -m wrf_ensembly preprocess metgrid {experiment_path}",
+    ] + [
+        f"conda run -n wrf python -m wrf_ensembly preprocess real {experiment_path} {cycle}"
+        for cycle in range(len(cycles))
+    ]
+
+    jobfile = experiment_path / "jobfiles" / "preprocess.sh"
+    jobfile.parent.mkdir(parents=True, exist_ok=True)
+
+    jobfile.write_text(
+        templates.generate(
+            "slurm_job.sh.j2",
+            slurm_args=slurm_args,
+            env_modules=env_modules,
+            commands=commands,
+        )
+    )
+    logger.info(f"Wrote jobfile to {jobfile}")

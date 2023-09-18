@@ -47,6 +47,7 @@ def create(
     (root / cfg.directories.observations_sub).mkdir(parents=True, exist_ok=True)
     (root / cfg.directories.work_sub).mkdir(parents=True, exist_ok=True)
     (root / cfg.directories.work_sub / "preprocessing").mkdir()
+    (root / "jobfiles").mkdir()
 
     output_dir = root / cfg.directories.output_sub
     output_dir.mkdir(parents=True, exist_ok=True)
