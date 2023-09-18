@@ -4,6 +4,9 @@
 #SBATCH --{{key}}={{val}}
 {% endfor %}
 
+# Stop on errors
+set -e
+
 module purge
 {% for name in env_modules -%}
 module load {{name}}
