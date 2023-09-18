@@ -394,6 +394,7 @@ def jobfile(experiment_path: Path):
     slurm_args |= {"job-name": f"{experiment_name}__preprocess"}
 
     commands = [
+        f"conda run -n wrf python -m wrf_ensembly preprocess setup {experiment_path}",
         f"conda run -n wrf python -m wrf_ensembly preprocess geogrid {experiment_path}",
         f"conda run -n wrf python -m wrf_ensembly preprocess ungrib {experiment_path}",
         f"conda run -n wrf python -m wrf_ensembly preprocess metgrid {experiment_path}",
