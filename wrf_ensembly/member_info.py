@@ -26,13 +26,10 @@ class CycleSection(BaseModel):
     advanced: bool
     """Whether the cycle was advanced or not"""
 
-    prior_postprocessed: bool
-    """Whether the prior was postprocessed or not"""
-
     filter: bool
     """Whether the filter was run or not"""
 
-    posterior_postprocessed: bool
+    analysis: bool
     """Whether the posterior was postprocessed or not"""
 
 

@@ -113,8 +113,8 @@ class AssimilationConfig(BaseModel):
     cycled_variables: list[str]
     """Which variables to carry forward from the previous cycle"""
 
-    extract_variables: list[str]
-    """Which variables to extract from the WRF output into the statistics"""
+    state_variables: list[str]
+    """Which variables to use in the state vector"""
 
 
 class PertubationVariableConfig(BaseModel):

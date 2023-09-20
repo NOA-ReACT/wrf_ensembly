@@ -94,9 +94,8 @@ def setup(experiment_path: Path):
                 runtime=None,
                 walltime_s=None,
                 advanced=False,
-                prior_postprocessed=False,
                 filter=False,
-                posterior_postprocessed=False,
+                analysis=False,
             )
         toml_path = member_info.write_member_info(experiment_path, minfo)
         logger.info(f"Member {i}: Wrote info file to {toml_path}")
@@ -182,7 +181,9 @@ def advance_member(
     Args:
         experiment_path: Path to the experiment directory
         member: The member to advance
-        skip_wrf: If True, skips the WRF run and assumes it has already been run. Useful when something goes wrong with wrf-ensembly but you know everything is OK with the model.
+        skip_wrf: If True, skips the WRF run and assumes it has already been run.
+                  Useful when something goes wrong with wrf-ensembly but you know
+                  everything is OK with the model.
     """
 
     logger.setup(f"ensemble-advance-member_{member}", experiment_path)
@@ -222,14 +223,26 @@ def advance_member(
         logger.error(f"Member {member}: wrf.exe failed with exit code {res.returncode}")
         return 1
 
+    # Copy wrfout to the forecasts directory
+    data_dir = experiment_path / cfg.directories.output_sub
+    current_cycle = minfo.member.current_cycle
+
+    forecasts_dir = (
+        data_dir / "forecasts" / f"cycle_{current_cycle}" / f"member_{member:02d}"
+    )
+    forecasts_dir.mkdir(parents=True, exist_ok=True)
+    for wrfout in member_dir.glob("wrfout*"):
+        # TODO move files instead of copying, this is just to debug this command in dev
+        logger.info(f"Member {member}: Copying {wrfout} to {forecasts_dir}")
+        utils.copy(wrfout, forecasts_dir / wrfout.name)
+
     minfo.set_current_cycle(
         member_info.CycleSection(
             runtime=start_time,
             walltime_s=(end_time - start_time).total_seconds(),
             advanced=True,
-            prior_postprocessed=False,
             filter=False,
-            posterior_postprocessed=False,
+            analysis=False,
         )
     )
     member_info.write_member_info(experiment_path, minfo)
@@ -277,86 +290,12 @@ def advance_members_slurm(
 
 
 @app.command()
-def postprocess_prior(experiment_path: Path, member: int, force: bool = False):
-    """
-    After a forward run has completed, converts the WRF output files into input ones
-    by copying cycling variables into the next initial condition files.
-    """
-
-    logger.setup(f"postprocess-prior-member_{member}", experiment_path)
-    experiment_path = experiment_path.resolve()
-    cfg = config.read_config(experiment_path / "config.toml")
-    data_dir = experiment_path / cfg.directories.output_sub
-
-    member_dir = cfg.get_member_dir(member)
-    minfo = member_info.read_member_info(experiment_path, member)
-    current_cycle = minfo.member.current_cycle
-    next_cycle = current_cycle + 1
-
-    minfo_cycle = minfo.cycle[current_cycle]
-    if not force and minfo_cycle.prior_postprocessed:
-        logger.info(
-            f"Member {member} is already postprocessed for cycle {current_cycle}"
-        )
-        return 0
-
-    cycle_info = cycling.get_cycle_information(cfg)[current_cycle]
-
-    # Copy wrfout to the forecasts directory
-    forecasts_dir = (
-        data_dir / "forecasts" / f"cycle_{current_cycle}" / f"member_{member}"
-    )
-    forecasts_dir.mkdir(parents=True, exist_ok=True)
-    for wrfout in member_dir.glob("wrfout*"):
-        # TODO move files instead of copying
-        logger.info(f"Member {member}: Copying {wrfout} to {forecasts_dir}")
-        utils.copy(wrfout, forecasts_dir / wrfout.name)
-
-    # Copy initial/boundary for the next cycle to the prior directory, then copy the
-    # cycled variables
-    prior_dir = data_dir / "prior" / f"cycle_{current_cycle}" / f"member_{member}"
-    prior_dir.mkdir(parents=True, exist_ok=True)
-
-    initial_c = data_dir / "initial_boundary" / f"wrfinput_d01_cycle_{next_cycle}"
-    boundary_c = data_dir / "initial_boundary" / f"wrfbdy_d01_cycle_{next_cycle}"
-    logger.info(f"Member {member}: Copying {initial_c} to {prior_dir}")
-    utils.copy(initial_c, prior_dir / "wrfinput_d01")
-    logger.info(f"Member {member}: Copying {boundary_c} to {prior_dir}")
-    utils.copy(boundary_c, prior_dir / "wrfbdy_d01")
-
-    wrfout_name = "wrfout_d01_" + cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
-
-    logger.info("Copying cycled variables to initial conditions")
-    with (
-        netCDF4.Dataset(prior_dir / "wrfinput_d01", "r+") as nc_prior_initial,
-        netCDF4.Dataset(forecasts_dir / wrfout_name, "r") as nc_prior_wrfout,
-    ):
-        for name in cfg.assimilation.cycled_variables:
-            logger.info(f"Member {member}: Copying {name} from {wrfout_name}")
-            nc_prior_initial[name][:] = nc_prior_wrfout[name][:]
-
-    # Update boundary conditions to match
-    res = update_bc.update_wrf_bc(
-        cfg, initial_c, boundary_c, log_filename=f"da_update_bc_member_{member}.log"
-    )
-    if not res.success or "update_wrf_bc Finished successfully" not in res.stdout:
-        logger.error(
-            f"Member {member}: bc_update.exe failed with exit code {res.returncode}"
-        )
-        return 1
-    logger.info(f"Member {member}: bc_update.exe finished successfully")
-
-    minfo.cycle[current_cycle].prior_postprocessed = True
-    member_info.write_member_info(experiment_path, minfo)
-
-
-@app.command()
 def filter(experiment_path: Path):
     """
     Runs the assimilation filter for the current cycle
     """
 
-    logger.setup("filter", experiment_path)
+    logger.setup("ensemble-filter", experiment_path)
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
     data_dir = experiment_path / cfg.directories.output_sub
@@ -364,26 +303,27 @@ def filter(experiment_path: Path):
     # Establish which cycle we are running and that all member priors are pre-processed
     minfos = member_info.read_all_member_info(experiment_path)
     member_info.ensure_same_cycle(minfos)
-    member_info.ensure_current_cycle_state(
-        minfos, {"advanced": True, "prior_postprocessed": True}
-    )
+    member_info.ensure_current_cycle_state(minfos, {"advanced": True})
 
     current_cycle = minfos[0].member.current_cycle
+    cycle_info = cycling.get_cycle_information(cfg)[current_cycle]
 
     # Write input/output file lists
+    # For each member, we need the latest forecast only!
+    wrfout_name = "wrfout_d01_" + cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
     priors = list(
-        (data_dir / "prior" / f"cycle_{current_cycle}").glob("member_*/wrfinput_d01")
+        (data_dir / "forecasts" / f"cycle_{current_cycle}").glob(
+            f"member_*/{wrfout_name}"
+        )
     )
-    analysis = [
+    dart_output = [
         data_dir
-        / "analysis"
+        / "dart"
         / f"cycle_{current_cycle}"
-        / f"analysis_{prior.parent.name}.nc"
+        / f"dart_analysis_{prior.parent.name}.nc"
         for prior in priors
     ]
-    (data_dir / "analysis" / f"cycle_{current_cycle}").mkdir(
-        parents=True, exist_ok=True
-    )
+    (data_dir / "dart" / f"cycle_{current_cycle}").mkdir(parents=True, exist_ok=True)
 
     dart_dir = cfg.directories.dart_root / "models" / "wrf" / "work"
     dart_dir = dart_dir.resolve()
@@ -392,7 +332,7 @@ def filter(experiment_path: Path):
     logger.info(f"Wrote input_list.txt")
 
     dart_output_txt = dart_dir / "output_list.txt"
-    dart_output_txt.write_text("\n".join([str(f) for f in analysis]))
+    dart_output_txt.write_text("\n".join([str(f) for f in dart_output]))
     logger.info(f"Wrote output_list.txt")
 
     # Run filter
@@ -409,31 +349,100 @@ def filter(experiment_path: Path):
         utils.copy(f, posterior_dir / f.name)
         logger.info(f"Copied {f} to {posterior_dir}")
 
+    # Mark filter as completed
+    for minfo in minfos.values():
+        minfo.cycle[current_cycle].filter = True
+        member_info.write_member_info(experiment_path, minfo)
+
 
 @app.command()
-def postprocess_analysis(experiment_path: Path):
+def analysis(experiment_path: Path):
     """
-    Postprocesses the analysis files from the filter, by running bc_update again
-    and moving them to the appropriate directory to re-run the model.
+    Combines the DART output files and the forecast to create the analysis.
+    Also creates the mean and standard deviation analysis files.
     """
 
-    logger.setup("postprocess_analysis", experiment_path)
+    logger.setup("ensemble-analysis", experiment_path)
+    experiment_path = experiment_path.resolve()
+    cfg = config.read_config(experiment_path / "config.toml")
+    data_dir = experiment_path / cfg.directories.output_sub
+
+    # Establish which cycle we are running and that all member priors are pre-processed
+    minfos = member_info.read_all_member_info(experiment_path)
+    member_info.ensure_current_cycle_state(minfos, {"advanced": True, "filter": True})
+
+    current_cycle = minfos[0].member.current_cycle
+    cycle_info = cycling.get_cycle_information(cfg)[current_cycle]
+
+    forecast_dir = data_dir / "forecasts" / f"cycle_{current_cycle}"
+    analysis_dir = data_dir / "analysis" / f"cycle_{current_cycle}"
+    dart_out_dir = data_dir / "dart" / f"cycle_{current_cycle}"
+
+    # Postprocess analysis files
+    for member in range(cfg.assimilation.n_members):
+        # Copy forecasts to analysis directory
+        wrfout_name = "wrfout_d01_" + cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
+        forecast_file = forecast_dir / f"member_{member:02d}" / wrfout_name
+        analysis_file = analysis_dir / f"member_{member:02d}" / wrfout_name
+        utils.copy(forecast_file, analysis_file)
+
+        member_dir = cfg.get_member_dir(member)
+        dart_file = dart_out_dir / f"dart_analysis_member_{member}.nc"
+        if not dart_file.exists():
+            logger.error(f"Member {member}: {analysis_file} does not exist")
+            return 1
+
+        # Copy the state variables from the dart file to the analysis file
+        logger.info(f"Member {member}: Copying state variables from {dart_file}")
+        with (
+            netCDF4.Dataset(dart_file, "r") as nc_dart,
+            netCDF4.Dataset(analysis_file, "r+") as nc_analysis,
+        ):
+            for name in cfg.assimilation.state_variables:
+                if name not in nc_dart.variables:
+                    logger.warning(f"Member {member}: {name} not in dart file")
+                    continue
+                logger.info(f"Member {member}: Copying {name}")
+                nc_analysis[name][:] = nc_dart[name][:]
+
+            # Add experiment name and current cycle information to attributes
+            # TODO Standardize this somehow? We must add metadata to all files!
+            nc_analysis.experiment_name = cfg.metadata.name
+            nc_analysis.current_cycle = current_cycle
+            nc_analysis.cycle_start = cycle_info.start.strftime("%Y-%m-%d_%H:%M:%S")
+            nc_analysis.cycle_end = cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
+
+        # Update member info
+        minfos[member].cycle[current_cycle].analysis = True
+        member_info.write_member_info(experiment_path, minfos[member])
+
+    # TODO Create mean and standard deviation analysis files
+
+
+@app.command()
+def cycle(experiment_path: Path):
+    """
+    Prepares the experiment for the next cycle by copying the cycled variables from the analysis
+    to the initial conditions and preparing the namelist.
+    """
+
+    logger.setup("cycle", experiment_path)
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
     data_dir = experiment_path / cfg.directories.output_sub
     icbc_dir = data_dir / "initial_boundary"
 
-    # Establish which cycle we are running and that all member priors are pre-processed
+    # Establish which cycle we are running and that all member have the analysis prepared
     minfos = member_info.read_all_member_info(experiment_path)
-    member_info.ensure_current_cycle_state(
-        minfos, {"advanced": True, "prior_postprocessed": True, "filter": True}
-    )
+    member_info.ensure_current_cycle_state(minfos, {"advanced": True, "analysis": True})
 
     current_cycle = minfos[0].member.current_cycle
+    cycle_info = cycling.get_cycle_information(cfg)[current_cycle]
     next_cycle = current_cycle + 1
+
     analysis_dir = data_dir / "analysis" / f"cycle_{current_cycle}"
 
-    # Prepare namelist contents
+    # Prepare namelist contents, same for all members
     cycles = cycling.get_cycle_information(cfg)
     cycle = cycles[next_cycle]
     logger.info(f"Configuring members for cycle {next_cycle}: {str(cycle)}")
@@ -462,37 +471,47 @@ def postprocess_analysis(experiment_path: Path):
         else:
             wrf_namelist[name] = group
 
-    # Postprocess analysis files
+    # Combine initial condition file w/ analysis by copying the cycled variables, for each member
     for member in range(cfg.assimilation.n_members):
         member_dir = cfg.get_member_dir(member)
-        analysis_file = analysis_dir / f"analysis_member_{member}.nc"
-        if not analysis_file.exists():
-            logger.error(f"Member {member}: {analysis_file} does not exist")
-            return 1
 
-        target_wrfinput = member_dir / "wrfinput_d01"
-        target_wrfbdy = member_dir / "wrfbdy_d01"
+        # Copy the initial & boundary condition files for the next cycle, as is
+        icbc_file = icbc_dir / f"wrfinput_d01_cycle_{next_cycle}"
+        bdy_file = icbc_dir / f"wrfbdy_d01_cycle_{next_cycle}"
 
-        utils.copy(icbc_dir / f"wrfinput_d01_cycle_{next_cycle}", target_wrfinput)
-        utils.copy(icbc_dir / f"wrfbdy_d01_cycle_{next_cycle}", target_wrfbdy)
+        icbc_target_file = member_dir / "wrfinput_d01"
+        bdy_target_file = member_dir / "wrfbdy_d01"
 
-        logger.info(f"Member {member}: Copying cycled variables to initial conditions")
+        utils.copy(icbc_file, icbc_target_file)
+        utils.copy(bdy_file, bdy_target_file)
+
+        # Copy the cycled variables from the analysis file to the initial condition file
+        wrfout_name = "wrfout_d01_" + cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
+        analysis_file = analysis_dir / f"member_{member:02d}" / wrfout_name
+
+        logger.info(
+            f"Copying cycled variables from {analysis_file} to {icbc_target_file}"
+        )
         with (
             netCDF4.Dataset(analysis_file, "r") as nc_analysis,
-            netCDF4.Dataset(target_wrfinput, "r+") as nc_wrfinput,
+            netCDF4.Dataset(icbc_target_file, "r+") as nc_icbc,
         ):
             for name in cfg.assimilation.cycled_variables:
                 if name not in nc_analysis.variables:
                     logger.warning(f"Member {member}: {name} not in analysis file")
                     continue
                 logger.info(f"Member {member}: Copying {name}")
-                nc_wrfinput[name][:] = nc_analysis[name][:]
+                nc_icbc[name][:] = nc_analysis[name][:]
 
-        logger.info(f"Member {member}: Postprocessing analysis file")
+            # Add experiment name to attributes
+            nc_icbc.experiment_name = cfg.metadata.name
+
+        # Update the boundary conditions to match the new initial conditions
+        logger.info(f"Member {member}: Updating boundary conditions")
         res = update_bc.update_wrf_bc(
             cfg,
-            target_wrfinput,
-            target_wrfbdy,
+            icbc_target_file,
+            bdy_target_file,
             log_filename=f"da_update_bc_analysis_member_{member}.log",
         )
         if not res.success or "update_wrf_bc Finished successfully" not in res.stdout:
@@ -507,20 +526,19 @@ def postprocess_analysis(experiment_path: Path):
         namelist.write_namelist(wrf_namelist, namelist_path)
         logger.info(f"Member {member}: Wrote namelist to {namelist_path}")
 
-        # Update member info
-        minfos[member].cycle[current_cycle].posterior_postprocessed = True
-        minfos[member].member.current_cycle = next_cycle
-        member_info.write_member_info(
-            experiment_path
-            / cfg.directories.work_sub
-            / "ensemble"
-            / f"member_{member}"
-            / "member_info.toml",
-            minfos[member],
-        )
-
         # Remove forecast files
         logger.info(f"Removing forecast files from member directory {member_dir}")
         for f in member_dir.glob("wrfout*"):
             logger.debug(f"Removing forecast file {f}")
             f.unlink()
+
+        # Update member info
+        minfos[member].member.current_cycle += 1
+        minfos[member].cycle[next_cycle] = member_info.CycleSection(
+            runtime=None,
+            walltime_s=None,
+            advanced=False,
+            filter=False,
+            analysis=False,
+        )
+        member_info.write_member_info(experiment_path, minfos[member])

@@ -111,16 +111,19 @@ def int_to_letter_numeral(i: int, length=3) -> str:
     return "".join(reversed(letters)).rjust(length, "A")
 
 
-def copy(src: Path, dest: Path):
+def copy(src: Path, dest: Path, ensure_dest_parent_exists=True):
     """
     Copies the file from `src` to `dest` using `shutil.copy` and logs the operation.
 
     Args:
         src: Source file
-        dest: Destination file
+        dest: Destination file.
+        ensure_dest_parent_exists: Whether to create the parent directory of `dest` if it doesn't exist.
     """
 
     logger.debug(f"Copying {src} to {dest}")
+    if ensure_dest_parent_exists:
+        dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(src, dest)
 
 
