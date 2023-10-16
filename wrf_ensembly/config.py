@@ -1,6 +1,6 @@
 from pathlib import Path
 from datetime import datetime
-from typing import Any
+from typing import Any, Dict, Optional
 import os
 
 import tomli
@@ -69,6 +69,13 @@ class DomainControlConfig(BaseModel):
     """Standard longitude for the projection"""
 
 
+class CycleConfig(BaseModel):
+    """Configuration overrides for a specific cycle"""
+
+    duration: Optional[int]
+    """Duration of the cycle in minutes"""
+
+
 class TimeControlConfig(BaseModel):
     """Configuration related to the experiment time period."""
 
@@ -86,6 +93,9 @@ class TimeControlConfig(BaseModel):
 
     analysis_interval: int = 60 * 6
     """Time between analysis/assimilation cycles, minutes"""
+
+    cycles: Optional[Dict[int, CycleConfig]] = {}
+    """Configuration overrides for specific cycles"""
 
 
 class DataConfig(BaseModel):

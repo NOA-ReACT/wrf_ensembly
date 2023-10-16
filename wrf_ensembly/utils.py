@@ -136,3 +136,14 @@ def filter_none_from_dict(dict: dict) -> dict:
     """
 
     return {k: v for k, v in dict.items() if v is not None}
+
+
+def seconds_to_pretty_hours(seconds: int) -> str:
+    """
+    Converts seconds to hours minutes in the `HHh MMm` format
+    """
+
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+
+    return f"{hours:.0f}h {minutes:02.0f}m"

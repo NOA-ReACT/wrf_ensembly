@@ -40,13 +40,16 @@ def setup(experiment_path: Path):
     first_cycle = cycles[0]
     logger.info(f"Configuring members for cycle 0: {str(first_cycle)}")
 
+    history_interval = cfg.time_control.output_interval
+    if cycle.output_interval is not None:
+        history_interval = cycle.output_interval
     wrf_namelist = {
         "time_control": {
             **wrf.timedelta_to_namelist_items(first_cycle.end - first_cycle.start),
             **wrf.datetime_to_namelist_items(first_cycle.start, "start"),
             **wrf.datetime_to_namelist_items(first_cycle.end, "end"),
             "interval_seconds": cfg.time_control.boundary_update_interval * 60,
-            "history_interval": cfg.time_control.output_interval,
+            "history_interval": history_interval,
         },
         "domains": {
             "e_we": cfg.domain_control.xy_size[0],
@@ -446,13 +449,16 @@ def cycle(experiment_path: Path):
     cycle = cycles[next_cycle]
     logger.info(f"Configuring members for cycle {next_cycle}: {str(cycle)}")
 
+    history_interval = cfg.time_control.output_interval
+    if cycle.output_interval is not None:
+        history_interval = cycle.output_interval
     wrf_namelist = {
         "time_control": {
             **wrf.timedelta_to_namelist_items(cycle.end - cycle.start),
             **wrf.datetime_to_namelist_items(cycle.start, "start"),
             **wrf.datetime_to_namelist_items(cycle.end, "end"),
             "interval_seconds": cfg.time_control.boundary_update_interval * 60,
-            "history_interval": cfg.time_control.output_interval,
+            "history_interval": history_interval,
         },
         "domains": {
             "e_we": cfg.domain_control.xy_size[0],

@@ -4,9 +4,11 @@ from typing_extensions import Annotated
 from typing import Optional
 
 import typer
+from rich.console import Console
+from rich.table import Table, Column
 
 from wrf_ensembly.console import logger
-from wrf_ensembly import config, utils
+from wrf_ensembly import config, utils, cycling
 
 app = typer.Typer()
 
@@ -87,3 +89,31 @@ def copy_model(experiment_path: Path):
         member_dir = cfg.get_member_dir(j)
         shutil.copytree(work_dir / "WRF", member_dir, dirs_exist_ok=True)
         logger.info(f"Copied WRF to {member_dir}")
+
+
+@app.command()
+def cycle_info(experiment_path: Path):
+    """Prints cycle information"""
+
+    logger.setup("experiment-cycle-info", experiment_path)
+    cfg = config.read_config(experiment_path / "config.toml")
+
+    cycles = cycling.get_cycle_information(cfg)
+
+    table = Table(
+        "i",
+        "Start",
+        "End",
+        Column(header="Duration", justify="right"),
+        title="Cycle information",
+    )
+
+    for c in cycles:
+        table.add_row(
+            str(c.index),
+            c.start.strftime("%Y-%m-%d %H:%M"),
+            c.end.strftime("%Y-%m-%d %H:%M"),
+            utils.seconds_to_pretty_hours((c.end - c.start).total_seconds()),
+        )
+
+    Console().print(table)
