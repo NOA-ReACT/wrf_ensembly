@@ -386,10 +386,9 @@ def analysis(experiment_path: Path):
         analysis_file = analysis_dir / f"member_{member:02d}" / wrfout_name
         utils.copy(forecast_file, analysis_file)
 
-        member_dir = cfg.get_member_dir(member)
-        dart_file = dart_out_dir / f"dart_analysis_member_{member}.nc"
+        dart_file = dart_out_dir / f"dart_analysis_member_{member:02d}.nc"
         if not dart_file.exists():
-            logger.error(f"Member {member}: {analysis_file} does not exist")
+            logger.error(f"Member {member}: {dart_file} does not exist")
             return 1
 
         # Copy the state variables from the dart file to the analysis file
