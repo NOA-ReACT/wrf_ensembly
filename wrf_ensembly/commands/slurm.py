@@ -105,7 +105,7 @@ def run_experiment(
         jf = jobfiles.generate_advance_jobfiles(experiment_path, cfg, cycle.index)
 
         if last_cycle_dependency is not None:
-            dependency = f"--dependency=afterany:{last_cycle_dependency}"
+            dependency = f"--dependency=afterok:{last_cycle_dependency}"
         else:
             dependency = None
 
@@ -129,7 +129,7 @@ def run_experiment(
 
         # Generate the analysis jobfile, queue it and keep jobid
         jf = jobfiles.generate_make_analysis_jobfile(experiment_path, cfg, cycle.index)
-        dependency = "--dependency=afterany:" + ":".join(map(str, ids))
+        dependency = "--dependency=afterok:" + ":".join(map(str, ids))
         res = utils.call_external_process(
             [*slurm_command.split(" "), dependency, str(jf.resolve())]
         )
