@@ -138,6 +138,23 @@ class PertubationVariableConfig(BaseModel):
     """Number of rounds of smoothing to apply to the pertubation field"""
 
 
+class SlurmConfig(BaseModel):
+    sbatch_command: str = "sbatch --parsable"
+    """Command for sbatch (should probably include `--parsable`)"""
+
+    python_command: str = "python3"
+    """Command to run python in the environment that has wrf-ensembles installed"""
+
+    env_modules: list[str] = []
+    """List of environment modules to load in each job"""
+
+    directives_large: dict[str, str] = {}
+    """SLURM directives to add to the jobfile for big jobs (i.e., ensemble member advance)"""
+
+    directives_small: dict[str, str] = {}
+    """SLURM directives to add to small jobs (i.e., wrf-ensembly python steps)"""
+
+
 class Config(BaseModel):
     experiment_path: Path | None
     """Experiment path, assumed to be the parent of the config file location"""
@@ -166,11 +183,8 @@ class Config(BaseModel):
     pertubations: dict[str, PertubationVariableConfig] = {}
     """Configuration related to pertubation of the initial conditions."""
 
-    slurm: dict[str, Any] = {}
-    """
-    Arguments passed to slurm jobfiles. A special variable "env_modules" can be used
-    for loading environment modules at the start of the job.
-    """
+    slurm: SlurmConfig
+    """Configuration related to SLURM jobfiles."""
 
     wrf_namelist: dict[str, dict[str, Any]]
     """Overrides for the WRF namelist"""

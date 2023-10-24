@@ -17,7 +17,6 @@ from wrf_ensembly import (
     utils,
     pertubations,
     member_info,
-    templates,
     update_bc,
 )
 
@@ -249,47 +248,6 @@ def advance_member(
         )
     )
     member_info.write_member_info(experiment_path, minfo)
-
-
-@app.command()
-def advance_members_slurm(
-    experiment_path: Path,
-):
-    """
-    Creates a SLURM jobfile to advance each member 1 cycle
-    """
-
-    logger.setup(f"ensemble-advance-members-slurm", experiment_path)
-    experiment_path = experiment_path.resolve()
-    cfg = config.read_config(experiment_path / "config.toml")
-
-    jobfile_directory = experiment_path / "jobfiles"
-    jobfile_directory.mkdir(parents=True, exist_ok=True)
-
-    minfos = member_info.read_all_member_info(experiment_path)
-    member_info.ensure_same_cycle(minfos)
-
-    slurm_args = cfg.slurm
-    env_modules = []
-    if "env_modules" in slurm_args:
-        env_modules = slurm_args["env_modules"]
-        del slurm_args["env_modules"]
-    for i in range(cfg.assimilation.n_members):
-        jobfile = jobfile_directory / f"advance_member_{i}.job.sh"
-
-        # TODO Conda environment is hard-coded here
-        jobfile.write_text(
-            templates.generate(
-                "slurm_job.sh.j2",
-                slurm_args=slurm_args
-                | {"job-name": f"{cfg.metadata.name}_wrf_member_{i}"},
-                env_modules=env_modules,
-                commands=[
-                    f"conda run -n wrf python -m wrf_ensembly ensemble advance-member {experiment_path.resolve()} {i}"
-                ],
-            )
-        )
-        logger.info(f"Wrote jobfile for member {i} to {jobfile}")
 
 
 @app.command()

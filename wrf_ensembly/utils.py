@@ -43,7 +43,9 @@ class ExternalProcessResult:
     """Standard error of the process"""
 
 
-def call_external_process(command: list[str], cwd: Path, log_filename: str = None):
+def call_external_process(
+    command: list[str], cwd: Path = Path.cwd(), log_filename: str = None
+) -> ExternalProcessResult:
     """
     Calls an external process and handles failures gracefully.
 
