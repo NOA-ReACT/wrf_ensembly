@@ -41,7 +41,7 @@ def setup(experiment_path: Path):
     logger.info(f"Configuring members for cycle 0: {str(first_cycle)}")
 
     history_interval = cfg.time_control.output_interval
-    if cycle.output_interval is not None:
+    if first_cycle.output_interval is not None:
         history_interval = cycle.output_interval
     wrf_namelist = {
         "time_control": {
