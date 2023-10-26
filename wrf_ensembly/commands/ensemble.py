@@ -278,9 +278,9 @@ def filter(experiment_path: Path):
     obs_file = experiment_path / "obs" / f"cycle_{current_cycle}.obs_seq"
     if not obs_file.exists():
         logger.warning(
-            f"No observations found for cycle {current_cycle} ({obs_file}), filter will probably fail"
+            f"No observations found for cycle {current_cycle} ({obs_file}), skipping filter!"
         )
-        # TODO Deal with this issue, maybe just skip the filter?
+        raise typer.Exit(0)
     else:
         utils.copy(obs_file, obs_seq)
         logger.info(f"Added observations!")
@@ -387,7 +387,7 @@ def analysis(experiment_path: Path):
 
 
 @app.command()
-def cycle(experiment_path: Path):
+def cycle(experiment_path: Path, use_forecast: bool = False):
     """
     Prepares the experiment for the next cycle by copying the cycled variables from the analysis
     to the initial conditions and preparing the namelist.
@@ -401,13 +401,30 @@ def cycle(experiment_path: Path):
 
     # Establish which cycle we are running and that all member have the analysis prepared
     minfos = member_info.read_all_member_info(experiment_path)
-    member_info.ensure_current_cycle_state(minfos, {"advanced": True, "analysis": True})
+    member_info.ensure_current_cycle_state(minfos, {"advanced": True})
+    try:
+        member_info.ensure_current_cycle_state(minfos, {"analysis": True})
+    except ValueError:
+        if not use_forecast:
+            logger.error("Not all members have completed the analysis step")
+            logger.error(
+                "Either run the analysis or use `--use-forecast` to cycle w/ the latest forecast"
+            )
+            raise typer.Exit(1)
+
+        if use_forecast:
+            logger.warning(
+                "Not all members have completed the analysis step, using forecasts for cycling"
+            )
 
     current_cycle = minfos[0].member.current_cycle
     cycle_info = cycling.get_cycle_information(cfg)[current_cycle]
     next_cycle = current_cycle + 1
 
-    analysis_dir = data_dir / "analysis" / f"cycle_{current_cycle}"
+    if use_forecast:
+        analysis_dir = data_dir / "forecasts" / f"cycle_{current_cycle}"
+    else:
+        analysis_dir = data_dir / "analysis" / f"cycle_{current_cycle}"
 
     # Prepare namelist contents, same for all members
     cycles = cycling.get_cycle_information(cfg)
@@ -489,6 +506,7 @@ def cycle(experiment_path: Path):
                 f"Member {member}: bc_update.exe failed with exit code {res.returncode}"
             )
             logger.error(res.stdout)
+            # TODO raise exception?
             continue
 
         # Write namelist
