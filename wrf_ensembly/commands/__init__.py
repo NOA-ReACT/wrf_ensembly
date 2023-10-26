@@ -1,1 +1,1 @@
-from wrf_ensembly.commands import experiment, preprocess, ensemble
+from wrf_ensembly.commands import experiment, preprocess, ensemble, observations

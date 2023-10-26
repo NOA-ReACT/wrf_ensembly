@@ -260,6 +260,8 @@ def filter(experiment_path: Path):
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
     data_dir = experiment_path / cfg.directories.output_sub
+    dart_dir = cfg.directories.dart_root / "models" / "wrf" / "work"
+    dart_dir = dart_dir.resolve()
 
     # Establish which cycle we are running and that all member priors are pre-processed
     minfos = member_info.read_all_member_info(experiment_path)
@@ -268,6 +270,20 @@ def filter(experiment_path: Path):
 
     current_cycle = minfos[0].member.current_cycle
     cycle_info = cycling.get_cycle_information(cfg)[current_cycle]
+
+    # Grab observations if they exist for this cycle
+    obs_seq = dart_dir / "obs_seq.out"
+    obs_seq.unlink(missing_ok=True)
+
+    obs_file = experiment_path / "obs" / f"cycle_{current_cycle}.obs_seq"
+    if not obs_file.exists():
+        logger.warning(
+            f"No observations found for cycle {current_cycle} ({obs_file}), filter will probably fail"
+        )
+        # TODO Deal with this issue, maybe just skip the filter?
+    else:
+        utils.copy(obs_file, obs_seq)
+        logger.info(f"Added observations!")
 
     # Write input/output file lists
     # For each member, we need the latest forecast only!
@@ -286,8 +302,6 @@ def filter(experiment_path: Path):
     ]
     (data_dir / "dart" / f"cycle_{current_cycle}").mkdir(parents=True, exist_ok=True)
 
-    dart_dir = cfg.directories.dart_root / "models" / "wrf" / "work"
-    dart_dir = dart_dir.resolve()
     dart_input_txt = dart_dir / "input_list.txt"
     dart_input_txt.write_text("\n".join([str(prior) for prior in priors]))
     logger.info(f"Wrote input_list.txt")
