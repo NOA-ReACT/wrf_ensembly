@@ -317,13 +317,6 @@ def filter(experiment_path: Path):
         logger.error(f"filter failed with exit code {res.returncode}")
         return 1
 
-    # Copy output to posterior directory
-    posterior_dir = data_dir / "posterior" / f"cycle_{current_cycle}"
-    posterior_dir.mkdir(parents=True, exist_ok=True)
-    for f in dart_dir.glob("dart_member_*.nc"):
-        utils.copy(f, posterior_dir / f.name)
-        logger.info(f"Copied {f} to {posterior_dir}")
-
     # Mark filter as completed
     for minfo in minfos.values():
         minfo.cycle[current_cycle].filter = True
