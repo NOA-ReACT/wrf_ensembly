@@ -44,18 +44,13 @@ def make_analysis(
     experiment_path: Annotated[
         Path, typer.Argument(..., help="Path to the experiment directory")
     ],
-    cycle: Annotated[
-        Optional[int],
-        typer.Argument(
-            ...,
-            help="Current cycle, will be added to the job name and filename",
-        ),
-    ],
+    cycle: Annotated[int, typer.Argument(..., help="Current cycle")],
 ):
     """
-    Creates a SLURM jobfile for the `filter`, `analysis` and `cycle` steps. This
-    jobfile is cycle-agnostic, thus can be reused. If the cycle parameter is given,
-    it is only added to the job name
+    Creates a SLURM jobfile for the `filter`, `analysis` and `cycle` steps. At runtime,
+    the job script will check whether there are observations available for the current
+    cycle and will only run `filter` and `analysis` if they are found. Otherwise, only
+    `cycle` will be run with the `--use-forecast` flag.
     """
 
     logger.setup(f"slurm-make-analysis", experiment_path)
@@ -81,6 +76,9 @@ def run_experiment(
     Creates jobfiles for all experiment steps and queues them in the correct order. This
     does not deal with the initial steps (setup, initial/boundary conditions, ...), only
     the member advancing, analysis and cycling.
+
+    If for some cycle there are not prepared observations (in the `obs` directory), the
+    generated job will skip the analysis step and go straight to cycling.
     """
 
     logger.setup(f"slurm-run-experiment", experiment_path)

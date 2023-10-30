@@ -42,9 +42,10 @@ def generate_make_analysis_jobfile(
     experiment_path: Path, cfg: config.Config, cycle: Optional[int] = None
 ):
     """
-    Generates a jobfile for the `filter`, `analysis` and `cycle` steps. This jobfile
-    is cycle-agnostic but if the `cycle` parameter is given, the job-name and filename
-    will have this extra information.
+    Generates a jobfile for the `filter`, `analysis` and `cycle` steps. At runtime, the
+    script will check whether observations exist for the current cycle. If they do, all
+    steps (filter, analysis, cycle) are run. If they don't, only the cycle step is run
+    with the `--use-forecast` flag.
 
     Returns:
         A Path object to the jobfile
@@ -53,12 +54,14 @@ def generate_make_analysis_jobfile(
     jobfile_directory = experiment_path / "jobfiles"
     jobfile_directory.mkdir(parents=True, exist_ok=True)
 
-    if cycle is None:
-        job_name = f"{cfg.metadata.name}_make_analysis"
-        jobfile = jobfile_directory / "make_analysis.job.sh"
-    else:
-        job_name = f"{cfg.metadata.name}_analysis_cycle_{cycle}"
-        jobfile = jobfile_directory / f"cycle_{cycle}_make_analysis.job.sh"
+    obs_file = experiment_path / "obs" / f"cycle_{cycle}.obs_seq"
+    if not obs_file.exists():
+        logger.warning(
+            f"Observation file {obs_file} does not exist! Filter won't run if it is not created for cycle {cycle}"
+        )
+
+    job_name = f"{cfg.metadata.name}_analysis_cycle_{cycle}"
+    jobfile = jobfile_directory / f"cycle_{cycle}_make_analysis.job.sh"
 
     base_cmd = f"{cfg.slurm.python_command} -m wrf_ensembly ensemble %SUBCOMMAND% {experiment_path.resolve()}"
 
@@ -68,9 +71,13 @@ def generate_make_analysis_jobfile(
             slurm_directives=cfg.slurm.directives_small | {"job-name": job_name},
             env_modules=cfg.slurm.env_modules,
             commands=[
+                f"if [ -f {obs_file} ]; then",
                 base_cmd.replace("%SUBCOMMAND%", "filter"),
                 base_cmd.replace("%SUBCOMMAND%", "analysis"),
                 base_cmd.replace("%SUBCOMMAND%", "cycle"),
+                "else",
+                base_cmd.replace("%SUBCOMMAND%", "cycle") + " --use-forecast",
+                "fi",
             ],
         )
     )
