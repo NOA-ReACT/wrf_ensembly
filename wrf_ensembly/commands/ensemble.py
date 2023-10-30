@@ -5,6 +5,7 @@ from typing_extensions import Annotated
 
 import typer
 import netCDF4
+import numpy as np
 
 app = typer.Typer()
 
@@ -115,11 +116,13 @@ def apply_pertubations(
     experiment_path = experiment_path.resolve()
     cfg = config.read_config(experiment_path / "config.toml")
 
-    ensemble_dir = experiment_path / cfg.directories.work_sub / "ensemble"
-
-    if len(cfg.pertubations) == 0:
+    if len(cfg.pertubations.variables) == 0:
         logger.info("No pertubations configured.")
         return 0
+
+    if cfg.pertubations.seed is not None:
+        logger.warning(f"Setting numpy random seed to {cfg.pertubations.seed}")
+        np.random.seed(cfg.pertubations.seed)
 
     for i in range(cfg.assimilation.n_members):
         member_dir = cfg.get_member_dir(i)
@@ -129,7 +132,7 @@ def apply_pertubations(
         # Modify wrfinput accoarding to pertubation configuration
         logger.info(f"Member {i}: Applying pertubations to {wrfinput_path}")
         with netCDF4.Dataset(wrfinput_path, "r+") as ds:
-            for variable, pertubation in cfg.pertubations.items():
+            for variable, pertubation in cfg.pertubations.variables.items():
                 logger.info(f"Member {i}: Perturbing {variable} by {pertubation}")
                 var = ds[variable]
                 field = pertubations.generate_pertubation_field(

@@ -138,6 +138,16 @@ class PertubationVariableConfig(BaseModel):
     """Number of rounds of smoothing to apply to the pertubation field"""
 
 
+class PertubationsConfig(BaseModel):
+    """Configuration about pertubation fields"""
+
+    variables: dict[str, PertubationVariableConfig] = {}
+    """Configuration for each variable"""
+
+    seed: Optional[int] = None
+    """RNG seed to use when generating pertubation fields. If none, it will be randomly generated."""
+
+
 class SlurmConfig(BaseModel):
     sbatch_command: str = "sbatch --parsable"
     """Command for sbatch (should probably include `--parsable`)"""
@@ -180,7 +190,7 @@ class Config(BaseModel):
     assimilation: AssimilationConfig
     """Configuration related to assimilation."""
 
-    pertubations: dict[str, PertubationVariableConfig] = {}
+    pertubations: PertubationsConfig
     """Configuration related to pertubation of the initial conditions."""
 
     slurm: SlurmConfig
