@@ -67,6 +67,10 @@ def prepare(experiment_path: Path, cycle: Optional[int] = None):
                 obs_group.convert_file(file, out)
                 cycle_files.append(out)
 
+        if len(cycle_files) == 0:
+            logger.warning("No observation files found for this cycle!")
+            continue
+
         # Join files for this group
         logger.info(f"Joining files for cycle {c.index}")
         kinds = [v.kind for v in obs_groups.values()]
