@@ -39,7 +39,10 @@ def generate_advance_jobfiles(experiment_path: Path, cfg: config.Config, cycle: 
 
 
 def generate_make_analysis_jobfile(
-    experiment_path: Path, cfg: config.Config, cycle: Optional[int] = None
+    experiment_path: Path,
+    cfg: config.Config,
+    cycle: Optional[int] = None,
+    queue_next_cycle: bool = False,
 ):
     """
     Generates a jobfile for the `filter`, `analysis` and `cycle` steps. At runtime, the
@@ -64,21 +67,27 @@ def generate_make_analysis_jobfile(
     jobfile = jobfile_directory / f"cycle_{cycle}_make_analysis.job.sh"
 
     base_cmd = f"{cfg.slurm.python_command} -m wrf_ensembly ensemble %SUBCOMMAND% {experiment_path.resolve()}"
+    commands = [
+        f"if [ -f {obs_file} ]; then",
+        base_cmd.replace("%SUBCOMMAND%", "filter"),
+        base_cmd.replace("%SUBCOMMAND%", "analysis"),
+        base_cmd.replace("%SUBCOMMAND%", "cycle"),
+        "else",
+        base_cmd.replace("%SUBCOMMAND%", "cycle") + " --use-forecast",
+        "fi",
+    ]
+
+    if queue_next_cycle:
+        commands.append(
+            f"{cfg.slurm.python_command} -m wrf_ensembly slurm run-experiment {experiment_path.resolve()} --only-next-cycle --resume --in-waves"
+        )
 
     jobfile.write_text(
         templates.generate(
             "slurm_job.sh.j2",
             slurm_directives=cfg.slurm.directives_small | {"job-name": job_name},
             env_modules=cfg.slurm.env_modules,
-            commands=[
-                f"if [ -f {obs_file} ]; then",
-                base_cmd.replace("%SUBCOMMAND%", "filter"),
-                base_cmd.replace("%SUBCOMMAND%", "analysis"),
-                base_cmd.replace("%SUBCOMMAND%", "cycle"),
-                "else",
-                base_cmd.replace("%SUBCOMMAND%", "cycle") + " --use-forecast",
-                "fi",
-            ],
+            commands=commands,
         )
     )
     logger.info(f"Wrote jobfile to {jobfile}")

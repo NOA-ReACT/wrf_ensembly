@@ -71,6 +71,10 @@ def run_experiment(
     only_next_cycle: Annotated[
         Optional[bool], typer.Option(..., help="Only run the next cycle")
     ] = False,
+    in_waves: Annotated[
+        Optional[bool],
+        typer.Option(..., help="Queue next cycle after the current cycle is done"),
+    ] = False,
 ):
     """
     Creates jobfiles for all experiment steps and queues them in the correct order. This
@@ -79,6 +83,10 @@ def run_experiment(
 
     If for some cycle there are not prepared observations (in the `obs` directory), the
     generated job will skip the analysis step and go straight to cycling.
+
+    If there is a job limit on your local HPC and you cannot queue the whole experiment,
+    use the `--in-waves` option that only queues the current cycle. At the last job, the
+    next cycle will be queued.
     """
 
     logger.setup(f"slurm-run-experiment", experiment_path)
@@ -94,7 +102,7 @@ def run_experiment(
         cycles = list(filter(lambda c: c.index >= current_cycle, cycles))
 
     # If we only want to run the next cycle, keep only the first element of the list
-    if only_next_cycle:
+    if only_next_cycle or in_waves:
         cycles = [cycles[0]]
 
     last_cycle_dependency = None
@@ -123,10 +131,12 @@ def run_experiment(
             id = int(res.stdout.strip())
             ids.append(id)
 
-            logger.info(f"Queued {jf} with ID {id}")
+            logger.info(f"Queued {f} with ID {id}")
 
         # Generate the analysis jobfile, queue it and keep jobid
-        jf = jobfiles.generate_make_analysis_jobfile(experiment_path, cfg, cycle.index)
+        jf = jobfiles.generate_make_analysis_jobfile(
+            experiment_path, cfg, cycle.index, in_waves
+        )
         dependency = "--dependency=afterok:" + ":".join(map(str, ids))
         res = utils.call_external_process(
             [*slurm_command.split(" "), dependency, str(jf.resolve())]
