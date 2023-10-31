@@ -75,6 +75,9 @@ class CycleConfig(BaseModel):
     duration: Optional[int]
     """Duration of the cycle in minutes"""
 
+    output_interval: Optional[int]
+    """Override the output interval for this cycle"""
+
 
 class TimeControlConfig(BaseModel):
     """Configuration related to the experiment time period."""
