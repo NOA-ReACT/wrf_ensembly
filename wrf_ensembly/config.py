@@ -129,6 +129,9 @@ class AssimilationConfig(BaseModel):
     state_variables: list[str]
     """Which variables to use in the state vector"""
 
+    filter_mpi_tasks: int = 1
+    """If != 1, then filter will be executed w/ MPI and this many tasks (mpirun -n <filter_mpi_tasks>). Also check `slurm.mpirun_command`."""
+
 
 class PertubationVariableConfig(BaseModel):
     mean: float = 1.0

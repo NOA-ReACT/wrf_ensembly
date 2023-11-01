@@ -314,7 +314,16 @@ def filter(experiment_path: Path):
     logger.info(f"Wrote output_list.txt")
 
     # Run filter
-    cmd = ["./filter"]
+    if cfg.assimilation.filter_mpi_tasks == 1:
+        cmd = ["./filter"]
+    else:
+        logger.info(f"Using MPI to run filter, n={cfg.assimilation.filter_mpi_tasks}")
+        cmd = [
+            cfg.slurm.mpirun_command,
+            "-n",
+            str(cfg.assimilation.filter_mpi_tasks),
+            "./filter",
+        ]
     res = utils.call_external_process(cmd, dart_dir, log_filename="filter.log")
     if not res.success or "Finished ... at" not in res.stdout:
         logger.error(f"filter failed with exit code {res.returncode}")
