@@ -167,7 +167,7 @@ def apply_pertubations(
             logger.error(
                 f"Member {i}: bc_update.exe failed with exit code {res.returncode}"
             )
-            return 1
+            raise typer.Exit(1)
         logger.info(f"Member {i}: bc_update.exe finished successfully")
 
     logger.info("Finished applying pertubations")
@@ -221,12 +221,12 @@ def advance_member(
     rsl_file = member_dir / "rsl.out.0000"
     if not rsl_file.exists():
         logger.error(f"Member {member}: rsl.out.0000 does not exist")
-        return 1
+        return typer.Exit(1)
     rsl_content = rsl_file.read_text()
 
     if "SUCCESS COMPLETE WRF" not in rsl_content:
         logger.error(f"Member {member}: wrf.exe failed with exit code {res.returncode}")
-        return 1
+        return typer.Exit(1)
 
     # Copy wrfout to the forecasts directory
     data_dir = experiment_path / cfg.directories.output_sub
@@ -318,7 +318,7 @@ def filter(experiment_path: Path):
     res = utils.call_external_process(cmd, dart_dir, log_filename="filter.log")
     if not res.success or "Finished ... at" not in res.stdout:
         logger.error(f"filter failed with exit code {res.returncode}")
-        return 1
+        raise typer.Exit(1)
 
     # Mark filter as completed
     for minfo in minfos.values():
@@ -360,7 +360,7 @@ def analysis(experiment_path: Path):
         dart_file = dart_out_dir / f"dart_analysis_member_{member:02d}.nc"
         if not dart_file.exists():
             logger.error(f"Member {member}: {dart_file} does not exist")
-            return 1
+            return typer.Exit(1)
 
         # Copy the state variables from the dart file to the analysis file
         logger.info(f"Member {member}: Copying state variables from {dart_file}")
