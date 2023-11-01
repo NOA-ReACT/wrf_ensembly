@@ -206,7 +206,7 @@ def advance_member(
     logger.info(f"Advancing member {member} to cycle {minfo.member.current_cycle + 1}")
 
     wrf_exe_path = (member_dir / "wrf.exe").resolve()
-    cmd = ["mpirun", wrf_exe_path]  # TODO make slurm configurable here
+    cmd = [cfg.slurm.mpirun_command, wrf_exe_path]
 
     start_time = datetime.datetime.now()
     if skip_wrf:

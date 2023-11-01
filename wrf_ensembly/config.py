@@ -158,6 +158,9 @@ class SlurmConfig(BaseModel):
     python_command: str = "python3"
     """Command to run python in the environment that has wrf-ensembles installed"""
 
+    mpirun_command: str = "mpirun"
+    """Command to run an MPI binary (might be srun in some clusters)"""
+
     env_modules: list[str] = []
     """List of environment modules to load in each job"""
 
