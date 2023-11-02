@@ -19,6 +19,7 @@ from wrf_ensembly import (
     pertubations,
     member_info,
     update_bc,
+    nco,
 )
 
 
@@ -395,7 +396,110 @@ def analysis(experiment_path: Path):
         minfos[member].cycle[current_cycle].analysis = True
         member_info.write_member_info(experiment_path, minfos[member])
 
-    # TODO Create mean and standard deviation analysis files
+
+@app.command()
+def statistics(
+    experiment_path: Path,
+    cycle: Annotated[
+        Optional[int],
+        typer.Argument(
+            ..., help="Cycle to compute statistics for. Current cycle if not set"
+        ),
+    ] = None,
+    remove_member_forecasts: Annotated[
+        Optional[bool],
+        typer.Option(
+            ...,
+            help="Remove the individual member forecast files after computing the statistics",
+        ),
+    ] = False,
+    remove_member_analysis: Annotated[
+        Optional[bool],
+        typer.Option(
+            ...,
+            help="Remove the individual member analysis files after computing the statistics",
+        ),
+    ] = False,
+):
+    """
+    Calculates the mean and standard deviation of the analysis files
+    """
+
+    logger.setup("statistics", experiment_path)
+    experiment_path = experiment_path.resolve()
+    cfg = config.read_config(experiment_path / "config.toml")
+
+    data_dir = experiment_path / cfg.directories.output_sub
+
+    if cycle is None:
+        minfos = member_info.read_all_member_info(experiment_path)
+        cycle = minfos[0].member.current_cycle
+        member_info.ensure_current_cycle_state(minfos, {"analysis": True})
+
+    cycle = cycling.get_cycle_information(cfg)[cycle]
+
+    # Compute analysis statistics
+    logger.info(f"Computing analysis statistics for {cycle}")
+    analysis_dir = data_dir / "analysis" / f"cycle_{cycle.index}"
+    analysis_files = list(analysis_dir.rglob("member_*/wrfout*"))
+    if len(analysis_files) != 0:
+        analysis_mean_file = (
+            data_dir
+            / "analysis"
+            / f"cycle_{cycle.index}"
+            / f"{analysis_files[0].name}_mean"
+        )
+        analysis_mean_file.unlink(missing_ok=True)
+        nco.average(analysis_files, analysis_mean_file)
+
+        analysis_sd_file = (
+            data_dir
+            / "analysis"
+            / f"cycle_{cycle.index}"
+            / f"{analysis_files[0].name}_sd"
+        )
+        analysis_sd_file.unlink(missing_ok=True)
+        nco.standard_deviation(analysis_files, analysis_sd_file)
+    else:
+        logger.warning(f"No analysis files found for {cycle}!")
+
+    # Compute forecast statistics
+    logger.info(f"Computing forecast statistics for {cycle}")
+    forecast_dir = data_dir / "forecasts" / f"cycle_{cycle.index}"
+    forecast_filenames = [x.name for x in forecast_dir.rglob("member_00/wrfout*")]
+    for name in forecast_filenames:
+        logger.info(f"Computing statistics for {name}")
+
+        forecast_files = list(forecast_dir.rglob(f"member_*/{name}"))
+        if len(forecast_files) == 0:
+            logger.warning(f"No forecast files found for {name}!")
+            continue
+
+        forecast_mean_file = (
+            data_dir / "forecasts" / f"cycle_{cycle.index}" / f"{name}_mean"
+        )
+        forecast_mean_file.unlink(missing_ok=True)
+        nco.average(forecast_files, forecast_mean_file)
+
+        forecast_sd_file = (
+            data_dir / "forecasts" / f"cycle_{cycle.index}" / f"{name}_sd"
+        )
+        forecast_sd_file.unlink(missing_ok=True)
+        nco.standard_deviation(forecast_files, forecast_sd_file)
+
+    # Remove files if required
+    if remove_member_forecasts:
+        logger.info(f"Removing member forecasts for cycle {cycle}")
+        for f in forecast_dir.rglob("member_*/wrfout*"):
+            f.unlink()
+        for d in forecast_dir.glob("member_*"):
+            d.rmdir()
+    if remove_member_analysis:
+        logger.info(f"Removing member analysis for cycle {cycle}")
+        for f in analysis_dir.rglob("member_*/wrfout*"):
+            f.unlink()
+        for d in analysis_dir.glob("member_*"):
+            d.rmdir()
 
 
 @app.command()
