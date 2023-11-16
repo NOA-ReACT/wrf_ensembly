@@ -114,6 +114,15 @@ def run_experiment(
     if only_next_cycle or in_waves:
         cycles = [cycles[0]]
 
+    # Check if the current cycle is the last one
+    if cycles[-1].index == len(cycles) - 1:
+        try:
+            exp.ensure_current_cycle_state({"advanced": True})
+            logger.error("Last cycle already advanced, experiment finished")
+            raise typer.Exit(1)
+        except ValueError:
+            pass
+
     last_cycle_dependency = None
     for cycle in cycles:
         # Generate all member jobfiles, queue them and keep jobids
