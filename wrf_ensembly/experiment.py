@@ -182,7 +182,7 @@ class Experiment:
         Ensures that all members have the same current cycle. Raises a ValueError otherwise.
         """
         for m in self.members:
-            if m.current_cycle != self.members[0].current_cycle:
+            if m.current_cycle_i != self.members[0].current_cycle_i:
                 raise ValueError(
                     f"Member {m.i} has cycle {m.current_cycle} but member 0 has cycle {self.members[0].current_cycle}"
                 )
