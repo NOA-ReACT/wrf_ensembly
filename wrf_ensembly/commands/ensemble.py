@@ -396,7 +396,6 @@ def statistics(
     exp.ensure_same_cycle()
 
     if cycle is None:
-        exp.ensure_current_cycle_state({"analysis": True})
         cycle = exp.members[0].current_cycle_i
 
     logger.info(f"Cycle: {exp.cycles[cycle]}")
