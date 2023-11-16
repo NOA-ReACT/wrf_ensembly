@@ -1,14 +1,14 @@
-from pathlib import Path
 import shutil
-from typing_extensions import Annotated
+from pathlib import Path
 from typing import Optional
 
 import typer
 from rich.console import Console
-from rich.table import Table, Column
+from rich.table import Column, Table
+from typing_extensions import Annotated
 
+from wrf_ensembly import config, cycling, experiment, utils
 from wrf_ensembly.console import logger
-from wrf_ensembly import config, utils, cycling
 
 app = typer.Typer()
 
@@ -41,6 +41,7 @@ def create(
     else:
         # TODO Fix this, doesn't work like that
         # We gotta create a default config file
+        raise NotImplementedError("Default config file not implemented yet")
         cfg = config.Config()
         config_path = experiment_path / "config.toml"
         config.write_config(config_path, cfg)
@@ -71,23 +72,22 @@ def copy_model(experiment_path: Path):
     """Setup the experiment (i.e., copy WRF/WPS, generate namelists, ...)"""
 
     logger.setup("experiment-copy-model", experiment_path)
-    cfg = config.read_config(experiment_path / "config.toml")
-    work_dir = experiment_path / cfg.directories.work_sub
+    exp = experiment.Experiment(experiment_path)
 
     # Copy WRF/WPS in the work directory
     shutil.copytree(
-        cfg.directories.wrf_root / "run",
-        work_dir / "WRF",
+        exp.cfg.directories.wrf_root / "run",
+        exp.paths.work_wrf,
         symlinks=False,  # Maybe fix symlinks so that they are valid after getting copied?
     )
-    logger.info(f"Copied WRF to {work_dir / 'WRF'}")
+    logger.info(f"Copied WRF to {exp.paths.work_wrf}")
 
-    shutil.copytree(cfg.directories.wps_root, work_dir / "WPS", symlinks=True)
-    logger.info(f"Copied WPS to {work_dir / 'WPS'}")
+    shutil.copytree(exp.cfg.directories.wps_root, exp.paths.work_wps, symlinks=True)
+    logger.info(f"Copied WPS to {exp.paths.work_wps}")
 
-    for j in range(cfg.assimilation.n_members):
-        member_dir = cfg.get_member_dir(j)
-        shutil.copytree(work_dir / "WRF", member_dir, dirs_exist_ok=True)
+    for j in range(exp.cfg.assimilation.n_members):
+        member_dir = exp.paths.member_path(j)
+        shutil.copytree(exp.paths.work_wrf, member_dir, dirs_exist_ok=True)
         logger.info(f"Copied WRF to {member_dir}")
 
 

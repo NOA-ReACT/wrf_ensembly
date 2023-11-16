@@ -1,13 +1,12 @@
-from pathlib import Path
 import shutil
 from itertools import chain
+from pathlib import Path
 from typing import Optional
-from typing_extensions import Annotated
 
 import typer
-
+from typing_extensions import Annotated
+from wrf_ensembly import config, experiment, namelist, utils, wrf
 from wrf_ensembly.console import logger
-from wrf_ensembly import config, cycling, namelist, wrf, utils, templates
 
 app = typer.Typer()
 
@@ -17,7 +16,8 @@ def wps_namelist(experiment_path: Path):
     """Generates the WPS namelist for the whole experiment period."""
 
     logger.setup("preprocess-wps-namelist", experiment_path)
-    cfg = config.read_config(experiment_path / "config.toml")
+    exp = experiment.Experiment(experiment_path)
+    cfg = exp.cfg
 
     wps_namelist = {
         "share": {
@@ -55,7 +55,7 @@ def wps_namelist(experiment_path: Path):
         },
     }
 
-    preprocess_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
+    preprocess_dir = exp.paths.work_preprocessing
     namelist_path = preprocess_dir / "namelist.wps"
     namelist.write_namelist(wps_namelist, namelist_path)
 
@@ -72,6 +72,7 @@ def wrf_namelist(
     """
 
     logger.setup("preprocess-wrf-namelist", experiment_path)
+    exp = experiment.Experiment(experiment_path)
     cfg = config.read_config(experiment_path / "config.toml")
 
     if cycle is None:
@@ -80,8 +81,7 @@ def wrf_namelist(
 
         logger.info("Generating WRF namelist for whole experiment")
     else:
-        cycles = cycling.get_cycle_information(cfg)
-        cur_cycle = cycles[cycle]
+        cur_cycle = exp.cycles[cycle]
         start = cur_cycle.start
         end = cur_cycle.end
 
@@ -113,7 +113,7 @@ def wrf_namelist(
         else:
             wrf_namelist[name] = group
 
-    preprocess_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
+    preprocess_dir = exp.paths.work_preprocessing
     namelist_path = preprocess_dir / "namelist.input"
     namelist.write_namelist(wrf_namelist, namelist_path)
 
@@ -128,19 +128,12 @@ def setup(experiment_path: Path):
     """
 
     logger.setup("preprocess-setup", experiment_path)
-    cfg = config.read_config(experiment_path / "config.toml")
-    preprocess_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
+    exp = experiment.Experiment(experiment_path)
 
-    shutil.copytree(
-        experiment_path / cfg.directories.work_sub / "WRF",
-        preprocess_dir / "WRF",
-    )
-    logger.info(f"Copied WRF to {preprocess_dir / 'WRF'}")
-    shutil.copytree(
-        experiment_path / cfg.directories.work_sub / "WPS",
-        preprocess_dir / "WPS",
-    )
-    logger.info(f"Copied WPS to {preprocess_dir / 'WPS'}")
+    shutil.copytree(exp.paths.work_wrf, exp.paths.work_preprocessing_wrf)
+    logger.info(f"Copied WRF to {exp.paths.work_preprocessing_wrf}")
+    shutil.copytree(exp.paths.work_wps, exp.paths.work_preprocessing_wps)
+    logger.info(f"Copied WPS to {exp.paths.work_preprocessing_wps}")
 
     wps_namelist(experiment_path)
     wrf_namelist(experiment_path)
@@ -155,18 +148,14 @@ def geogrid(experiment_path: Path):
     """
 
     logger.setup("preprocess-geogrid", experiment_path)
-    cfg = config.read_config(experiment_path / "config.toml")
-    preprocessing_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
-    wps_dir = preprocessing_dir / "WPS"
+    exp = experiment.Experiment(experiment_path)
+    wps_dir = exp.paths.work_preprocessing_wps
 
     if (wps_dir / "geo_em.d01.nc").exists():
         logger.warning("geo_em.d01.nc already exists, skipping geogrid.exe")
         return 0
 
-    utils.copy(
-        preprocessing_dir / "namelist.wps",
-        wps_dir / "namelist.wps",
-    )
+    utils.copy(exp.paths.work_preprocessing / "namelist.wps", wps_dir / "namelist.wps")
 
     geogrid_path = wps_dir / "geogrid.exe"
     if not geogrid_path.is_file():
@@ -191,10 +180,9 @@ def ungrib(experiment_path: Path):
     """
 
     logger.setup("preprocess-ungrib", experiment_path)
-    cfg = config.read_config(experiment_path / "config.toml")
-    preprocessing_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
-    wps_dir = preprocessing_dir / "WPS"
-    data_dir = cfg.data.meteorology.resolve()
+    exp = experiment.Experiment(experiment_path)
+    wps_dir = exp.paths.work_preprocessing_wps
+    data_dir = exp.cfg.data.meteorology.resolve()
 
     for f in chain(
         wps_dir.glob("FILE:*"), wps_dir.glob("PFILE:*"), wps_dir.glob("GRIBFILE.*")
@@ -203,17 +191,14 @@ def ungrib(experiment_path: Path):
         f.unlink()
 
     # Add namelist
-    utils.copy(
-        preprocessing_dir / "namelist.wps",
-        wps_dir / "namelist.wps",
-    )
+    utils.copy(exp.paths.work_preprocessing / "namelist.wps", wps_dir / "namelist.wps")
 
     # Link Vtable
-    if cfg.data.meteorology_vtable.is_absolute():
-        vtable_path = cfg.data.meteorology_vtable
+    if exp.cfg.data.meteorology_vtable.is_absolute():
+        vtable_path = exp.cfg.data.meteorology_vtable
     else:
         vtable_path = (
-            wps_dir / "ungrib" / "Variable_Tables" / cfg.data.meteorology_vtable
+            wps_dir / "ungrib" / "Variable_Tables" / exp.cfg.data.meteorology_vtable
         ).resolve()
     if not vtable_path.is_file() or vtable_path.is_symlink():
         logger.error(f"Vtable {vtable_path} does not exist")
@@ -224,7 +209,7 @@ def ungrib(experiment_path: Path):
 
     # Make symlinks for grib files
     i = 0
-    for i, grib_file in enumerate(data_dir.glob(cfg.data.meteorology_glob)):
+    for i, grib_file in enumerate(data_dir.glob(exp.cfg.data.meteorology_glob)):
         link_path = wps_dir / f"GRIBFILE.{utils.int_to_letter_numeral(i + 1)}"
         link_path.symlink_to(grib_file)
         logger.debug(f"Created symlink for {grib_file} at {link_path}")
@@ -258,9 +243,8 @@ def metgrid(
     """
 
     logger.setup("preprocess-metgrid", experiment_path)
-    cfg = config.read_config(experiment_path / "config.toml")
-    preprocessing_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
-    wps_dir = preprocessing_dir / "WPS"
+    exp = experiment.Experiment(experiment_path)
+    wps_dir = exp.paths.work_preprocessing_wps
 
     if len(list(wps_dir.glob("met_em*.nc"))) > 0:
         if not force:
@@ -272,13 +256,13 @@ def metgrid(
                 f.unlink()
 
     utils.copy(
-        preprocessing_dir / "namelist.wps",
+        exp.paths.work_preprocessing / "namelist.wps",
         wps_dir / "namelist.wps",
     )
 
     metgrid_path = wps_dir / "metgrid.exe"
     if not metgrid_path.is_file():
-        logger.error("Could not find metgrid.exe at {metgrid_path}")
+        logger.error(f"Could not find metgrid.exe at {metgrid_path}")
         return typer.Exit(1)
 
     res = utils.call_external_process([metgrid_path], wps_dir)
@@ -302,10 +286,9 @@ def real(experiment_path: Path, cycle: int):
 
     logger.setup(f"preprocess-real-cycle_{cycle}", experiment_path)
 
-    cfg = config.read_config(experiment_path / "config.toml")
-    preprocessing_dir = experiment_path / cfg.directories.work_sub / "preprocessing"
-    wps_dir = preprocessing_dir / "WPS"
-    wrf_dir = preprocessing_dir / "WRF"
+    exp = experiment.Experiment(experiment_path)
+    wps_dir = exp.paths.work_preprocessing_wps
+    wrf_dir = exp.paths.work_preprocessing_wrf
 
     # Clean WRF dir from old met_em files
     for p in wrf_dir.glob("met_em*nc"):
@@ -328,7 +311,7 @@ def real(experiment_path: Path, cycle: int):
     # Generate namelist
     wrf_namelist(experiment_path, cycle)
     utils.copy(
-        preprocessing_dir / "namelist.input",
+        exp.paths.work_preprocessing / "namelist.input",
         wrf_dir / "namelist.input",
     )
 
@@ -339,7 +322,7 @@ def real(experiment_path: Path, cycle: int):
         return typer.Exit(1)
 
     cmd = [
-        cfg.slurm.mpirun_command,
+        exp.cfg.slurm.mpirun_command,
         "-n",
         "1",
         str(real_path.resolve()),
@@ -360,7 +343,7 @@ def real(experiment_path: Path, cycle: int):
 
     logger.info("real finished successfully")
 
-    data_dir = experiment_path / cfg.directories.output_sub / "initial_boundary"
+    data_dir = exp.paths.data_icbc
     data_dir.mkdir(parents=True, exist_ok=True)
     shutil.move(
         wrf_dir / "wrfinput_d01",
@@ -376,46 +359,3 @@ def real(experiment_path: Path, cycle: int):
     shutil.copyfile(
         wrf_dir / "namelist.input", data_dir / f"namelist.input_cycle_{cycle}"
     )
-
-
-@app.command()
-def jobfile(experiment_path: Path):
-    """Creates a jobfile for running all preprocessing steps. Useful if you want to run WPS and real on your processing nodes."""
-
-    logger.setup(f"preprocess-jobfile", experiment_path)
-    experiment_path = experiment_path.resolve()
-    cfg = config.read_config(experiment_path / "config.toml")
-
-    experiment_name = cfg.metadata.name
-    cycles = cycling.get_cycle_information(cfg)
-
-    # Write jobfile
-    slurm_args = cfg.slurm
-    env_modules = []
-    if "env_modules" in slurm_args:
-        env_modules = slurm_args["env_modules"]
-        del slurm_args["env_modules"]
-    slurm_args |= {"job-name": f"{experiment_name}__preprocess"}
-
-    commands = [
-        f"conda run -n wrf python -m wrf_ensembly preprocess setup {experiment_path}",
-        f"conda run -n wrf python -m wrf_ensembly preprocess geogrid {experiment_path}",
-        f"conda run -n wrf python -m wrf_ensembly preprocess ungrib {experiment_path}",
-        f"conda run -n wrf python -m wrf_ensembly preprocess metgrid {experiment_path}",
-    ] + [
-        f"conda run -n wrf python -m wrf_ensembly preprocess real {experiment_path} {cycle}"
-        for cycle in range(len(cycles))
-    ]
-
-    jobfile = experiment_path / "jobfiles" / "preprocess.sh"
-    jobfile.parent.mkdir(parents=True, exist_ok=True)
-
-    jobfile.write_text(
-        templates.generate(
-            "slurm_job.sh.j2",
-            slurm_args=slurm_args,
-            env_modules=env_modules,
-            commands=commands,
-        )
-    )
-    logger.info(f"Wrote jobfile to {jobfile}")

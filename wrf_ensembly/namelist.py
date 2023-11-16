@@ -1,11 +1,12 @@
+from pathlib import Path
 import re
 
 from typing import Union
 
 
 def convert_to_dtype(
-    x: Union[list[str], str],
-) -> Union[str, bool, int, float, list[Union[str, bool, int, float]]]:
+    x: list[str] | str,
+) -> list[int | float | str | bool | list] | int | float | str | bool:
     """
     Convert a namelist value to the appropriate data type.
     Can handle integers and floats, and lists of either.
@@ -57,7 +58,7 @@ def parse(buf: str) -> dict[str, Union[str, dict, list, str, int, float]]:
     return groups
 
 
-def read(path: str):
+def read(path: str | Path):
     """
     Read a namelist from a file.
 
@@ -84,7 +85,7 @@ def convert_to_string(
     return f"'{x}'"
 
 
-def write_namelist(namelist: dict, path: str):
+def write_namelist(namelist: dict, path: str | Path):
     """
     Write a namelist to a file.
 

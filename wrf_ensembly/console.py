@@ -1,7 +1,8 @@
 import logging
+import shutil
 from datetime import datetime
 from pathlib import Path
-import shutil
+from typing import Optional
 
 from rich.console import Console
 from rich.logging import RichHandler
@@ -10,8 +11,8 @@ console = Console()
 
 
 class Logger:
-    experiment_path: Path = None
-    command_name: str = None
+    experiment_path: Path
+    command_name: str
     logger: logging.Logger
     log_dir: Path | None = None
     logger = logging.getLogger("rich")
@@ -54,7 +55,7 @@ class Logger:
         log_path = self.log_dir / filename
         log_path.write_text(contents)
 
-    def add_log_file(self, source: Path, filename: str = None):
+    def add_log_file(self, source: Path, filename: Optional[str] = None):
         if self.log_dir is None:
             self.logger.warning(
                 f"add_log_file(): No log directory set, cannot write log file {source}"

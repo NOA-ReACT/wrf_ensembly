@@ -1,8 +1,9 @@
-from dataclasses import dataclass
-import logging
 import shutil
-from pathlib import Path
 import subprocess
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 
 from wrf_ensembly.console import logger
 
@@ -44,7 +45,9 @@ class ExternalProcessResult:
 
 
 def call_external_process(
-    command: list[str], cwd: Path = Path.cwd(), log_filename: str = None
+    command: Sequence[str | Path],
+    cwd: Path = Path.cwd(),
+    log_filename: Optional[str] = None,
 ) -> ExternalProcessResult:
     """
     Calls an external process and handles failures gracefully.
@@ -62,7 +65,7 @@ def call_external_process(
     logger.debug(f"Calling external process: {command_str}")
 
     if isinstance(command[0], Path):
-        command[0] = str(command[0].resolve())
+        command = [str(command[0].resolve()), *command[1:]]
 
     proc = subprocess.run(
         command,
@@ -140,7 +143,7 @@ def filter_none_from_dict(dict: dict) -> dict:
     return {k: v for k, v in dict.items() if v is not None}
 
 
-def seconds_to_pretty_hours(seconds: int) -> str:
+def seconds_to_pretty_hours(seconds: int | float) -> str:
     """
     Converts seconds to hours minutes in the `HHh MMm` format
     """

@@ -1,16 +1,11 @@
-from pathlib import Path
 import datetime as dt
+from pathlib import Path
 from typing import Optional
 
 import typer
 
+from wrf_ensembly import config, cycling, experiment, observations
 from wrf_ensembly.console import logger
-from wrf_ensembly import (
-    config,
-    cycling,
-    observations,
-)
-
 
 app = typer.Typer()
 
@@ -20,16 +15,15 @@ def prepare(experiment_path: Path, cycle: Optional[int] = None):
     """Converts observation files to DART obs_seq format"""
 
     logger.setup("observations-prepare", experiment_path)
-    experiment_path = experiment_path.resolve()
-    cfg = config.read_config(experiment_path / "config.toml")
+    exp = experiment.Experiment(experiment_path)
 
     # If a cycle is not given, we will convert for all cycles
-    cycles = cycling.get_cycle_information(cfg)
+    cycles = exp.cycles
     if cycle is not None:
         cycles = [c for c in cycles if c.index == cycle]
 
     # Prepare observation groups for all toml file
-    obs_path = experiment_path / "obs"
+    obs_path = exp.paths.obs
     obs_groups = observations.read_observations(obs_path)
     names = list(obs_groups.keys())
 
@@ -75,7 +69,7 @@ def prepare(experiment_path: Path, cycle: Optional[int] = None):
         logger.info(f"Joining files for cycle {c.index}")
         kinds = [v.kind for v in obs_groups.values()]
         observations.join_obs_seq(
-            cfg, cycle_files, obs_path / f"cycle_{c.index}.obs_seq", kinds
+            exp.cfg, cycle_files, obs_path / f"cycle_{c.index}.obs_seq", kinds
         )
 
         # Remove temporary files

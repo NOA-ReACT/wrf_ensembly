@@ -1,12 +1,12 @@
-from pathlib import Path
-from datetime import datetime
-from typing import Any, Dict, Optional
 import os
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
 
+import rich
 import tomli
 import tomli_w
 from pydantic import BaseModel
-import rich
 
 from wrf_ensembly.console import console
 
@@ -97,7 +97,7 @@ class TimeControlConfig(BaseModel):
     analysis_interval: int = 60 * 6
     """Time between analysis/assimilation cycles, minutes"""
 
-    cycles: Optional[Dict[int, CycleConfig]] = {}
+    cycles: Dict[int, CycleConfig] = {}
     """Configuration overrides for specific cycles"""
 
 
@@ -218,6 +218,9 @@ class Config(BaseModel):
         Returns:
             Path to the work directory for that member
         """
+
+        if self.experiment_path is None:
+            raise ValueError("Experiment path not set")
 
         return (
             self.experiment_path

@@ -4,6 +4,7 @@ to match the initial conditions, that might be modified.
 """
 
 from pathlib import Path
+from typing import Optional
 
 from wrf_ensembly.config import Config
 from wrf_ensembly.utils import call_external_process
@@ -13,7 +14,7 @@ def update_wrf_bc(
     cfg: Config,
     wrfinput: Path,
     wrfbdy: Path,
-    log_filename: str = None,
+    log_filename: Optional[str] = None,
 ):
     """
     Updates the given `wrfbdy` file to match the `wrfinput` file, using `update_wrf_bc`.

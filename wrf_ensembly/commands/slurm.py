@@ -1,13 +1,25 @@
 from pathlib import Path
-from typing_extensions import Annotated
 from typing import Optional
 
 import typer
-
+from typing_extensions import Annotated
+from wrf_ensembly import config, cycling, experiment, jobfiles, member_info, utils
 from wrf_ensembly.console import logger
-from wrf_ensembly import config, jobfiles, member_info, cycling, utils
 
 app = typer.Typer()
+
+
+@app.command()
+def preprocessing(
+    experiment_path: Annotated[
+        Path, typer.Argument(..., help="Path to the experiment directory")
+    ]
+):
+    """Creates a jobfile for running all preprocessing steps. Useful if you want to run WPS and real on your processing nodes."""
+
+    logger.setup("slurm-preprocessing", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+    jobfiles.generate_preprocess_jobfile(exp)
 
 
 @app.command()
@@ -26,17 +38,16 @@ def advance_members(
     """Create a SLURM jobfile to advance each member of the ensemble"""
 
     logger.setup(f"slurm-advance-members", experiment_path)
-    cfg = config.read_config(experiment_path / "config.toml")
+    exp = experiment.Experiment(experiment_path)
 
     # If a cycle is passed by the user, generate jobfiles for that cycle,
     # otherwise grab the current cycle
     if cycle is None:
-        minfos = member_info.read_all_member_info(experiment_path)
-        member_info.ensure_same_cycle(minfos)
-        cycle = minfos[0].member.current_cycle
+        exp.ensure_same_cycle()
+        cycle = exp.members[0].current_cycle_i
 
     logger.info(f"Writing jobfiles for cycle {cycle}")
-    jobfiles.generate_advance_jobfiles(experiment_path, cfg, cycle)
+    jobfiles.generate_advance_jobfiles(exp, cycle)
 
 
 @app.command()
@@ -54,9 +65,8 @@ def make_analysis(
     """
 
     logger.setup(f"slurm-make-analysis", experiment_path)
-    cfg = config.read_config(experiment_path / "config.toml")
-
-    jobfiles.generate_make_analysis_jobfile(experiment_path, cfg, cycle)
+    exp = experiment.Experiment(experiment_path)
+    jobfiles.generate_make_analysis_jobfile(exp, cycle)
 
 
 @app.command()
@@ -90,15 +100,14 @@ def run_experiment(
     """
 
     logger.setup(f"slurm-run-experiment", experiment_path)
-    cfg = config.read_config(experiment_path / "config.toml")
-    slurm_command = cfg.slurm.sbatch_command
+    exp = experiment.Experiment(experiment_path)
+    slurm_command = exp.cfg.slurm.sbatch_command
 
     # If we need to resume, grab current cycle and filter the cycles list
-    cycles = cycling.get_cycle_information(cfg)
+    cycles = exp.cycles
     if resume:
-        minfos = member_info.read_all_member_info(experiment_path)
-        member_info.ensure_same_cycle(minfos)
-        current_cycle = minfos[0].member.current_cycle
+        exp.ensure_same_cycle()
+        current_cycle = exp.members[0].current_cycle_i
         cycles = list(filter(lambda c: c.index >= current_cycle, cycles))
 
     # If we only want to run the next cycle, keep only the first element of the list
@@ -108,7 +117,7 @@ def run_experiment(
     last_cycle_dependency = None
     for cycle in cycles:
         # Generate all member jobfiles, queue them and keep jobids
-        jf = jobfiles.generate_advance_jobfiles(experiment_path, cfg, cycle.index)
+        jf = jobfiles.generate_advance_jobfiles(exp, cycle.index)
 
         if last_cycle_dependency is not None:
             dependency = f"--dependency=afterok:{last_cycle_dependency}"
@@ -134,9 +143,7 @@ def run_experiment(
             logger.info(f"Queued {f} with ID {id}")
 
         # Generate the analysis jobfile, queue it and keep jobid
-        jf = jobfiles.generate_make_analysis_jobfile(
-            experiment_path, cfg, cycle.index, in_waves
-        )
+        jf = jobfiles.generate_make_analysis_jobfile(exp, cycle.index, in_waves)  # type: ignore
         dependency = "--dependency=afterok:" + ":".join(map(str, ids))
         res = utils.call_external_process(
             [*slurm_command.split(" "), dependency, str(jf.resolve())]
