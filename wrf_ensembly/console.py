@@ -31,9 +31,6 @@ class Logger:
         self.logger = logging.getLogger("rich")
 
     def setup(self, command_name: str, experiment_path: Path):
-        if self.command_name is not None:
-            return
-
         self.command_name = command_name
         self.experiment_path = experiment_path
 
