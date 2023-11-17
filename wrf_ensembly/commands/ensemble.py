@@ -203,12 +203,12 @@ def advance_member(
     rsl_file = member_dir / "rsl.out.0000"
     if not rsl_file.exists():
         logger.error(f"Member {member}: rsl.out.0000 does not exist")
-        return typer.Exit(1)
+        raise typer.Exit(1)
     rsl_content = rsl_file.read_text()
 
     if "SUCCESS COMPLETE WRF" not in rsl_content:
         logger.error(f"Member {member}: wrf.exe failed with exit code {res.returncode}")
-        return typer.Exit(1)
+        raise typer.Exit(1)
 
     # Copy wrfout to the forecasts directory
     forecasts_dir = exp.paths.forecast_path(minfo.current_cycle_i, member)
