@@ -14,6 +14,7 @@ from wrf_ensembly import (
     member_info,
     namelist,
     nco,
+    observations,
     pertubations,
     update_bc,
     utils,
@@ -298,6 +299,15 @@ def filter(experiment_path: Path):
         logger.error(f"filter failed with exit code {res.returncode}")
         raise typer.Exit(1)
 
+    # Keep obs_seq.final, convert to netcdf
+    obs_seq_final = dart_dir / "obs_seq.final"
+    utils.copy(
+        obs_seq_final,
+        exp.paths.data_diag / f"cycle_{current_cycle}.obs_seq.final",
+    )
+    obs_seq_nc = exp.paths.data_diag / f"cycle_{current_cycle}.nc"
+    observations.obs_seq_to_nc(exp, obs_seq_final, obs_seq_nc)
+
     # Mark filter as completed
     for m in exp.members:
         m.cycles[current_cycle].filter = True
@@ -537,7 +547,7 @@ def cycle(experiment_path: Path, use_forecast: bool = False):
 
         # Copy the cycled variables from the analysis file to the initial condition file
         wrfout_name = "wrfout_d01_" + cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
-        analysis_file = analysis_dir / f"member_{member:02d}" / wrfout_name
+        analysis_file = analysis_dir / f"member_{member.i:02d}" / wrfout_name
 
         logger.info(
             f"Copying cycled variables from {analysis_file} to {icbc_target_file}"

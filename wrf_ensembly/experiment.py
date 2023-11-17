@@ -118,6 +118,7 @@ class ExperimentPaths:
         self.data_forecasts = self.data / "forecasts"
         self.data_dart = self.data / "dart"
         self.data_analysis = self.data / "analysis"
+        self.data_diag = self.data / "diagnostics"
 
         self.obs = experiment_path / "obs"
 
@@ -189,6 +190,9 @@ class Experiment:
 
     def ensure_current_cycle_state(self, state: dict[str, Any]):
         """Ensures that all members have the same state for the current cycle"""
+
+        logger.debug(f"Checking state for cycle {self.members[0].current_cycle_i}")
+
         self.ensure_same_cycle()
         for m in self.members:
             cycle_info = m.current_cycle.dict()

@@ -58,7 +58,7 @@ def create(
     (output_dir / "forecasts").mkdir()
     (output_dir / "dart").mkdir()
     (output_dir / "initial_boundary").mkdir()
-    (output_dir / "initial_boundary" / "cycled_inputs").mkdir()
+    (output_dir / "diagnostics").mkdir()
 
     for j in range(cfg.assimilation.n_members):
         member_dir = cfg.get_member_dir(j)
