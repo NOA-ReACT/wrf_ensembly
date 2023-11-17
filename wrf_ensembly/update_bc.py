@@ -41,8 +41,8 @@ def update_wrf_bc(
     sym_wrfinput.unlink(missing_ok=True)
     sym_wrfbdy.unlink(missing_ok=True)
 
-    sym_wrfinput.symlink_to(wrfinput)
-    sym_wrfbdy.symlink_to(wrfbdy)
+    sym_wrfinput.symlink_to(wrfinput.resolve())
+    sym_wrfbdy.symlink_to(wrfbdy.resolve())
 
     command = work_dir / "update_wrf_bc"
     if not command.is_file():
