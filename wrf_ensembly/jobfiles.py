@@ -15,14 +15,7 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
 
     exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
 
-    slurm_args = exp.cfg.slurm.dict()
-    env_modules = []
-    if "env_modules" in slurm_args:
-        env_modules = slurm_args["env_modules"]
-        del slurm_args["env_modules"]
-    slurm_args |= {"job-name": f"{exp.cfg.metadata.name}__preprocess"}
-
-    base_cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly ensemble %SUBCOMMAND% {exp.paths.experiment_path.resolve()}"
+    base_cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly preprocess %SUBCOMMAND% {exp.paths.experiment_path.resolve()}"
     commands = [
         base_cmd.replace("%SUBCOMMAND%", "setup"),
         base_cmd.replace("%SUBCOMMAND%", "geogrid"),
@@ -36,11 +29,13 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
     jobfile = exp.paths.jobfiles / "preprocess.sh"
     jobfile.parent.mkdir(parents=True, exist_ok=True)
 
+    jobname = f"{exp.cfg.metadata.name}_preprocess"
+
     jobfile.write_text(
         templates.generate(
             "slurm_job.sh.j2",
-            slurm_args=slurm_args,
-            env_modules=env_modules,
+            slurm_directives=exp.cfg.slurm.directives_large | {"job-name": jobname},
+            env_modules=exp.cfg.slurm.env_modules,
             commands=commands,
         )
     )
