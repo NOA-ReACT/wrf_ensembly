@@ -8,6 +8,7 @@ import tomli
 from wrf_ensembly.console import logger
 from wrf_ensembly import utils, namelist
 from wrf_ensembly.config import Config
+from wrf_ensembly.experiment import Experiment
 
 
 class Observation(BaseModel):
@@ -153,5 +154,84 @@ def join_obs_seq(
         # Move output file to the desired location
         obs_seq_out = tmp_dir / "obs_seq.out"
         utils.copy(obs_seq_out, output_file)
+
+    return res
+
+
+def obs_seq_to_nc(
+    exp: Experiment,
+    obs_seq: Path,
+    nc: Path,
+    binary_obs_sequence: bool = False,
+) -> utils.ExternalProcessResult:
+    """
+    Uses the `obs_seq_to_netcdf` program to convert the given obs_seq file to netcdf format
+
+    Args:
+        obs_seq: Path to obs_seq file
+        nc: Path to output netcdf file
+
+    Returns:
+        The result of the external process
+    """
+
+    # Locate executable
+    binary = (
+        exp.cfg.directories.dart_root / "models" / "wrf" / "work" / "obs_seq_to_netcdf"
+    )
+    binary = binary.resolve()
+    if not binary.exists():
+        raise RuntimeError(f"obs_seq_to_netcdf binary not found at {binary}")
+
+    # Link obs_seq_to_netcdf inside a temp directory
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_dir = Path(tmp_dir)
+
+        binary_ln = tmp_dir / "obs_seq_to_netcdf"
+        binary_ln.symlink_to(binary)
+
+        # Create namelist file
+        nml = {
+            "obs_seq_to_netcdf_nml": {
+                "obs_sequence_name": str(obs_seq.resolve()),
+                "obs_sequence_list": "",
+                "append_to_netcdf": False,
+                "lonlim1": 0.0,
+                "lonlim2": 360,
+                "latlim1": -90,
+                "latlim2": 90,
+                "verbose": False,
+            },
+            "obs_sequence_nml": {"write_binary_obs_sequence": binary_obs_sequence},
+            "location_nml": {},
+            "obs_kind_nml": {},
+            "schedule_nml": {},
+            "utilities_nml": {
+                "TERMLEVEL": 1,
+                "module_details": False,
+                "logfilename": "obs_sequence_tool.out",
+                "nmlfilename": "obs_sequence_tool.nml",
+                "write_nml": "file",
+            },
+        }
+        namelist.write_namelist(nml, tmp_dir / "input.nml")
+
+        # Call obs_seq_to_netcdf
+        res = utils.call_external_process(
+            [
+                str(binary_ln.resolve()),
+            ],
+            cwd=tmp_dir,
+        )
+
+        if res.returncode != 0:
+            logger.error(f"obs_seq_to_netcdf exited with error code {res.returncode}!")
+            logger.error(res.stdout)
+            raise RuntimeError(f"obs_seq_to_netcdf failed with code {res.returncode}")
+
+        # Move output file to the desired location
+        obs_seq_out = tmp_dir / "obs_epoch_001.nc"
+        utils.copy(obs_seq_out, nc)
+        logger.info(f"Converted obs_seq file to netcdf: {nc}")
 
     return res

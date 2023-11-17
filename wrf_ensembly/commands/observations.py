@@ -75,3 +75,13 @@ def prepare(experiment_path: Path, cycle: Optional[int] = None):
         # Remove temporary files
         for f in cycle_files:
             f.unlink()
+
+
+@app.command()
+def obs_seq_to_nc(experiment_path: Path, obs_seq_path: Path, nc_path: Path):
+    """Convert the given obs_seq file to netCDF format"""
+
+    exp = experiment.Experiment(experiment_path)
+    logger.setup("observations-convert-obs-seq", experiment_path)
+
+    observations.obs_seq_to_nc(exp, obs_seq_path, nc_path)
