@@ -273,11 +273,11 @@ def filter(experiment_path: Path):
     exp.paths.dart_path(current_cycle).mkdir(parents=True, exist_ok=True)
 
     dart_input_txt = dart_dir / "input_list.txt"
-    dart_input_txt.write_text("\n".join([str(prior) for prior in priors]))
+    dart_input_txt.write_text("\n".join([str(prior.resolve()) for prior in priors]))
     logger.info(f"Wrote input_list.txt")
 
     dart_output_txt = dart_dir / "output_list.txt"
-    dart_output_txt.write_text("\n".join([str(f) for f in dart_output]))
+    dart_output_txt.write_text("\n".join([str(f.resolve()) for f in dart_output]))
     logger.info(f"Wrote output_list.txt")
 
     # Run filter
