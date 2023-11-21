@@ -130,3 +130,48 @@ def generate_make_analysis_jobfile(
     logger.info(f"Wrote jobfile to {jobfile}")
 
     return jobfile
+
+
+def generate_statistics_jobfile(
+    exp: experiment.Experiment,
+    cycle: Optional[int] = None,
+    delete_members: bool = False,
+) -> Path:
+    """
+    Generates a jobfile to run the `statistics` step.
+
+    Args:
+        exp: The experiment
+        cycle: The cycle for which to run the statistics command. If None, all cycles will be processed.
+        delete_members: Whether to delete the members' forecasts after processing them.
+
+    Returns:
+        A Path object to the jobfile
+    """
+
+    exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
+
+    if cycle is not None:
+        job_name = f"{exp.cfg.metadata.name}_statistics_cycle_{cycle}"
+        jobfile = exp.paths.jobfiles / f"cycle_{cycle}_statistics.job.sh"
+    else:
+        job_name = f"{exp.cfg.metadata.name}_statistics"
+        jobfile = exp.paths.jobfiles / "statistics.job.sh"
+
+    cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly ensemble statistics {exp.paths.experiment_path}"
+    if cycle is not None:
+        cmd += f" {cycle}"
+    if delete_members:
+        cmd += " --remove-member-forecasts --remove-member-analysis"
+
+    jobfile.write_text(
+        templates.generate(
+            "slurm_job.sh.j2",
+            slurm_directives=exp.cfg.slurm.directives_small | {"job-name": job_name},
+            env_modules=exp.cfg.slurm.env_modules,
+            commands=[cmd],
+        )
+    )
+    logger.info(f"Wrote jobfile to {jobfile}")
+
+    return jobfile

@@ -85,6 +85,20 @@ def run_experiment(
         Optional[bool],
         typer.Option(..., help="Queue next cycle after the current cycle is done"),
     ] = False,
+    compute_statistics: Annotated[
+        Optional[bool],
+        typer.Option(
+            ...,
+            help="Compute statistics for the current cycle after the analysis step",
+        ),
+    ] = False,
+    delete_members: Annotated[
+        Optional[bool],
+        typer.Option(
+            ...,
+            help="Requires --compute-statistics. If set, the individual member's forecasts are deleted.",
+        ),
+    ] = False,
 ):
     """
     Creates jobfiles for all experiment steps and queues them in the correct order. This
@@ -158,5 +172,16 @@ def run_experiment(
             [*slurm_command.split(" "), dependency, str(jf.resolve())]
         )
         last_cycle_dependency = int(res.stdout.strip())
+
+        if compute_statistics:
+            jf = jobfiles.generate_statistics_jobfile(exp, cycle.index, delete_members)  # type: ignore
+            res = utils.call_external_process(
+                [
+                    *slurm_command.split(" "),
+                    f"--dependency=afterok:{last_cycle_dependency}",
+                    str(jf.resolve()),
+                ]
+            )
+            logger.info(f"Queued {jf} with ID {res.stdout.strip()}")
 
         logger.info(f"Queued {jf} with ID {last_cycle_dependency}")
