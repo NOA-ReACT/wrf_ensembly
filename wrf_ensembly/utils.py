@@ -1,4 +1,6 @@
+import itertools
 import shutil
+import string
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -97,23 +99,19 @@ def call_external_process(
     )
 
 
-def int_to_letter_numeral(i: int, length=3) -> str:
+def int_to_letter_numeral(i: int) -> str:
     """
-    Converts the given integer to a letter numeral, similar to how excel names the rows. For example, 1 becomes "A", 27 becomes "AA", etc.
+    Converts the given integer to a letter numeral, This is used by WPS when ungribing files (e.g., GRIBFILE.AAB), ...
 
-    This is used by WPS when ungribing files (e.g., GRIBFILE.AAB), ...
-
-    Args:
-        i: Integer to convert
-        length: Length of the output string, defaults to 3
+    The first file (1) would be A, the second would be B, and so on. After Z, the next file would be BA, then BB, and so on.
     """
 
-    letters = []
-    while i > 0:
-        i, remainder = divmod(i - 1, 26)
-        letters.append(chr(ord("A") + remainder))
+    if i < 1 or i > 17576:
+        raise ValueError("i must be between 1 and 704 (AAA and ZZZ)")
 
-    return "".join(reversed(letters)).rjust(length, "A")
+    letters = list(itertools.product(string.ascii_uppercase, repeat=3))[i - 1]
+
+    return "".join(letters).rjust(3, "A")
 
 
 def copy(src: Path, dest: Path, ensure_dest_parent_exists=True):
