@@ -58,7 +58,14 @@ def generate_advance_jobfiles(exp: experiment.Experiment, cycle: int) -> list[Pa
     base_cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly ensemble advance-member {exp.paths.experiment_path.resolve()}"
 
     files = []
-    for i in range(exp.cfg.assimilation.n_members):
+    for member in exp.members:
+        if member.cycles[cycle].advanced:
+            logger.info(
+                f"Member {member.i} has already been advanced to cycle {cycle}. Skipping..."
+            )
+            continue
+
+        i = member.i
         job_name = f"{exp.cfg.metadata.name}_cycle_{cycle}_member_{i}"
         jobfile = exp.paths.jobfiles / f"cycle_{cycle}_advance_member_{i}.job.sh"
 
