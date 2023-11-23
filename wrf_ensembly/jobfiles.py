@@ -81,12 +81,21 @@ def generate_make_analysis_jobfile(
     exp: experiment.Experiment,
     cycle: Optional[int] = None,
     queue_next_cycle: bool = False,
+    compute_statistics: bool = False,
+    delete_members: bool = False,
 ):
     """
     Generates a jobfile for the `filter`, `analysis` and `cycle` steps. At runtime, the
     script will check whether observations exist for the current cycle. If they do, all
     steps (filter, analysis, cycle) are run. If they don't, only the cycle step is run
     with the `--use-forecast` flag.
+
+    Args:
+        exp: The experiment
+        cycle: The cycle for which to run the analysis command. If None, all cycles will be processed.
+        queue_next_cycle: Whether to queue the next cycle after the current one is done.
+        compute_statistics: Whether to compute statistics after the analysis step.
+        delete_members: Whether to delete the members' forecasts after processing them.
 
     Returns:
         A Path object to the jobfile
@@ -116,8 +125,14 @@ def generate_make_analysis_jobfile(
     ]
 
     if queue_next_cycle:
+        args = ""
+        if compute_statistics:
+            args += " --compute-statistics"
+            if delete_members:
+                args += " --delete-members"
+
         commands.append(
-            f"{exp.cfg.slurm.python_command} -m wrf_ensembly slurm run-experiment {exp.paths.experiment_path} --only-next-cycle --resume --in-waves"
+            f"{exp.cfg.slurm.python_command} -m wrf_ensembly slurm run-experiment {exp.paths.experiment_path} {args}"
         )
 
     jobfile.write_text(

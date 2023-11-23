@@ -74,26 +74,22 @@ def run_experiment(
     experiment_path: Annotated[
         Path, typer.Argument(..., help="Path to the experiment directory")
     ],
-    resume: Annotated[
-        Optional[bool],
-        typer.Option(..., help="Resume the experiment from the current cycle"),
-    ] = False,
-    only_next_cycle: Annotated[
-        Optional[bool], typer.Option(..., help="Only run the next cycle")
-    ] = False,
-    in_waves: Annotated[
-        Optional[bool],
-        typer.Option(..., help="Queue next cycle after the current cycle is done"),
-    ] = False,
+    all_cycles: Annotated[
+        bool,
+        typer.Option(
+            ...,
+            help="After the current cycle, automatically queue next cycle, until experiment is over",
+        ),
+    ] = True,
     compute_statistics: Annotated[
-        Optional[bool],
+        bool,
         typer.Option(
             ...,
             help="Compute statistics for the current cycle after the analysis step",
         ),
     ] = False,
     delete_members: Annotated[
-        Optional[bool],
+        bool,
         typer.Option(
             ...,
             help="Requires --compute-statistics. If set, the individual member's forecasts are deleted.",
@@ -118,18 +114,11 @@ def run_experiment(
     slurm_command = exp.cfg.slurm.sbatch_command
 
     # If we need to resume, grab current cycle and filter the cycles list
-    cycles = exp.cycles
-    if resume:
-        exp.ensure_same_cycle()
-        current_cycle = exp.members[0].current_cycle_i
-        cycles = list(filter(lambda c: c.index >= current_cycle, cycles))
-
-    # If we only want to run the next cycle, keep only the first element of the list
-    if only_next_cycle or in_waves:
-        cycles = [cycles[0]]
+    exp.ensure_same_cycle()
+    current_cycle = exp.cycles[exp.members[0].current_cycle_i]
 
     # Check if the current cycle is the last one
-    if cycles[-1].index == len(cycles) - 1:
+    if current_cycle.index == len(exp.cycles) - 1:
         try:
             exp.ensure_current_cycle_state({"advanced": True})
             logger.error("Last cycle already advanced, experiment finished")
@@ -137,51 +126,49 @@ def run_experiment(
         except ValueError:
             pass
 
-    last_cycle_dependency = None
-    for cycle in cycles:
-        # Generate all member jobfiles, queue them and keep jobids
-        jf = jobfiles.generate_advance_jobfiles(exp, cycle.index)
+    # Generate all member jobfiles, queue them and keep jobids
+    jfs = jobfiles.generate_advance_jobfiles(exp, current_cycle.index)
 
-        if last_cycle_dependency is not None:
-            dependency = f"--dependency=afterok:{last_cycle_dependency}"
-        else:
-            dependency = None
+    ids = []
+    for jf in jfs:
+        cmd = slurm_command.split(" ")
+        cmd.append(str(jf.resolve()))
 
-        ids = []
-        for f in jf:
-            cmd = slurm_command.split(" ")
-            if dependency is not None:
-                cmd.append(dependency)
-            cmd.append(str(f.resolve()))
-            print(cmd)
-            res = utils.call_external_process(cmd)
-            if not res.success:
-                logger.error("Could not queue jobfile, output:")
-                logger.error(res.stdout)
-                exit(1)
+        res = utils.call_external_process(cmd)
+        if not res.success:
+            logger.error("Could not queue jobfile, output:")
+            logger.error(res.stdout)
+            exit(1)
 
-            id = int(res.stdout.strip())
-            ids.append(id)
+        id = int(res.stdout.strip())
+        ids.append(id)
 
-            logger.info(f"Queued {f} with ID {id}")
+        logger.info(f"Queued {jf} with ID {id}")
 
-        # Generate the analysis jobfile, queue it and keep jobid
-        jf = jobfiles.generate_make_analysis_jobfile(exp, cycle.index, in_waves)  # type: ignore
-        dependency = "--dependency=afterok:" + ":".join(map(str, ids))
-        res = utils.call_external_process(
-            [*slurm_command.split(" "), dependency, str(jf.resolve())]
+    # Generate the analysis jobfile, queue it and keep jobid
+    jf = jobfiles.generate_make_analysis_jobfile(
+        exp, current_cycle.index, all_cycles, compute_statistics, delete_members
+    )
+    dependency = "--dependency=afterok:" + ":".join(map(str, ids))
+    res = utils.call_external_process(
+        [*slurm_command.split(" "), dependency, str(jf.resolve())]
+    )
+    analysis_jobid = int(res.stdout.strip())
+    ids.append(analysis_jobid)
+    logger.info(f"Queued {jf} with ID {analysis_jobid}")
+
+    if compute_statistics:
+        jf = jobfiles.generate_statistics_jobfile(
+            exp, current_cycle.index, delete_members
         )
-        last_cycle_dependency = int(res.stdout.strip())
+        res = utils.call_external_process(
+            [
+                *slurm_command.split(" "),
+                f"--dependency=afterok:{analysis_jobid}",
+                str(jf.resolve()),
+            ]
+        )
+        logger.info(f"Queued {jf} with ID {res.stdout.strip()}")
+        ids.append(int(res.stdout.strip()))
 
-        if compute_statistics:
-            jf = jobfiles.generate_statistics_jobfile(exp, cycle.index, delete_members)  # type: ignore
-            res = utils.call_external_process(
-                [
-                    *slurm_command.split(" "),
-                    f"--dependency=afterok:{last_cycle_dependency}",
-                    str(jf.resolve()),
-                ]
-            )
-            logger.info(f"Queued {jf} with ID {res.stdout.strip()}")
-
-        logger.info(f"Queued {jf} with ID {last_cycle_dependency}")
+    logger.info(f"First JobID: {min(ids)}, last JobID: {max(ids)}")
