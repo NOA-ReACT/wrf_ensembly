@@ -181,3 +181,11 @@ def seconds_to_pretty_hours(seconds: int | float) -> str:
     minutes = (seconds % 3600) // 60
 
     return f"{hours:.0f}h {minutes:02.0f}m"
+
+
+def bool_to_console_str(b: bool):
+    """
+    Converts a boolean to a string that can be printed to the console.
+    """
+
+    return "✅" if b else "❌"

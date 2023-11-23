@@ -5,9 +5,9 @@ from typing import Optional
 import netCDF4
 import numpy as np
 import typer
+from rich.console import Console
+from rich.table import Column, Table
 from typing_extensions import Annotated
-
-app = typer.Typer()
 
 from wrf_ensembly import (
     experiment,
@@ -21,6 +21,8 @@ from wrf_ensembly import (
     wrf,
 )
 from wrf_ensembly.console import logger
+
+app = typer.Typer()
 
 
 @app.command()
@@ -603,3 +605,31 @@ def cycle(experiment_path: Path, use_forecast: bool = False):
             analysis=False,
         )
         member.write_minfo()
+
+
+@app.command()
+def status(experiment_path: Path):
+    """Prints the current status of all members (i.e., which cycles have been completed)"""
+
+    logger.setup("experiment-status", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    table = Table(
+        "Member",
+        "Current cycle",
+        "advanced",
+        "filter",
+        "analysis",
+        title="Experiment status",
+    )
+
+    for i, member in enumerate(exp.members):
+        table.add_row(
+            str(i),
+            str(member.current_cycle_i),
+            utils.bool_to_console_str(member.current_cycle.advanced),
+            utils.bool_to_console_str(member.current_cycle.filter),
+            utils.bool_to_console_str(member.current_cycle.analysis),
+        )
+
+    Console().print(table)
