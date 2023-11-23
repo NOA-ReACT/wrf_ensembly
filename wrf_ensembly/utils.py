@@ -3,6 +3,7 @@ import shutil
 import string
 import subprocess
 from collections.abc import Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -128,6 +129,36 @@ def copy(src: Path, dest: Path, ensure_dest_parent_exists=True):
     if ensure_dest_parent_exists:
         dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(src, dest)
+
+
+@contextmanager
+def atomic_binary_open(path: Path):
+    """
+    Opens a file in atomic mode, which means that the file is first opened in a temporary
+    location and then moved to the final location after the file is closed.
+
+    This function will attempt to create the temp file in the same directory but with a
+    random prefix. So the process/user must have the appropriate permissions to create
+    files in the same directory.
+
+    The `wb` mode is used to open the file.
+
+    Args:
+        path: Path to the file
+        mode: Mode to open the file in
+    """
+
+    # Create a temp file
+    tmp_file = path.parent / (path.name + ".tmp")
+    with open(tmp_file, "wb") as f:
+        yield f
+
+    # If the target exists, remove it
+    if path.exists():
+        path.unlink()
+
+    # Move the temp file to the target location
+    tmp_file.rename(path)
 
 
 def filter_none_from_dict(dict: dict) -> dict:

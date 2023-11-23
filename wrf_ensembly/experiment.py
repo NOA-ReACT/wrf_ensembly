@@ -4,7 +4,7 @@ from typing import Any, Optional
 import tomli
 import tomli_w
 
-from wrf_ensembly import config, cycling, member_info
+from wrf_ensembly import config, cycling, member_info, utils
 from wrf_ensembly.console import logger
 from wrf_ensembly.utils import filter_none_from_dict
 
@@ -94,7 +94,7 @@ class EnsembleMember:
             str(k): filter_none_from_dict(v.dict()) for k, v in minfo.cycle.items()
         }
 
-        with open(self.minfo_path, "wb") as f:
+        with utils.atomic_binary_open(self.minfo_path) as f:
             tomli_w.dump(minfo.dict() | {"cycle": cycle}, f)
         logger.info(
             f"Member {self.current_cycle_i}: Wrote info file to {self.minfo_path}"
