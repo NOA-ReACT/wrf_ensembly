@@ -98,6 +98,9 @@ class EnsembleMember:
             tomli_w.dump(minfo.dict() | {"cycle": cycle}, f)
         logger.info(f"Member {self.i}: Wrote info file to {self.minfo_path}")
 
+    def __str__(self) -> str:
+        return f"Member {self.i}"
+
 
 class ExperimentPaths:
     """
