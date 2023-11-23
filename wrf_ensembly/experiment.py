@@ -96,9 +96,7 @@ class EnsembleMember:
 
         with utils.atomic_binary_open(self.minfo_path) as f:
             tomli_w.dump(minfo.dict() | {"cycle": cycle}, f)
-        logger.info(
-            f"Member {self.current_cycle_i}: Wrote info file to {self.minfo_path}"
-        )
+        logger.info(f"Member {self.i}: Wrote info file to {self.minfo_path}")
 
 
 class ExperimentPaths:
