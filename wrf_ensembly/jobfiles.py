@@ -95,6 +95,7 @@ def generate_make_analysis_jobfile(
     exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
 
     obs_file = exp.paths.obs / f"cycle_{cycle}.obs_seq"
+    obs_file = obs_file.resolve()
     if not obs_file.exists():
         logger.warning(
             f"Observation file {obs_file} does not exist! Filter won't run if it is not created for cycle {cycle}"
