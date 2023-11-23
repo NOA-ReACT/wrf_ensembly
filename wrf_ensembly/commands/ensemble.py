@@ -475,9 +475,9 @@ def cycle(experiment_path: Path, use_forecast: bool = False):
     exp.ensure_same_cycle()
 
     # Establish which cycle we are running and that all member have the analysis prepared
-    exp.ensure_current_cycle_state({"advanced": True, "filter": True})
+    exp.ensure_current_cycle_state({"advanced": True})
     try:
-        exp.ensure_current_cycle_state({"analysis": True})
+        exp.ensure_current_cycle_state({"filter": True, "analysis": True})
     except ValueError:
         if not use_forecast:
             logger.error("Not all members have completed the analysis step")
