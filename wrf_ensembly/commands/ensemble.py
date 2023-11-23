@@ -84,8 +84,8 @@ def setup(experiment_path: Path):
         )
         logger.info(f"Member {i}: Copied wrfbdy_d01_cycle_0")
 
-        # Create member info file
-        exp.write_all_member_info()
+    # Create member info file
+    exp.write_all_member_info()
 
 
 @app.command()
