@@ -346,7 +346,7 @@ def analysis(experiment_path: Path):
         dart_file = dart_out_dir / f"dart_analysis_member_{member:02d}.nc"
         if not dart_file.exists():
             logger.error(f"Member {member}: {dart_file} does not exist")
-            return typer.Exit(1)
+            raise typer.Exit(1)
 
         # Copy the state variables from the dart file to the analysis file
         logger.info(f"Member {member}: Copying state variables from {dart_file}")
@@ -495,7 +495,7 @@ def cycle(experiment_path: Path, use_forecast: bool = False):
 
     if next_cycle >= len(exp.cycles):
         logger.error(f"Experiment is finished! No cycle {next_cycle}")
-        return typer.Exit(1)
+        raise typer.Exit(1)
 
     if use_forecast:
         analysis_dir = exp.paths.forecast_path(current_cycle)

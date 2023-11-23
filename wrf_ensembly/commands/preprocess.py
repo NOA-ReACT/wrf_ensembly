@@ -160,12 +160,12 @@ def geogrid(experiment_path: Path):
     geogrid_path = wps_dir / "geogrid.exe"
     if not geogrid_path.is_file():
         logger.error("Could not find geogrid.exe at {geogrid_path}")
-        return typer.Exit(1)
+        raise typer.Exit(1)
 
     res = utils.call_external_process([geogrid_path], wps_dir)
     if not res.success:
         logger.error("Error is fatal")
-        return typer.Exit(1)
+        raise typer.Exit(1)
 
     logger.info("Geogrid finished successfully!")
     logger.debug(f"stdout:\n{res.stdout.strip()}")
@@ -202,7 +202,7 @@ def ungrib(experiment_path: Path):
         ).resolve()
     if not vtable_path.is_file() or vtable_path.is_symlink():
         logger.error(f"Vtable {vtable_path} does not exist")
-        return typer.Exit(1)
+        raise typer.Exit(1)
     logger.info(f"[green]Linking Vtable[/green] {vtable_path}")
     (wps_dir / "Vtable").unlink(missing_ok=True)
     (wps_dir / "Vtable").symlink_to(vtable_path)
@@ -215,20 +215,20 @@ def ungrib(experiment_path: Path):
         logger.debug(f"Created symlink for {grib_file} at {link_path}")
     if i == 0:
         logger.error("No GRIB files found")
-        return typer.Exit(1)
+        raise typer.Exit(1)
     logger.info(f"Linked {i+1} GRIB files to {wps_dir} from {data_dir}")
 
     # Run ungrib.exe
     ungrib_path = wps_dir / "ungrib.exe"
     if not ungrib_path.is_file():
         logger.error("Could not find ungrib.exe at {ungrib_path}")
-        return typer.Exit(1)
+        raise typer.Exit(1)
 
     res = utils.call_external_process([ungrib_path], wps_dir)
     if not res.success or "Successful completion of ungrib" not in res.stdout:
         logger.error("Ungrib could not finish successfully")
         logger.error("Check the `ungrib.log` file for more info.")
-        return typer.Exit(1)
+        raise typer.Exit(1)
 
     logger.info("Ungrib finished successfully!")
     return 0
@@ -249,7 +249,7 @@ def metgrid(
     if len(list(wps_dir.glob("met_em*.nc"))) > 0:
         if not force:
             logger.warning("met_em files seem to exist, skipping metgrid.exe")
-            return 0
+            raise typer.Exit(0)
         else:
             for f in wps_dir.glob("met_em*.nc"):
                 logger.debug(f"Removing old met_em file {f}")
@@ -263,17 +263,15 @@ def metgrid(
     metgrid_path = wps_dir / "metgrid.exe"
     if not metgrid_path.is_file():
         logger.error(f"Could not find metgrid.exe at {metgrid_path}")
-        return typer.Exit(1)
+        raise typer.Exit(1)
 
     res = utils.call_external_process([metgrid_path], wps_dir)
     if not res.success or "Successful completion of metgrid" not in res.stdout:
         logger.error("Metgrid could not finish successfully")
         logger.error("Check the `metgrid.log` file for more info.")
-        return typer.Exit(1)
+        raise typer.Exit(1)
 
     logger.info("Metgrid finished successfully!")
-
-    return 0
 
 
 @app.command()
@@ -304,7 +302,7 @@ def real(experiment_path: Path, cycle: int):
 
     if count == 0:
         logger.error("No met_em files found")
-        return typer.Exit(1)
+        raise typer.Exit(1)
 
     logger.info(f"Linked {count} met_em files to {wrf_dir}")
 
@@ -319,7 +317,7 @@ def real(experiment_path: Path, cycle: int):
     real_path = wrf_dir / "real.exe"
     if not real_path.is_file():
         logger.error("[red]Could not find real.exe at[/red] {real_path}")
-        return typer.Exit(1)
+        raise typer.Exit(1)
 
     cmd = [
         exp.cfg.slurm.mpirun_command,
@@ -334,12 +332,12 @@ def real(experiment_path: Path, cycle: int):
     rsl_path = wrf_dir / "rsl.out.0000"
     if not rsl_path.is_file():
         logger.error("Could not find rsl.out.0000, wrf did not execute probably.")
-        return typer.Exit(1)
+        raise typer.Exit(1)
     else:
         rsl = rsl_path.read_text()
         if "SUCCESS COMPLETE REAL_EM INIT" not in rsl:
             logger.error("real.exe could not complete, check logs.")
-            return typer.Exit(1)
+            raise typer.Exit(1)
 
     logger.info("real finished successfully")
 
