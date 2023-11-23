@@ -357,3 +357,20 @@ def real(experiment_path: Path, cycle: int):
     shutil.copyfile(
         wrf_dir / "namelist.input", data_dir / f"namelist.input_cycle_{cycle}"
     )
+
+
+@app.command()
+def clean(experiment_path: Path):
+    """
+    Deletes the preprocessing directory and all its contents. Specifically removes:
+    - One copy of WPS and WRF
+    - Intermediate files (FILE_* and GRIBFILE.*)
+    - met_em files
+    """
+
+    logger.setup("preprocess-clean", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    logger.info(f"Removing {exp.paths.work_preprocessing}")
+    shutil.rmtree(exp.paths.work_preprocessing)
+    exp.paths.work_preprocessing.mkdir(parents=True, exist_ok=True)
