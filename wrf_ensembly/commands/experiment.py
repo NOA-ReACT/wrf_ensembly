@@ -1,6 +1,7 @@
 import shutil
 from pathlib import Path
 from typing import Optional
+import typing_extensions
 
 import typer
 from rich.console import Console
@@ -33,7 +34,11 @@ def create(
 
     # Create directory tree, add config file
     root = experiment_path
-    root.mkdir(parents=True, exist_ok=True)
+    try:
+        root.mkdir(parents=True)
+    except OSError as ex:
+        logger.error(f"Could not create directory `{root}`: {ex}")
+        raise typer.Exit(1)
 
     if config_path is not None:
         utils.copy(config_path, experiment_path / "config.toml")
@@ -47,13 +52,13 @@ def create(
         config.write_config(config_path, cfg)
 
     # Create sub-directories
-    (root / cfg.directories.observations_sub).mkdir(parents=True, exist_ok=True)
-    (root / cfg.directories.work_sub).mkdir(parents=True, exist_ok=True)
+    (root / cfg.directories.observations_sub).mkdir(parents=True)
+    (root / cfg.directories.work_sub).mkdir(parents=True)
     (root / cfg.directories.work_sub / "preprocessing").mkdir()
     (root / "jobfiles").mkdir()
 
     output_dir = root / cfg.directories.output_sub
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True)
     (output_dir / "analysis").mkdir()
     (output_dir / "forecasts").mkdir()
     (output_dir / "dart").mkdir()
@@ -68,11 +73,35 @@ def create(
 
 
 @app.command()
-def copy_model(experiment_path: Path):
+def copy_model(
+    experiment_path: Path,
+    force: Annotated[
+        bool,
+        typer.Option(
+            ..., help="If model directory already exists, remove and copy again"
+        ),
+    ] = False,
+):
     """Setup the experiment (i.e., copy WRF/WPS, generate namelists, ...)"""
 
     logger.setup("experiment-copy-model", experiment_path)
     exp = experiment.Experiment(experiment_path)
+
+    # Check if WRF/WPS directories already exist
+    if exp.paths.work_wrf.exists():
+        if force:
+            logger.info(f"Removing existing WRF directory {exp.paths.work_wrf}")
+            shutil.rmtree(exp.paths.work_wrf)
+        else:
+            logger.error(f"WRF directory {exp.paths.work_wrf} already exists")
+            raise typer.Exit(1)
+    if exp.paths.work_wps.exists():
+        if force:
+            logger.info(f"Removing existing WPS directory {exp.paths.work_wps}")
+            shutil.rmtree(exp.paths.work_wps)
+        else:
+            logger.error(f"WPS directory {exp.paths.work_wps} already exists")
+            raise typer.Exit(1)
 
     # Copy WRF/WPS in the work directory
     shutil.copytree(
@@ -87,6 +116,15 @@ def copy_model(experiment_path: Path):
 
     for j in range(exp.cfg.assimilation.n_members):
         member_dir = exp.paths.member_path(j)
+
+        if member_dir.exists():
+            if force:
+                logger.info(f"Removing existing member directory {member_dir}")
+                shutil.rmtree(member_dir)
+            else:
+                logger.error(f"Member directory {member_dir} already exists")
+                raise typer.Exit(1)
+
         shutil.copytree(exp.paths.work_wrf, member_dir, dirs_exist_ok=True)
         logger.info(f"Copied WRF to {member_dir}")
 
