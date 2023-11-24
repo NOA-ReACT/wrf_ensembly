@@ -50,7 +50,8 @@ class Logger:
             return
 
         log_path = self.log_dir / filename
-        log_path.write_text(contents)
+        with open(log_path, "a") as f:
+            f.write(contents)
 
     def add_log_file(self, source: Path, filename: Optional[str] = None):
         if self.log_dir is None:
