@@ -111,54 +111,65 @@ def apply_pertubations(
         logger.warning(f"Setting numpy random seed to {cfg.pertubations.seed}")
         np.random.seed(cfg.pertubations.seed)
 
-    for i in range(cfg.assimilation.n_members):
-        member_dir = exp.paths.member_path(i)
-        wrfinput_path = member_dir / "wrfinput_d01"
-        wrfbdy_path = member_dir / "wrfbdy_d01"
+    perts_nc_path = exp.paths.data_diag / "pertubations.nc"
+    perts_nc_path.unlink(missing_ok=True)
+    with netCDF4.Dataset(perts_nc_path, "w") as perts_nc:  # type: ignore
+        perts_nc.createDimension("member", cfg.assimilation.n_members)
 
-        # Modify wrfinput accoarding to pertubation configuration
-        logger.info(f"Member {i}: Applying pertubations to {wrfinput_path}")
-        with netCDF4.Dataset(wrfinput_path, "r+") as ds:  # type: ignore
-            for variable, pertubation in cfg.pertubations.variables.items():
-                logger.info(f"Member {i}: Perturbing {variable} by {pertubation}")
-                var = ds[variable]
-                field = pertubations.generate_pertubation_field(
-                    var.shape, pertubation.mean, pertubation.sd, pertubation.rounds
-                )
-                ds[variable][:] += field
+        for i in range(cfg.assimilation.n_members):
+            member_dir = exp.paths.member_path(i)
+            wrfinput_path = member_dir / "wrfinput_d01"
+            wrfbdy_path = member_dir / "wrfbdy_d01"
 
-                # Store pertubation field in netcdf file
-                if f"{variable}_pert" in ds.variables:
-                    field_var = ds[f"{variable}_pert"]
-                else:
-                    field_var = ds.createVariable(
-                        f"{variable}_pert", var.dtype, var.dimensions
+            # Modify wrfinput accoarding to pertubation configuration
+            logger.info(f"Member {i}: Applying pertubations to {wrfinput_path}")
+            with netCDF4.Dataset(wrfinput_path, "r+") as ds:  # type: ignore
+                for variable, pertubation in cfg.pertubations.variables.items():
+                    logger.info(f"Member {i}: Perturbing {variable} by {pertubation}")
+                    var = ds[variable]
+                    field = pertubations.generate_pertubation_field(
+                        var.shape, pertubation.mean, pertubation.sd, pertubation.rounds
                     )
-                field_var[:] = field
-                field_var.units = var.units
-                field_var.description = (
-                    f"wrf-ensembly: Pertubation field for {variable}"
-                )
-                field_var.mean = pertubation.mean
-                field_var.sd = pertubation.sd
-                field_var.rounds = pertubation.rounds
+                    ds[variable][:] += field
 
-        # Update BC to match
-        res = update_bc.update_wrf_bc(
-            cfg,
-            wrfinput_path,
-            wrfbdy_path,
-            log_filename=f"da_update_bc_member_{i}.log",
-        )
-        if (
-            res.returncode != 0
-            or "update_wrf_bc Finished successfully" not in res.output
-        ):
-            logger.error(
-                f"Member {i}: bc_update.exe failed with exit code {res.returncode}"
+                    ## Store pertubation field in netcdf file
+                    # Copy dimensions if they don't exist
+                    for dim in var.dimensions:
+                        if dim not in perts_nc.dimensions:
+                            perts_nc.createDimension(dim, ds.dimensions[dim].size)
+
+                    # Create variable to store pertubation field
+                    if f"{variable}_pert" in perts_nc.variables:
+                        field_var = perts_nc.variables[f"{variable}_pert"]
+                    else:
+                        field_var = perts_nc.createVariable(
+                            f"{variable}_pert", var.dtype, ["member", *var.dimensions]
+                        )
+                        field_var.units = var.units
+                        field_var.description = (
+                            f"wrf-ensembly: Pertubation field for {variable}"
+                        )
+                        field_var.mean = pertubation.mean
+                        field_var.sd = pertubation.sd
+                        field_var.rounds = pertubation.rounds
+                    field_var[i, :] = field
+
+            # Update BC to match
+            res = update_bc.update_wrf_bc(
+                cfg,
+                wrfinput_path,
+                wrfbdy_path,
+                log_filename=f"da_update_bc_member_{i}.log",
             )
-            raise typer.Exit(1)
-        logger.info(f"Member {i}: bc_update.exe finished successfully")
+            if (
+                res.returncode != 0
+                or "update_wrf_bc Finished successfully" not in res.output
+            ):
+                logger.error(
+                    f"Member {i}: bc_update.exe failed with exit code {res.returncode}"
+                )
+                raise typer.Exit(1)
+            logger.info(f"Member {i}: bc_update.exe finished successfully")
 
     logger.info("Finished applying pertubations")
     return 0
