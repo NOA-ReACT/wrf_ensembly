@@ -3,7 +3,7 @@ from typing import Optional
 
 import typer
 from typing_extensions import Annotated
-from wrf_ensembly import config, cycling, experiment, jobfiles, member_info, utils
+from wrf_ensembly import experiment, external, jobfiles
 from wrf_ensembly.console import logger
 
 app = typer.Typer()
@@ -134,13 +134,13 @@ def run_experiment(
         cmd = slurm_command.split(" ")
         cmd.append(str(jf.resolve()))
 
-        res = utils.call_external_process(cmd)
-        if not res.success:
+        res = external.runc(cmd)
+        if res.returncode != 0:
             logger.error("Could not queue jobfile, output:")
-            logger.error(res.stdout)
+            logger.error(res.output)
             exit(1)
 
-        id = int(res.stdout.strip())
+        id = int(res.output.strip())
         ids.append(id)
 
         logger.info(f"Queued {jf} with ID {id}")
@@ -150,10 +150,8 @@ def run_experiment(
         exp, current_cycle.index, all_cycles, compute_statistics, delete_members
     )
     dependency = "--dependency=afterok:" + ":".join(map(str, ids))
-    res = utils.call_external_process(
-        [*slurm_command.split(" "), dependency, str(jf.resolve())]
-    )
-    analysis_jobid = int(res.stdout.strip())
+    res = external.runc([*slurm_command.split(" "), dependency, str(jf.resolve())])
+    analysis_jobid = int(res.output.strip())
     ids.append(analysis_jobid)
     logger.info(f"Queued {jf} with ID {analysis_jobid}")
 
@@ -161,14 +159,14 @@ def run_experiment(
         jf = jobfiles.generate_statistics_jobfile(
             exp, current_cycle.index, delete_members
         )
-        res = utils.call_external_process(
+        res = external.runc(
             [
                 *slurm_command.split(" "),
                 f"--dependency=afterok:{analysis_jobid}",
                 str(jf.resolve()),
             ]
         )
-        logger.info(f"Queued {jf} with ID {res.stdout.strip()}")
-        ids.append(int(res.stdout.strip()))
+        logger.info(f"Queued {jf} with ID {res.output.strip()}")
+        ids.append(int(res.output.strip()))
 
     logger.info(f"First JobID: {min(ids)}, last JobID: {max(ids)}")

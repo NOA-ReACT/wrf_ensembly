@@ -1,13 +1,13 @@
-from pathlib import Path
 import datetime as dt
 import tempfile
+from pathlib import Path
 
-from pydantic import BaseModel
 import tomli
+from pydantic import BaseModel
 
-from wrf_ensembly.console import logger
-from wrf_ensembly import utils, namelist
+from wrf_ensembly import external, namelist, utils
 from wrf_ensembly.config import Config
+from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import Experiment
 
 
@@ -57,9 +57,12 @@ class ObservationGroup(BaseModel):
     def convert_file(self, file: Observation, output_file: Path):
         """Converts a file to DART obs_seq format by running the appropriate converter"""
 
-        res = utils.call_external_process(
-            [self.converter, str(file.path.resolve()), str(output_file.resolve())],
-            cwd=self.converter.parent,
+        res = external.run(
+            external.ExternalProcess(
+                [self.converter, file.path, output_file],
+                cwd=self.converter.parent,
+                log_filename=f"converter_{file.path.name}.log",
+            )
         )
         if res.returncode != 0:
             raise RuntimeError(
@@ -140,15 +143,14 @@ def join_obs_seq(
         filelist_path.write_text("\n".join(str(f.resolve()) for f in obs_seq_files))
 
         # Call obs_sequence_tool, check results
-        res = utils.call_external_process(
-            [
-                str(obs_seq_tool_ln.resolve()),
-            ],
-            cwd=tmp_dir,
+        res = external.run(
+            external.ExternalProcess(
+                [obs_seq_tool_ln], cwd=tmp_dir, log_filename="obs_sequence_tool.log"
+            )
         )
         if res.returncode != 0:
             logger.error(f"obs_sequence_tool exited with error code {res.returncode}!")
-            logger.error(res.stdout)
+            logger.error(res.output)
             raise RuntimeError(f"obs_sequence_tool failed with code {res.returncode}")
 
         # Move output file to the desired location
@@ -163,7 +165,7 @@ def obs_seq_to_nc(
     obs_seq: Path,
     nc: Path,
     binary_obs_sequence: bool = False,
-) -> utils.ExternalProcessResult:
+) -> external.ExternalProcessResult:
     """
     Uses the `obs_seq_to_netcdf` program to convert the given obs_seq file to netcdf format
 
@@ -217,16 +219,11 @@ def obs_seq_to_nc(
         namelist.write_namelist(nml, tmp_dir / "input.nml")
 
         # Call obs_seq_to_netcdf
-        res = utils.call_external_process(
-            [
-                str(binary_ln.resolve()),
-            ],
-            cwd=tmp_dir,
-        )
+        res = external.run(external.ExternalProcess([binary_ln], cwd=tmp_dir))
 
         if res.returncode != 0:
             logger.error(f"obs_seq_to_netcdf exited with error code {res.returncode}!")
-            logger.error(res.stdout)
+            logger.error(res.output)
             raise RuntimeError(f"obs_seq_to_netcdf failed with code {res.returncode}")
 
         # Move output file to the desired location

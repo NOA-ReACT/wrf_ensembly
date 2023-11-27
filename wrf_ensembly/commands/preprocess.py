@@ -5,7 +5,7 @@ from typing import Optional
 
 import typer
 from typing_extensions import Annotated
-from wrf_ensembly import config, experiment, namelist, utils, wrf
+from wrf_ensembly import config, experiment, external, namelist, utils, wrf
 from wrf_ensembly.console import logger
 
 app = typer.Typer()
@@ -162,13 +162,13 @@ def geogrid(experiment_path: Path):
         logger.error("Could not find geogrid.exe at {geogrid_path}")
         raise typer.Exit(1)
 
-    res = utils.call_external_process([geogrid_path], wps_dir)
-    if not res.success:
+    res = external.runc([geogrid_path], wps_dir, "geogrid.log")
+    if res.returncode != 0:
         logger.error("Error is fatal")
         raise typer.Exit(1)
 
     logger.info("Geogrid finished successfully!")
-    logger.debug(f"stdout:\n{res.stdout.strip()}")
+    logger.debug(f"stdout:\n{res.output}")
 
     return 0
 
@@ -224,8 +224,8 @@ def ungrib(experiment_path: Path):
         logger.error("Could not find ungrib.exe at {ungrib_path}")
         raise typer.Exit(1)
 
-    res = utils.call_external_process([ungrib_path], wps_dir)
-    if not res.success or "Successful completion of ungrib" not in res.stdout:
+    res = external.runc([ungrib_path], wps_dir, "ungrib.log")
+    if res.returncode != 0 or "Successful completion of ungrib" not in res.output:
         logger.error("Ungrib could not finish successfully")
         logger.error("Check the `ungrib.log` file for more info.")
         raise typer.Exit(1)
@@ -265,8 +265,8 @@ def metgrid(
         logger.error(f"Could not find metgrid.exe at {metgrid_path}")
         raise typer.Exit(1)
 
-    res = utils.call_external_process([metgrid_path], wps_dir)
-    if not res.success or "Successful completion of metgrid" not in res.stdout:
+    res = external.runc([metgrid_path], wps_dir, "metgrid.log")
+    if res.returncode != 0 or "Successful completion of metgrid" not in res.output:
         logger.error("Metgrid could not finish successfully")
         logger.error("Check the `metgrid.log` file for more info.")
         raise typer.Exit(1)
@@ -325,7 +325,7 @@ def real(experiment_path: Path, cycle: int):
         "1",
         str(real_path.resolve()),
     ]
-    utils.call_external_process(cmd, wrf_dir, "real.log")
+    external.runc(cmd, wrf_dir, "real.log")
     for log_file in wrf_dir.glob("rsl.*"):
         logger.add_log_file(log_file)
 

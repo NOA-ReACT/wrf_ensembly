@@ -1,0 +1,107 @@
+"""
+Functions related to running external commands
+"""
+
+import os
+import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional, Sequence
+
+import typer
+from wrf_ensembly.console import logger
+
+
+@dataclass
+class ExternalProcess:
+    """Represents a command to run in parallel"""
+
+    command: Sequence[str | Path]
+    cwd: Path = Path(os.getcwd())
+    log_filename: Optional[str] = None
+
+
+@dataclass
+class ExternalProcessResult:
+    """Represents a command that has been run in parallel"""
+
+    command: Sequence[str]
+    cwd: Path
+    returncode: int
+    output: str
+    log_filename: Optional[str] = None
+
+
+def run(proc: ExternalProcess):
+    """
+    Runs a command and returns the output
+    """
+
+    command = []
+    for c in proc.command:
+        if isinstance(c, Path):
+            command.append(str(c.resolve()))
+        else:
+            command.append(c)
+
+    p = subprocess.run(
+        command,
+        cwd=proc.cwd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if p.returncode != 0:
+        logger.error(f"Command {proc.command} failed with return code {p.returncode}")
+
+    # Write stdout/err to this command's log directory
+    if proc.log_filename is not None:
+        logger.write_log_file(proc.log_filename, p.stdout)
+
+    return ExternalProcessResult(
+        command=command,
+        cwd=proc.cwd,
+        returncode=p.returncode,
+        output=p.stdout,
+    )
+
+
+def runc(
+    command: Sequence[str | Path],
+    cwd: Path = Path(os.getcwd()),
+    log_filename: Optional[str] = None,
+):
+    """Brief form of run() in case you don't need the ExternalProcess object"""
+    return run(ExternalProcess(command, cwd, log_filename))
+
+
+def run_in_parallel(commands: list[ExternalProcess], max_processes: int = 1):
+    """
+    Runs a list of commands in parallel, with a maximum of `max_processes` processes running at the same time.
+    """
+
+    with ThreadPoolExecutor(max_workers=max_processes) as executor:
+        futures = [executor.submit(run, command) for command in commands]
+
+    for future in as_completed(futures):
+        res = future.result()
+        str_cmd = " ".join(res.command)
+
+        if res.returncode != 0:
+            logger.error(f"Command {str_cmd} failed with return code {res.returncode}")
+        else:
+            logger.debug(
+                f"Command {str_cmd} finished with return code {res.returncode}"
+            )
+        yield res
+
+
+def assert_all_successful(results: list[ExternalProcessResult]):
+    """
+    Assert that all commands in the list of results were successful
+    """
+
+    for res in results:
+        if res.returncode != 0:
+            raise typer.Exit(1)

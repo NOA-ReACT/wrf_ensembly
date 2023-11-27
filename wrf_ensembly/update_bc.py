@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from wrf_ensembly.config import Config
-from wrf_ensembly.utils import call_external_process
+from wrf_ensembly.external import ExternalProcess, run
 
 
 def update_wrf_bc(
@@ -50,9 +50,11 @@ def update_wrf_bc(
             "update_wrf_bc executable not found in DART/wrf/work directory"
         )
 
-    res = call_external_process(
-        [str(command.resolve())],
-        cwd=work_dir,
-        log_filename=log_filename,
+    res = run(
+        ExternalProcess(
+            [str(command.resolve())],
+            cwd=work_dir,
+            log_filename=log_filename,
+        )
     )
     return res

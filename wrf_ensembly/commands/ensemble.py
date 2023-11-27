@@ -6,11 +6,12 @@ import netCDF4
 import numpy as np
 import typer
 from rich.console import Console
-from rich.table import Column, Table
+from rich.table import Table
 from typing_extensions import Annotated
 
 from wrf_ensembly import (
     experiment,
+    external,
     member_info,
     namelist,
     nco,
@@ -149,7 +150,10 @@ def apply_pertubations(
             wrfbdy_path,
             log_filename=f"da_update_bc_member_{i}.log",
         )
-        if not res.success or "update_wrf_bc Finished successfully" not in res.stdout:
+        if (
+            res.returncode != 0
+            or "update_wrf_bc Finished successfully" not in res.output
+        ):
             logger.error(
                 f"Member {i}: bc_update.exe failed with exit code {res.returncode}"
             )
@@ -195,9 +199,11 @@ def advance_member(
 
     start_time = datetime.datetime.now()
     if skip_wrf:
-        res = utils.ExternalProcessResult(0, True, "", "")
+        res = external.ExternalProcessResult(
+            cmd, member_dir, 0, "--skip-wrf used, mock run!"
+        )
     else:
-        res = utils.call_external_process(cmd, member_dir, log_filename=f"wrf.log")
+        res = external.runc(cmd, member_dir, log_filename=f"wrf.log")
     end_time = datetime.datetime.now()
 
     for f in member_dir.glob("rsl.*"):
@@ -296,8 +302,8 @@ def filter(experiment_path: Path):
             str(exp.cfg.assimilation.filter_mpi_tasks),
             "./filter",
         ]
-    res = utils.call_external_process(cmd, dart_dir, log_filename="filter.log")
-    if not res.success or "Finished ... at" not in res.stdout:
+    res = external.runc(cmd, dart_dir, log_filename="filter.log")
+    if res.returncode != 0 or "Finished ... at" not in res.output:
         logger.error(f"filter failed with exit code {res.returncode}")
         raise typer.Exit(1)
 
@@ -313,7 +319,7 @@ def filter(experiment_path: Path):
     # Mark filter as completed
     for m in exp.members:
         m.cycles[current_cycle].filter = True
-        m.write_minfo()
+    exp.write_all_member_info()
 
 
 @app.command()
@@ -384,15 +390,19 @@ def statistics(
             ..., help="Cycle to compute statistics for. Current cycle if not set"
         ),
     ] = None,
+    jobs: Annotated[
+        int,
+        typer.Option(..., help="How many NCO commands to execute in parallel", min=1),
+    ] = 4,
     remove_member_forecasts: Annotated[
-        Optional[bool],
+        bool,
         typer.Option(
             ...,
             help="Remove the individual member forecast files after computing the statistics",
         ),
     ] = False,
     remove_member_analysis: Annotated[
-        Optional[bool],
+        bool,
         typer.Option(
             ...,
             help="Remove the individual member analysis files after computing the statistics",
@@ -412,23 +422,24 @@ def statistics(
 
     logger.info(f"Cycle: {exp.cycles[cycle]}")
 
+    # An array to collect all commands to run
+    commads = []
+
     # Compute analysis statistics
-    logger.info(f"Computing analysis statistics for cycle {cycle}")
     analysis_dir = exp.paths.analysis_path(cycle)
     analysis_files = list(analysis_dir.rglob("member_*/wrfout*"))
     if len(analysis_files) != 0:
         analysis_mean_file = analysis_dir / f"{analysis_files[0].name}_mean"
         analysis_mean_file.unlink(missing_ok=True)
-        nco.average(analysis_files, analysis_mean_file)
+        commads.append(nco.average(analysis_files, analysis_mean_file))
 
         analysis_sd_file = analysis_dir / f"{analysis_files[0].name}_sd"
         analysis_sd_file.unlink(missing_ok=True)
-        nco.standard_deviation(analysis_files, analysis_sd_file)
+        commads.append(nco.standard_deviation(analysis_files, analysis_sd_file))
     else:
         logger.warning("No analysis files found!")
 
     # Compute forecast statistics
-    logger.info(f"Computing forecast statistics for cycle {cycle}")
     forecast_dir = exp.paths.forecast_path(cycle)
     forecast_filenames = [x.name for x in forecast_dir.rglob("member_00/wrfout*")]
     for name in forecast_filenames:
@@ -441,11 +452,25 @@ def statistics(
 
         forecast_mean_file = forecast_dir / f"{name}_mean"
         forecast_mean_file.unlink(missing_ok=True)
-        nco.average(forecast_files, forecast_mean_file)
+        commads.append(nco.average(forecast_files, forecast_mean_file))
 
         forecast_sd_file = forecast_dir / f"{name}_sd"
         forecast_sd_file.unlink(missing_ok=True)
-        nco.standard_deviation(forecast_files, forecast_sd_file)
+        commads.append(nco.standard_deviation(forecast_files, forecast_sd_file))
+
+    # Execute commands
+    failure = False
+    logger.info(f"Executing {len(commads)} nco commands in parallel, using {jobs} jobs")
+    for res in external.run_in_parallel(commads, jobs):
+        str_cmd = " ".join(res.command)
+        if res.returncode != 0:
+            logger.error(f"nco command failed with exit code {res.returncode}")
+            logger.error(res.output)
+            failure = True
+
+    if failure:
+        logger.error("One or more nco commands failed, exiting")
+        raise typer.Exit(1)
 
     # Remove files if required
     if remove_member_forecasts:
@@ -576,13 +601,15 @@ def cycle(experiment_path: Path, use_forecast: bool = False):
             bdy_target_file,
             log_filename=f"da_update_bc_analysis_member_{member}.log",
         )
-        if not res.success or "update_wrf_bc Finished successfully" not in res.stdout:
+        if (
+            res.returncode != 0
+            or "update_wrf_bc Finished successfully" not in res.output
+        ):
             logger.error(
                 f"Member {member}: bc_update.exe failed with exit code {res.returncode}"
             )
-            logger.error(res.stdout)
-            # TODO raise exception?
-            continue
+            logger.error(res.output)
+            raise typer.Exit(1)
 
         # Write namelist
         namelist_path = member.path / "namelist.input"
