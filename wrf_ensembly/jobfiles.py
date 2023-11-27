@@ -174,6 +174,13 @@ def generate_statistics_jobfile(
 
     exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
 
+    jobs = exp.cfg.slurm.directives_statistics.get("ntasks", -1)
+    if jobs == -1:
+        logger.warning(
+            "ntasks not set in `slurm.directives_small``. Using default value of 1"
+        )
+        jobs = 1
+
     if cycle is not None:
         job_name = f"{exp.cfg.metadata.name}_statistics_cycle_{cycle}"
         jobfile = exp.paths.jobfiles / f"cycle_{cycle}_statistics.job.sh"
@@ -181,7 +188,7 @@ def generate_statistics_jobfile(
         job_name = f"{exp.cfg.metadata.name}_statistics"
         jobfile = exp.paths.jobfiles / "statistics.job.sh"
 
-    cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly ensemble statistics {exp.paths.experiment_path}"
+    cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly ensemble statistics {exp.paths.experiment_path} --jobs {jobs}"
     if cycle is not None:
         cmd += f" {cycle}"
     if delete_members:
@@ -190,7 +197,8 @@ def generate_statistics_jobfile(
     jobfile.write_text(
         templates.generate(
             "slurm_job.sh.j2",
-            slurm_directives=exp.cfg.slurm.directives_small | {"job-name": job_name},
+            slurm_directives=exp.cfg.slurm.directives_statistics
+            | {"job-name": job_name},
             env_modules=exp.cfg.slurm.env_modules,
             commands=[cmd],
         )

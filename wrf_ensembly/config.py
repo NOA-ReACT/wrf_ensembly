@@ -173,6 +173,9 @@ class SlurmConfig(BaseModel):
     directives_small: dict[str, str] = {}
     """SLURM directives to add to small jobs (i.e., wrf-ensembly python steps)"""
 
+    directives_statistics: dict[str, str] = {}
+    """SLURM directives to add to statistics jobs"""
+
 
 class Config(BaseModel):
     experiment_path: Path | None
