@@ -1,3 +1,4 @@
+from genericpath import exists
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -35,14 +36,13 @@ def create(
     # Create directory tree, add config file
     root = experiment_path
     try:
-        root.mkdir(parents=True)
+        root.mkdir(parents=True, exist_ok=True)
     except OSError as ex:
         logger.error(f"Could not create directory `{root}`: {ex}")
         raise typer.Exit(1)
 
     if config_path is not None:
         utils.copy(config_path, experiment_path / "config.toml")
-        cfg = config.read_config(experiment_path / "config.toml")
     else:
         # TODO Fix this, doesn't work like that
         # We gotta create a default config file
@@ -51,23 +51,23 @@ def create(
         config_path = experiment_path / "config.toml"
         config.write_config(config_path, cfg)
 
+    exp = experiment.Experiment(experiment_path)
+
     # Create sub-directories
-    (root / cfg.directories.observations_sub).mkdir(parents=True)
-    (root / cfg.directories.work_sub).mkdir(parents=True)
-    (root / cfg.directories.work_sub / "preprocessing").mkdir()
-    (root / "jobfiles").mkdir()
+    exp.paths.obs.mkdir()
+    exp.paths.work.mkdir()
+    exp.paths.work_preprocessing.mkdir()
+    exp.paths.jobfiles.mkdir()
 
-    output_dir = root / cfg.directories.output_sub
-    output_dir.mkdir(parents=True)
-    (output_dir / "analysis").mkdir()
-    (output_dir / "forecasts").mkdir()
-    (output_dir / "dart").mkdir()
-    (output_dir / "initial_boundary").mkdir()
-    (output_dir / "diagnostics").mkdir()
+    exp.paths.data.mkdir()
+    exp.paths.data_analysis.mkdir()
+    exp.paths.data_forecasts.mkdir()
+    exp.paths.data_dart.mkdir()
+    exp.paths.data_icbc.mkdir()
+    exp.paths.data_diag.mkdir()
 
-    for j in range(cfg.assimilation.n_members):
-        member_dir = cfg.get_member_dir(j)
-        member_dir.mkdir(parents=True)
+    for j in range(exp.cfg.assimilation.n_members):
+        exp.paths.member_path(j).mkdir(parents=True)
 
     logger.info("Experiment created successfully!")
 

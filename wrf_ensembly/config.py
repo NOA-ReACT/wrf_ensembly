@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 import os
 from datetime import datetime
 from pathlib import Path
@@ -11,7 +12,8 @@ from pydantic import BaseModel
 from wrf_ensembly.console import console
 
 
-class MetadataConfig(BaseModel):
+@dataclass
+class MetadataConfig:
     """Metadata about the experiment (name, ...)"""
 
     name: str
@@ -21,7 +23,8 @@ class MetadataConfig(BaseModel):
     """Description of the experiment"""
 
 
-class DirectoriesConfig(BaseModel):
+@dataclass
+class DirectoriesConfig:
     """Info about where the experiment will run (in, out, models,...)"""
 
     wrf_root: Path
@@ -43,14 +46,15 @@ class DirectoriesConfig(BaseModel):
     """Work directory for pre-processing and ensemble members, relative to the experiment root."""
 
 
-class DomainControlConfig(BaseModel):
+@dataclass
+class DomainControlConfig:
     xy_resolution: tuple[int, int]
     """Space between two grid points in the x and y directions, kilometers. Corresponds to dx and dy."""
 
     xy_size: tuple[int, int]
     """Number of grid points in the x and y directions. Corresponds to e_we and e_sn."""
 
-    projection: str = "lambert"
+    projection: str
     """Projection used for the grid"""
 
     ref_lat: float
@@ -69,7 +73,8 @@ class DomainControlConfig(BaseModel):
     """Standard longitude for the projection"""
 
 
-class CycleConfig(BaseModel):
+@dataclass
+class CycleConfig:
     """Configuration overrides for a specific cycle"""
 
     duration: Optional[int]
@@ -79,7 +84,8 @@ class CycleConfig(BaseModel):
     """Override the output interval for this cycle"""
 
 
-class TimeControlConfig(BaseModel):
+@dataclass
+class TimeControlConfig:
     """Configuration related to the experiment time period."""
 
     start: datetime
@@ -97,11 +103,12 @@ class TimeControlConfig(BaseModel):
     analysis_interval: int = 60 * 6
     """Time between analysis/assimilation cycles, minutes"""
 
-    cycles: Dict[int, CycleConfig] = {}
+    cycles: Dict[int, CycleConfig] = field(default_factory=dict)
     """Configuration overrides for specific cycles"""
 
 
-class DataConfig(BaseModel):
+@dataclass
+class DataConfig:
     """Configuration related to the data used in the experiment."""
 
     wps_geog: Path
@@ -117,7 +124,8 @@ class DataConfig(BaseModel):
     """Vtable to use for the meteorological fields GRIB files"""
 
 
-class AssimilationConfig(BaseModel):
+@dataclass
+class AssimilationConfig:
     """Configuration related assimilation"""
 
     n_members: int
@@ -133,7 +141,8 @@ class AssimilationConfig(BaseModel):
     """If != 1, then filter will be executed w/ MPI and this many tasks (mpirun -n <filter_mpi_tasks>). Also check `slurm.mpirun_command`."""
 
 
-class PertubationVariableConfig(BaseModel):
+@dataclass
+class PertubationVariableConfig:
     mean: float = 1.0
     """Mean of the pertubation field"""
 
@@ -147,17 +156,19 @@ class PertubationVariableConfig(BaseModel):
         return f"mean={self.mean:.2f}, sd={self.sd:.2f}, rounds={self.rounds}"
 
 
-class PertubationsConfig(BaseModel):
+@dataclass
+class PertubationsConfig:
     """Configuration about pertubation fields"""
 
-    variables: dict[str, PertubationVariableConfig] = {}
+    variables: dict[str, PertubationVariableConfig] = field(default_factory=dict)
     """Configuration for each variable"""
 
     seed: Optional[int] = None
     """RNG seed to use when generating pertubation fields. If none, it will be randomly generated."""
 
 
-class SlurmConfig(BaseModel):
+@dataclass
+class SlurmConfig:
     sbatch_command: str = "sbatch --parsable"
     """Command for sbatch (should probably include `--parsable`)"""
 
@@ -167,27 +178,24 @@ class SlurmConfig(BaseModel):
     mpirun_command: str = "mpirun"
     """Command to run an MPI binary (might be srun in some clusters)"""
 
-    env_modules: list[str] = []
+    env_modules: list[str] = field(default_factory=list)
     """List of environment modules to load in each job"""
 
-    directives_large: dict[str, str] = {}
+    directives_large: dict[str, str | int] = field(default_factory=dict)
     """SLURM directives to add to the jobfile for big jobs (i.e., ensemble member advance)"""
 
-    directives_small: dict[str, str] = {}
+    directives_small: dict[str, str | int] = field(default_factory=dict)
     """SLURM directives to add to small jobs (i.e., wrf-ensembly python steps)"""
 
-    directives_statistics: dict[str, str] = {}
+    directives_statistics: dict[str, str | int] = field(default_factory=dict)
     """SLURM directives to add to statistics jobs"""
 
 
 class Config(BaseModel):
-    experiment_path: Path | None
-    """Experiment path, assumed to be the parent of the config file location"""
-
     metadata: MetadataConfig
     """Metadata about the experiment (name, ...)"""
 
-    environment: dict[str, str] = {}
+    environment: dict[str, str] = field(default_factory=dict)
     """Environment variables to set when running the experiment"""
 
     directories: DirectoriesConfig
@@ -214,27 +222,6 @@ class Config(BaseModel):
     wrf_namelist: dict[str, dict[str, Any]]
     """Overrides for the WRF namelist"""
 
-    def get_member_dir(self, id: int) -> Path:
-        """
-        Get the work directory for given ensemble member
-
-        Args:
-            id: ID of the ensemble member
-
-        Returns:
-            Path to the work directory for that member
-        """
-
-        if self.experiment_path is None:
-            raise ValueError("Experiment path not set")
-
-        return (
-            self.experiment_path
-            / self.directories.work_sub
-            / "ensemble"
-            / f"member_{id:02d}"
-        ).resolve()
-
 
 def read_config(path: Path, inject_environment=True) -> Config:
     """
@@ -253,8 +240,6 @@ def read_config(path: Path, inject_environment=True) -> Config:
         for k, v in cfg.environment.items():
             os.environ[k] = str(v)
 
-    cfg.experiment_path = path.parent
-
     return cfg
 
 
@@ -267,7 +252,7 @@ def write_config(path: Path, cfg: Config):
         cfg: Config object to write
     """
     with open(path, "wb") as f:
-        tomli_w.dump(cfg.dict(), f)
+        tomli_w.dump(cfg.model_dump(), f)
 
 
 def inspect(cfg: Config):
