@@ -121,16 +121,33 @@ def apply_pertubations(
             wrfinput_path = member_dir / "wrfinput_d01"
             wrfbdy_path = member_dir / "wrfbdy_d01"
 
+            wrfinput_copy_path = member_dir / "wrfinput_d01_copy"
+            wrfinput_copy_path.unlink(missing_ok=True)
+            wrfbdy_copy_path = member_dir / "wrfbdy_d01_copy"
+            wrfbdy_copy_path.unlink(missing_ok=True)
+
+            # Copy wrfinput and wrfbdy to a temporary file
+            utils.copy(wrfinput_path, wrfinput_copy_path)
+            utils.copy(wrfbdy_path, wrfbdy_copy_path)
+
             # Modify wrfinput accoarding to pertubation configuration
             logger.info(f"Member {i}: Applying pertubations to {wrfinput_path}")
-            with netCDF4.Dataset(wrfinput_path, "r+") as ds:  # type: ignore
+            with netCDF4.Dataset(wrfinput_copy_path, "r+") as ds:  # type: ignore
+                # Check if pertubations have already been applied
+                if "wrf_ensembly_perts" in ds.ncattrs():
+                    logger.warning(f"Pertubations already applied, skipping file")
+                    continue
+                ds.wrf_ensembly_perts = "True"
+
                 for variable, pertubation in cfg.pertubations.variables.items():
                     logger.info(f"Member {i}: Perturbing {variable} by {pertubation}")
                     var = ds[variable]
+
                     field = pertubations.generate_pertubation_field(
                         var.shape, pertubation.mean, pertubation.sd, pertubation.rounds
                     )
                     ds[variable][:] += field
+                    ds[variable].perts = str(pertubation)
 
                     ## Store pertubation field in netcdf file
                     # Copy dimensions if they don't exist
@@ -155,6 +172,7 @@ def apply_pertubations(
                     field_var[i, :] = field
 
             # Update BC to match
+            logger.info("Updating boundary conditions...")
             res = update_bc.update_wrf_bc(
                 cfg,
                 wrfinput_path,
@@ -170,6 +188,12 @@ def apply_pertubations(
                 )
                 raise typer.Exit(1)
             logger.info(f"Member {i}: bc_update.exe finished successfully")
+
+            # Move temporary file to original file
+            wrfinput_path.unlink()
+            utils.copy(wrfinput_copy_path, wrfinput_path)
+            wrfbdy_path.unlink()
+            utils.copy(wrfbdy_copy_path, wrfbdy_path)
 
     logger.info("Finished applying pertubations")
     return 0

@@ -143,6 +143,9 @@ class PertubationVariableConfig(BaseModel):
     rounds: int = 10
     """Number of rounds of smoothing to apply to the pertubation field"""
 
+    def __str__(self) -> str:
+        return f"mean={self.mean:.2f}, sd={self.sd:.2f}, rounds={self.rounds}"
+
 
 class PertubationsConfig(BaseModel):
     """Configuration about pertubation fields"""
