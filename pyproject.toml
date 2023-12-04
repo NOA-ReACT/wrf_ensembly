@@ -6,6 +6,9 @@ authors = ["Thanasis Georgiou <ageorgiou@noa.gr>"]
 readme = "README.md"
 packages = [{ include = "wrf_ensembly" }]
 
+[tool.poetry.scripts]
+wrf-ensembly = "wrf_ensembly:main"
+
 [tool.poetry.dependencies]
 python = "^3.10,<3.13"
 typer = "^0.9.0"
@@ -23,3 +26,8 @@ xarray = "^2023.5.0"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.isort]
+profile = "black"
+src_paths = ["wrf_ensembly"]
+float_to_top = true
