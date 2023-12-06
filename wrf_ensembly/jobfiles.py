@@ -29,12 +29,15 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
     jobfile = exp.paths.jobfiles / "preprocess.sh"
     jobfile.parent.mkdir(parents=True, exist_ok=True)
 
-    jobname = f"{exp.cfg.metadata.name}_preprocess"
+    dynamic_directives = {
+        "job-name": f"{exp.cfg.metadata.name}_preprocess",
+        "output": f"{exp.paths.logs_slurm}/%j-preprocess.out",
+    }
 
     jobfile.write_text(
         templates.generate(
             "slurm_job.sh.j2",
-            slurm_directives=exp.cfg.slurm.directives_large | {"job-name": jobname},
+            slurm_directives=exp.cfg.slurm.directives_large | dynamic_directives,
             env_modules=exp.cfg.slurm.env_modules,
             commands=commands,
         )
@@ -66,14 +69,17 @@ def generate_advance_jobfiles(exp: experiment.Experiment, cycle: int) -> list[Pa
             continue
 
         i = member.i
-        job_name = f"{exp.cfg.metadata.name}_cycle_{cycle}_member_{i}"
         jobfile = exp.paths.jobfiles / f"cycle_{cycle}_advance_member_{i}.job.sh"
+
+        dynamic_directives = {
+            "job-name": f"{exp.cfg.metadata.name}_cycle_{cycle}_member_{i}",
+            "output": f"{exp.paths.logs_slurm}/%j-advance_cycle_{cycle}_member_{i}.out",
+        }
 
         jobfile.write_text(
             templates.generate(
                 "slurm_job.sh.j2",
-                slurm_directives=exp.cfg.slurm.directives_large
-                | {"job-name": job_name},
+                slurm_directives=exp.cfg.slurm.directives_large | dynamic_directives,
                 env_modules=exp.cfg.slurm.env_modules,
                 commands=[f"{base_cmd} {i}"],
             )
@@ -117,8 +123,12 @@ def generate_make_analysis_jobfile(
             f"Observation file {obs_file} does not exist! Filter won't run if it is not created for cycle {cycle}"
         )
 
-    job_name = f"{exp.cfg.metadata.name}_analysis_cycle_{cycle}"
     jobfile = exp.paths.jobfiles / f"cycle_{cycle}_make_analysis.job.sh"
+
+    dynamic_directives = {
+        "job-name": f"{exp.cfg.metadata.name}_analysis_cycle_{cycle}",
+        "output": f"{exp.paths.logs_slurm}/%j-analysis_cycle_{cycle}.out",
+    }
 
     base_cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly ensemble %SUBCOMMAND% {exp.paths.experiment_path}"
     commands = [
@@ -145,7 +155,7 @@ def generate_make_analysis_jobfile(
     jobfile.write_text(
         templates.generate(
             "slurm_job.sh.j2",
-            slurm_directives=exp.cfg.slurm.directives_small | {"job-name": job_name},
+            slurm_directives=exp.cfg.slurm.directives_small | dynamic_directives,
             env_modules=exp.cfg.slurm.env_modules,
             commands=commands,
         )
@@ -188,6 +198,11 @@ def generate_statistics_jobfile(
         job_name = f"{exp.cfg.metadata.name}_statistics"
         jobfile = exp.paths.jobfiles / "statistics.job.sh"
 
+    dynamic_directives = {
+        "job-name": job_name,
+        "output": f"{exp.paths.logs_slurm}/%j-statistics.out",
+    }
+
     cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly ensemble statistics {exp.paths.experiment_path} --jobs {jobs}"
     if cycle is not None:
         cmd += f" {cycle}"
@@ -197,8 +212,7 @@ def generate_statistics_jobfile(
     jobfile.write_text(
         templates.generate(
             "slurm_job.sh.j2",
-            slurm_directives=exp.cfg.slurm.directives_statistics
-            | {"job-name": job_name},
+            slurm_directives=exp.cfg.slurm.directives_statistics | dynamic_directives,
             env_modules=exp.cfg.slurm.env_modules,
             commands=[cmd],
         )

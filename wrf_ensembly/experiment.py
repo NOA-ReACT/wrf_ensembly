@@ -134,6 +134,10 @@ class ExperimentPaths:
         self.work_preprocessing_wrf = self.work_preprocessing / "WRF"
         self.work_preprocessing_wps = self.work_preprocessing / "WPS"
 
+        # Logs
+        self.logs = experiment_path / "logs"
+        self.logs_slurm = self.logs / "slurm"
+
     def member_path(self, i: int) -> Path:
         """
         Get the work directory for given ensemble member
