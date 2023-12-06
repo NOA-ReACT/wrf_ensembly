@@ -65,16 +65,16 @@ class Logger:
         shutil.copyfile(source, self.log_dir / filename)
 
     def info(self, msg: str):
-        self.logger.info(msg)
+        self.logger.info(msg, stacklevel=2)
 
     def debug(self, msg: str):
-        self.logger.debug(msg)
+        self.logger.debug(msg, stacklevel=2)
 
     def error(self, msg: str):
-        self.logger.error(msg)
+        self.logger.error(msg, stacklevel=2)
 
     def warning(self, msg: str):
-        self.logger.warning(msg)
+        self.logger.warning(msg, stacklevel=2)
 
 
 logger = Logger()
