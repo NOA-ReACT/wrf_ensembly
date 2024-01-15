@@ -142,6 +142,13 @@ class AssimilationConfig:
 
 
 @dataclass
+class GeogridConfig:
+    """Configuration related to geogrid (geographical data preprocessing)."""
+
+    table = Path("GEOGRID.TBL")
+
+
+@dataclass
 class PertubationVariableConfig:
     mean: float = 1.0
     """Mean of the pertubation field"""
@@ -212,6 +219,9 @@ class Config(BaseModel):
 
     assimilation: AssimilationConfig
     """Configuration related to assimilation."""
+
+    geogrid: GeogridConfig
+    """Configuration related to geogrid (geographical data preprocessing)."""
 
     pertubations: PertubationsConfig
     """Configuration related to pertubation of the initial conditions."""

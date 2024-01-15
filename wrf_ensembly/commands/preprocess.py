@@ -155,6 +155,15 @@ def geogrid(experiment_path: Path):
         logger.warning("geo_em.d01.nc already exists, skipping geogrid.exe")
         return 0
 
+    # Link the correct table
+    table_path = wps_dir / "geogrid" / exp.cfg.geogrid.table
+    table_path.resolve()
+
+    table_target = wps_dir / "geogrid" / "GEOGRID.TBL"
+    table_target.unlink(missing_ok=True)
+    table_target.symlink_to(table_path)
+    logger.info(f"Linked {table_path} to {table_target}")
+
     utils.copy(exp.paths.work_preprocessing / "namelist.wps", wps_dir / "namelist.wps")
 
     geogrid_path = wps_dir / "geogrid.exe"
