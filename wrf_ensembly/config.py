@@ -77,10 +77,10 @@ class DomainControlConfig:
 class CycleConfig:
     """Configuration overrides for a specific cycle"""
 
-    duration: Optional[int]
+    duration: Optional[int] = None
     """Duration of the cycle in minutes"""
 
-    output_interval: Optional[int]
+    output_interval: Optional[int] = None
     """Override the output interval for this cycle"""
 
 
