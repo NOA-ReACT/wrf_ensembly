@@ -66,11 +66,9 @@ def create(
     exp.paths.data_icbc.mkdir()
     exp.paths.data_diag.mkdir()
 
-    exp.paths.logs.mkdir()
+    exp.paths.logs.mkdir(exist_ok=True)
     exp.paths.logs_slurm.mkdir()
 
-    for j in range(exp.cfg.assimilation.n_members):
-        exp.paths.member_path(j).mkdir(parents=True)
 
     logger.info("Experiment created successfully!")
 
