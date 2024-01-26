@@ -145,7 +145,7 @@ class AssimilationConfig:
 class GeogridConfig:
     """Configuration related to geogrid (geographical data preprocessing)."""
 
-    table = Path("GEOGRID.TBL")
+    table: Optional[str] = "GEOGRID.TBL"
 
 
 @dataclass
