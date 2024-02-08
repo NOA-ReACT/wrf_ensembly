@@ -66,6 +66,19 @@ def setup(experiment_path: Path):
         else:
             wrf_namelist[name] = group
 
+    # chem_in_opt override for chemical initial conditions
+    if exp.cfg.data.manage_chem_ic:
+        if "chem" in wrf_namelist:
+            # If the user has already set chem_in_opt, warn about overriding
+            if "chem_in_opt" in wrf_namelist["chem"]:
+                logger.warning(
+                    "chem_in_opt already set in WRF namelist, overriding with 1. Check `Data.manage_chem_ic` in config.toml to disable this."
+                )
+
+            wrf_namelist["chem"]["chem_in_opt"] = 1
+        else:
+            wrf_namelist["chem"] = {"chem_in_opt": 1}
+
     for i in range(exp.cfg.assimilation.n_members):
         member_dir = exp.paths.member_path(i)
         member_dir.mkdir(parents=True, exist_ok=True)

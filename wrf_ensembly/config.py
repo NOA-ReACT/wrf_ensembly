@@ -123,6 +123,9 @@ class DataConfig:
     meteorology_vtable: Path = Path("Vtable.ERA-interim.pl")
     """Vtable to use for the meteorological fields GRIB files"""
 
+    manage_chem_ic: bool = False
+    """If true, use the chemical initial conditions. In practice, this makes sure that the `chem_in_opt` namelist variable is set to 0 when running `real.exe` and to 1 when running `wrf.exe`"""
+
 
 @dataclass
 class AssimilationConfig:

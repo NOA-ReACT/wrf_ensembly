@@ -113,6 +113,19 @@ def wrf_namelist(
         else:
             wrf_namelist[name] = group
 
+    # chem_in_opt override for chemical initial conditions
+    if cfg.data.manage_chem_ic:
+        if "chem" in wrf_namelist:
+            # If the user has already set chem_in_opt, warn about overriding
+            if "chem_in_opt" in wrf_namelist["chem"]:
+                logger.warning(
+                    "chem_in_opt already set in WRF namelist, overriding with 0. Check `Data.manage_chem_ic` in config.toml to disable this."
+                )
+
+            wrf_namelist["chem"]["chem_in_opt"] = 0
+        else:
+            wrf_namelist["chem"] = {"chem_in_opt": 0}
+
     preprocess_dir = exp.paths.work_preprocessing
     namelist_path = preprocess_dir / "namelist.input"
     namelist.write_namelist(wrf_namelist, namelist_path)
