@@ -6,6 +6,7 @@ Mainly used in `experiment.py` to validate the toml file after reading.
 """
 
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -19,10 +20,10 @@ class MemberSection(BaseModel):
 
 
 class CycleSection(BaseModel):
-    runtime: datetime | None
+    runtime: Optional[datetime] = None
     """When the cycle was processed"""
 
-    walltime_s: int | None
+    walltime_s: Optional[int] = None
     """Walltime in seconds"""
 
     advanced: bool
@@ -36,7 +37,7 @@ class CycleSection(BaseModel):
 
 
 class MemberInfo(BaseModel):
-    metadata: dict[str, str] = {}
+    metadata: Optional[dict[str, str]] = {}
 
     member: MemberSection
 
