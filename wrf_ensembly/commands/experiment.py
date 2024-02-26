@@ -1,8 +1,7 @@
 from genericpath import exists
 import shutil
 from pathlib import Path
-from typing import Optional
-import typing_extensions
+import pkg_resources
 
 import typer
 from rich.console import Console
@@ -21,13 +20,10 @@ def create(
         Path,
         typer.Argument(..., help="Where the experiment directory should be created"),
     ],
-    config_path: Annotated[
-        Optional[Path],
-        typer.Option(
-            ...,
-            help="Path to the config file to use for the experiment. If not specified, the default config file will be used.",
-        ),
-    ] = None,
+    template: Annotated[
+        str,
+        typer.Argument(..., help="Name of the config template to use")
+    ],
 ):
     """Create a new experiment directory."""
 
@@ -41,15 +37,11 @@ def create(
         logger.error(f"Could not create directory `{root}`: {ex}")
         raise typer.Exit(1)
 
-    if config_path is not None:
-        utils.copy(config_path, experiment_path / "config.toml")
-    else:
-        # TODO Fix this, doesn't work like that
-        # We gotta create a default config file
-        raise NotImplementedError("Default config file not implemented yet")
-        cfg = config.Config()
-        config_path = experiment_path / "config.toml"
-        config.write_config(config_path, cfg)
+    config_template_path = pkg_resources.resource_filename(
+        "wrf_ensembly", f"templates/{template}.toml"
+    )
+    config_template_path = Path(config_template_path)
+    utils.copy(config_template_path, root / "config.toml")
 
     exp = experiment.Experiment(experiment_path)
 
@@ -68,7 +60,6 @@ def create(
 
     exp.paths.logs.mkdir(exist_ok=True)
     exp.paths.logs_slurm.mkdir()
-
 
     logger.info("Experiment created successfully!")
 

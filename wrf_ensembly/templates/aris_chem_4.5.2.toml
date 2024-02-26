@@ -1,0 +1,248 @@
+[metadata]
+name = "aris_chem_4.5.2"
+description = """\
+Configuration sample for WRF-CHEM, v4.5.2 on ARIS
+Domain consist of the general North Atlantic region, 30x30 km resolution
+Time period is September 2021, 01 00:00 - 14 00:00
+"""
+
+[environment]
+PREFIX = "/users/pr005/ageorg/L2A_WRF"
+WRF_DIR = "/users/pr005/ageorg/L2A_WRF/WRFV4.5.2"
+
+[directories]
+wrf_root = "/users/pr005/ageorg/L2A_WRF/WRFV4.5.2"
+wps_root = "/users/pr005/ageorg/L2A_WRF/WPS-4.5"
+dart_root = "/users/pr005/ageorg/L2A_WRF/DART-aeolus"
+
+[domain_control]
+xy_resolution = [30, 30] # km
+xy_size = [400, 160]     # grid points
+
+projection = "lambert"
+ref_lat = 23
+ref_lon = -30.0
+truelat1 = 33.0
+truelat2 = 63.0
+stand_lon = -20.0
+
+[time_control]
+# Start-end times for the whole experiment (all assimilation cycles)
+start = 2021-09-01T00:00:00Z
+end = 2021-09-14T00:00:00Z
+# Corresponds to interval_seconds in WRF, but in minutes
+boundary_update_interval = 360 # 6h
+# Output file interval, in minutes (WRF history_interval)
+output_interval = 120 # 2h
+# How often the analysis is run, in minutes
+analysis_interval = 360 # 6h
+
+# Spin up cycle
+[time_control.cycles.0]
+duration = 1440
+
+[geogrid]
+table = "GEOGRID.TBL.ARW_CHEM"
+
+[data]
+wps_geog = "/work2/pr005/ageorg/wrf/WPS_GEOG"
+meteorology = "/work2/pr005/ageorg/L2A/data/ERA5_CDS_September_2021"
+meteorology_vtable = "Vtable.ERA-interim.pl"
+
+
+[pertubations.variables.V]
+mean = 1
+sd = 8
+rounds = 5
+
+[pertubations.variables.U]
+mean = 1
+sd = 8
+rounds = 5
+
+[assimilation]
+n_members = 32
+# Which variables to carry forward from the previous cycle
+cycled_variables = [
+  'U',
+  'V',
+  'P',
+  'PH',
+  'T',
+  'MU',
+  'QVAPOR',
+  'QCLOUD',
+  'QRAIN',
+  'QICE',
+  'QSNOW',
+  'QGRAUP',
+  'QNICE',
+  'QNRAIN',
+  'U10',
+  'V10',
+  'T2',
+  'Q2',
+  'PSFC',
+  'TSLB',
+  'SMOIS',
+  'TSK',
+]
+# Which variables to use in the state vector
+# Should probably match the DART namelist!
+state_variables = ['U', 'V', 'W', 'PH', 'T', 'MU', 'QVAPOR', 'PSFC']
+
+[slurm]
+python_command = "source /users/pr005/ageorg/pyenvs/wrf/bin/activate && python"
+env_modules = [
+  "gnu/8",
+  "jasper/1.900.1",
+  "intel/18",
+  "intelmpi/2018",
+  "szip/2.1",
+  "java",
+  "gsl",
+  "antlr",
+  "udunits2",
+  "nco",
+]
+
+[slurm.directives_large]
+partition = "compute"
+nodes = 1
+ntasks-per-node = 20
+mail-user = "ageorgiou@noa.gr"
+mail-type = "END,FAIL"
+account = "pr014048_thin"
+cpus-per-task = 1
+
+[slurm.directives_small]
+partition = "compute"
+nodes = 1
+ntasks-per-node = 1
+mail-user = "ageorgiou@noa.gr"
+mail-type = "END,FAIL"
+account = "pr014048_thin"
+cpus-per-task = 1
+
+[slurm.directives_statistics]
+partition = "compute"
+nodes = 1
+ntasks-per-node = 20
+ntasks = 20
+mail-user = "ageorgiou@noa.gr"
+mail-type = "END,FAIL"
+account = "pr014048_thin"
+cpus-per-task = 1
+
+# -- WRF NAMELIST OPTIONS --
+[wrf_namelist]
+
+[wrf_namelist.time_control]
+input_from_file = true
+history_interval = 60
+frames_per_outfile = 1
+restart = false
+restart_interval = 3600
+io_form_history = 2
+io_form_restart = 2
+io_form_input = 2
+io_form_boundary = 2
+io_form_auxhist2 = 2
+debug_level = 0
+diag_print = 0
+
+[wrf_namelist.domains]
+time_step = 120             # 6*dx in km https://esrl.noaa.gov/gsd/wrfportal/namelist_input_options.html
+time_step_fract_num = 0
+time_step_fract_den = 1
+max_dom = 1
+e_vert = 45
+num_metgrid_levels = 38
+num_metgrid_soil_levels = 4
+grid_id = 1
+parent_id = 0
+i_parent_start = 1
+j_parent_start = 1
+parent_grid_ratio = 1
+parent_time_step_ratio = 1
+feedback = 1
+smooth_option = 0
+p_top_requested = 5000
+smooth_cg_topo = true
+dzstretch_s = 1.1
+
+
+[wrf_namelist.physics]
+sst_update = 0
+mp_physics = 10
+progn = 1
+do_radar_ref = 1
+ra_lw_physics = 4
+ra_sw_physics = 4
+radt = 20
+sf_sfclay_physics = 2
+sf_surface_physics = 2
+bl_pbl_physics = 2
+bldt = 0
+cu_physics = 5
+cu_diag = 1
+cudt = 0
+ishallow = 0
+isfflx = 1
+ifsnow = 1
+icloud = 1
+surface_input_source = 1
+num_soil_layers = 4
+sf_urban_physics = 0
+mp_zero_out = 2
+mp_zero_out_thresh = 1e-12
+maxiens = 1
+maxens = 3
+maxens2 = 3
+maxens3 = 16
+ensdim = 144
+cu_rad_feedback = true
+
+
+[wrf_namelist.dynamics]
+hybrid_opt = 2
+w_damping = 0
+diff_opt = 2
+km_opt = 4             # eddy coefficient, recommended value for real runs
+khdif = 0
+kvdif = 0
+non_hydrostatic = true
+gwd_opt = 1            # Add gravity wave drag & blocking
+
+# Recommended advection settings for WRF-CHEM, 2 = monotonic
+chem_adv_opt = 2
+moist_adv_opt = 2
+scalar_adv_opt = 2
+tke_adv_opt = 2
+diff_6th_opt = 0   # No 6th order diffusion
+
+[wrf_namelist.namelist_quilt]
+nio_tasks_per_group = 0
+nio_groups = 1
+
+[wrf_namelist.bdy_control]
+spec_bdy_width = 5
+specified = true
+
+[wrf_namelist.chem]
+chem_dt = 0     # Use met. model timestep
+chem_in_opt = 0 # Do not read ic/bc from a wrfchemi file, either read from wrfinput or use idealized profiles
+
+chem_opt = 300 # GOCART aerosols without chemistry
+dust_opt = 3   # AFWA emission scheme
+emiss_opt = 0  # No anthropogenic emissions
+seas_opt = 1   # Use seasalt
+
+# Disable various chemical processes
+phot_opt = 0
+gaschem_onoff = 0
+gas_drydep_opt = 0
+
+# Radiative effects
+aer_ra_feedback = 0
+cu_rad_feedback = false
