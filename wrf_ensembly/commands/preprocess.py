@@ -1,3 +1,4 @@
+import os
 import shutil
 from itertools import chain
 from pathlib import Path
@@ -300,7 +301,7 @@ def metgrid(
 
 
 @app.command()
-def real(experiment_path: Path, cycle: int):
+def real(experiment_path: Path, cycle: int, cores=None):
     """
     Run real.exe to produce the initial (wrfinput) and boundary (wrfbdy) conditions for
     one cycle. You should run this for all cycles to have initial/boundary conditions for
@@ -338,6 +339,14 @@ def real(experiment_path: Path, cycle: int):
         wrf_dir / "namelist.input",
     )
 
+    # Determine number of cores
+    if cores is None:
+        if "SLURM_NTASKS" in os.environ:
+            cores = int(os.environ["SLURM_NTASKS"])
+        else:
+            cores = 1
+    logger.info("Using {cores} cores for real.exe")
+
     # Run real
     real_path = wrf_dir / "real.exe"
     if not real_path.is_file():
@@ -347,7 +356,7 @@ def real(experiment_path: Path, cycle: int):
     cmd = [
         exp.cfg.slurm.mpirun_command,
         "-n",
-        "1",
+        str(cores),
         str(real_path.resolve()),
     ]
     external.runc(cmd, wrf_dir, "real.log")
