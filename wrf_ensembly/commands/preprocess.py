@@ -172,8 +172,7 @@ def geogrid(experiment_path: Path):
     if exp.cfg.geogrid.table is None:
         logger.error("No GEOGRID.TBL specified in config.toml")
         raise typer.Exit(1)
-    table_path = wps_dir / "geogrid" / exp.cfg.geogrid.table
-    table_path.resolve()
+    table_path = (wps_dir / "geogrid" / exp.cfg.geogrid.table).resolve()
 
     table_target = wps_dir / "geogrid" / "GEOGRID.TBL"
     table_target.unlink(missing_ok=True)
