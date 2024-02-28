@@ -31,7 +31,7 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
 
     dynamic_directives = {
         "job-name": f"{exp.cfg.metadata.name}_preprocess",
-        "output": f"{exp.paths.logs_slurm}/%j-preprocess.out",
+        "output": f"{exp.paths.logs_slurm.resolve()}/%j-preprocess.out",
     }
 
     jobfile.write_text(
@@ -73,7 +73,7 @@ def generate_advance_jobfiles(exp: experiment.Experiment, cycle: int) -> list[Pa
 
         dynamic_directives = {
             "job-name": f"{exp.cfg.metadata.name}_cycle_{cycle}_member_{i}",
-            "output": f"{exp.paths.logs_slurm}/%j-advance_cycle_{cycle}_member_{i}.out",
+            "output": f"{exp.paths.logs_slurm.resolve()}/%j-advance_cycle_{cycle}_member_{i}.out",
         }
 
         jobfile.write_text(
@@ -127,7 +127,7 @@ def generate_make_analysis_jobfile(
 
     dynamic_directives = {
         "job-name": f"{exp.cfg.metadata.name}_analysis_cycle_{cycle}",
-        "output": f"{exp.paths.logs_slurm}/%j-analysis_cycle_{cycle}.out",
+        "output": f"{exp.paths.logs_slurm.resolve()}/%j-analysis_cycle_{cycle}.out",
     }
 
     base_cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly ensemble %SUBCOMMAND% {exp.paths.experiment_path}"
@@ -200,7 +200,7 @@ def generate_statistics_jobfile(
 
     dynamic_directives = {
         "job-name": job_name,
-        "output": f"{exp.paths.logs_slurm}/%j-statistics.out",
+        "output": f"{exp.paths.logs_slurm.resolve()}/%j-statistics.out",
     }
 
     cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly ensemble statistics {exp.paths.experiment_path} --jobs {jobs}"
