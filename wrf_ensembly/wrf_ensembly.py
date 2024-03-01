@@ -2,7 +2,11 @@ import pathlib
 
 import click
 
-from wrf_ensembly import commands
+from wrf_ensembly.commands.ensemble import ensemble_cli
+from wrf_ensembly.commands.experiment import experiment_cli
+from wrf_ensembly.commands.observations import observations_cli
+from wrf_ensembly.commands.preprocess import preprocess_cli
+from wrf_ensembly.commands.slurm import slurm_cli
 
 
 @click.group()
@@ -17,8 +21,11 @@ def cli(ctx, experiment_path: str):
     ctx.obj["experiment_path"] = experiment_path
 
 
-cli.add_command(commands.experiment.experiment_cli)
-cli.add_command(commands.preprocess.preprocess_cli)
-cli.add_command(commands.ensemble.ensemble_cli)
-cli.add_command(commands.observations.observations_cli)
-cli.add_command(commands.slurm.slurm_cli)
+cli.add_command(experiment_cli)
+cli.add_command(preprocess_cli)
+cli.add_command(ensemble_cli)
+cli.add_command(observations_cli)
+cli.add_command(slurm_cli)
+
+if __name__ == "__main__":
+    cli()

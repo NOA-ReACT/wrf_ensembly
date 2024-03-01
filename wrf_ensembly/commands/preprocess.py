@@ -230,7 +230,7 @@ def real(experiment_path: Path, cycle: int, cores):
             cores = int(os.environ["SLURM_NTASKS"])
         else:
             cores = 1
-    logger.info("Using {cores} cores for real.exe")
+    logger.info(f"Using {cores} cores for real.exe")
 
     # Run real
     real_path = wrf_dir / "real.exe"
