@@ -71,7 +71,7 @@ class EnsembleMember:
 
         self.current_cycle_i = minfo.member.current_cycle
         self.metadata = minfo.metadata
-        self.cycles = minfo.cycle
+        self.cycles = {int(k): v for k, v in minfo.cycle.items()}
 
     def write_minfo(self):
         """
@@ -82,11 +82,8 @@ class EnsembleMember:
                 i=self.i, current_cycle=self.current_cycle_i
             ),
             metadata=self.metadata,
-            cycle=self.cycles,
+            cycle={str(k): v for k, v in self.cycles.items()},
         )
-        cycle = {
-            str(k): filter_none_from_dict(v.to_dict()) for k, v in minfo.cycle.items()
-        }
 
         with utils.atomic_binary_open(self.minfo_path, "w") as f:
             f.write(minfo.to_toml())

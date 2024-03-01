@@ -54,4 +54,4 @@ class MemberInfo(DataClassTOMLMixin):
 
     metadata: dict[str, str] = field(default_factory=dict)
 
-    cycle: dict[int, CycleSection] = field(default_factory=dict)
+    cycle: dict[str, CycleSection] = field(default_factory=dict)
