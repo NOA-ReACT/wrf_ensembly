@@ -269,9 +269,8 @@ def advance_member(
     forecasts_dir = exp.paths.forecast_path(minfo.current_cycle_i, member)
     forecasts_dir.mkdir(parents=True, exist_ok=True)
     for wrfout in member_dir.glob("wrfout*"):
-        # TODO move files instead of copying, this is just to debug this command in dev
-        logger.info(f"Member {member}: Copying {wrfout} to {forecasts_dir}")
-        utils.copy(wrfout, forecasts_dir / wrfout.name)
+        logger.info(f"Member {member}: Moving {wrfout} to {forecasts_dir}")
+        wrfout.rename(forecasts_dir / wrfout.name)
 
     minfo.current_cycle = member_info.CycleSection(
         runtime=start_time,
