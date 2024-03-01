@@ -182,8 +182,8 @@ class SlurmConfig:
     sbatch_command: str = "sbatch --parsable"
     """Command for sbatch (should probably include `--parsable`)"""
 
-    python_command: str = "python3"
-    """Command to run python in the environment that has wrf-ensembles installed"""
+    command_prefix: str = ""  # e.g., "conda run -n wrf-ensembly"
+    """Used to prefix all calls to `wrf-ensembly`, useful for using `conda run` or similar"""
 
     mpirun_command: str = "mpirun"
     """Command to run an MPI binary (might be srun in some clusters)"""

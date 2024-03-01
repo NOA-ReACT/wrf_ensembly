@@ -15,7 +15,7 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
 
     exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
 
-    base_cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly preprocess %SUBCOMMAND% {exp.paths.experiment_path.resolve()}"
+    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} preprocess %SUBCOMMAND%"
     commands = [
         base_cmd.replace("%SUBCOMMAND%", "setup"),
         base_cmd.replace("%SUBCOMMAND%", "geogrid"),
@@ -58,7 +58,7 @@ def generate_advance_jobfiles(exp: experiment.Experiment, cycle: int) -> list[Pa
     exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
 
     # Write one jobfile for each member
-    base_cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly ensemble advance-member {exp.paths.experiment_path.resolve()}"
+    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} ensemble advance-member"
 
     files = []
     for member in exp.members:
@@ -130,7 +130,7 @@ def generate_make_analysis_jobfile(
         "output": f"{exp.paths.logs_slurm.resolve()}/%j-analysis_cycle_{cycle}.out",
     }
 
-    base_cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly ensemble %SUBCOMMAND% {exp.paths.experiment_path}"
+    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path} ensemble %SUBCOMMAND%"
     commands = [
         f"if [ -f {obs_file} ]; then",
         base_cmd.replace("%SUBCOMMAND%", "filter"),
@@ -149,7 +149,7 @@ def generate_make_analysis_jobfile(
                 args += " --delete-members"
 
         commands.append(
-            f"{exp.cfg.slurm.python_command} -m wrf_ensembly slurm run-experiment {exp.paths.experiment_path} {args}"
+            f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path} slurm run-experiment {args}"
         )
 
     jobfile.write_text(
@@ -203,7 +203,7 @@ def generate_statistics_jobfile(
         "output": f"{exp.paths.logs_slurm.resolve()}/%j-statistics.out",
     }
 
-    cmd = f"{exp.cfg.slurm.python_command} -m wrf_ensembly ensemble statistics {exp.paths.experiment_path} --jobs {jobs}"
+    cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path} ensemble statistics --jobs {jobs}"
     if cycle is not None:
         cmd += f" {cycle}"
     if delete_members:
