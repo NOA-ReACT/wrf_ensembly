@@ -1,6 +1,4 @@
 import datetime
-from gc import is_finalized
-from operator import is_
 import sys
 from pathlib import Path
 from typing import Optional
@@ -10,13 +8,11 @@ import netCDF4
 import numpy as np
 from rich.console import Console
 from rich.table import Table
-from typing_extensions import Annotated
 
 from wrf_ensembly import (
     experiment,
     external,
     member_info,
-    namelist,
     nco,
     observations,
     pertubations,
@@ -43,57 +39,11 @@ def setup(experiment_path: Path):
     logger.setup("ensemble-setup", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    # WRF namelist for the first cycle
     first_cycle = exp.cycles[0]
     logger.info(f"Configuring members for cycle 0: {str(first_cycle)}")
 
-    history_interval = exp.cfg.time_control.output_interval
-    if first_cycle.output_interval is not None:
-        history_interval = first_cycle.output_interval
-    wrf_namelist = {
-        "time_control": {
-            **wrf.timedelta_to_namelist_items(first_cycle.end - first_cycle.start),
-            **wrf.datetime_to_namelist_items(first_cycle.start, "start"),
-            **wrf.datetime_to_namelist_items(first_cycle.end, "end"),
-            "interval_seconds": exp.cfg.time_control.boundary_update_interval * 60,
-            "history_interval": history_interval,
-        },
-        "domains": {
-            "e_we": exp.cfg.domain_control.xy_size[0],
-            "e_sn": exp.cfg.domain_control.xy_size[1],
-            "dx": exp.cfg.domain_control.xy_resolution[0] * 1000,
-            "dy": exp.cfg.domain_control.xy_resolution[1] * 1000,
-            "grid_id": 1,
-            "parent_id": 0,
-            "max_dom": 1,
-        },
-    }
-    for name, group in exp.cfg.wrf_namelist.items():
-        if name in wrf_namelist:
-            wrf_namelist[name] |= group
-        else:
-            wrf_namelist[name] = group
-
-    # chem_in_opt override for chemical initial conditions
-    if exp.cfg.data.manage_chem_ic:
-        if "chem" in wrf_namelist:
-            # If the user has already set chem_in_opt, warn about overriding
-            if "chem_in_opt" in wrf_namelist["chem"]:
-                logger.warning(
-                    "chem_in_opt already set in WRF namelist, overriding with 1. Check `Data.manage_chem_ic` in config.toml to disable this."
-                )
-
-            wrf_namelist["chem"]["chem_in_opt"] = 1
-        else:
-            wrf_namelist["chem"] = {"chem_in_opt": 1}
-
     for i in range(exp.cfg.assimilation.n_members):
         member_dir = exp.paths.member_path(i)
-        member_dir.mkdir(parents=True, exist_ok=True)
-
-        namelist_path = member_dir / "namelist.input"
-        namelist.write_namelist(wrf_namelist, namelist_path)
-        logger.info(f"Member {i}: Wrote namelist to {namelist_path}")
 
         # Copy initial and boundary conditions
         utils.copy(
@@ -107,6 +57,11 @@ def setup(experiment_path: Path):
             member_dir / "wrfbdy_d01",
         )
         logger.info(f"Member {i}: Copied wrfbdy_d01_cycle_0")
+
+    # Generate namelists for 1st cycle
+    wrf.generate_wrf_namelist(
+        exp, cycle=0, chem_in_opt=True, paths=exp.paths.member_paths
+    )
 
     # Create member info file
     exp.write_all_member_info()
@@ -588,32 +543,10 @@ def cycle(experiment_path: Path, use_forecast: bool):
     cycle = exp.cycles[next_cycle]
     logger.info(f"Configuring members for cycle {next_cycle}: {str(cycle)}")
 
-    history_interval = exp.cfg.time_control.output_interval
-    if cycle.output_interval is not None:
-        history_interval = cycle.output_interval
-    wrf_namelist = {
-        "time_control": {
-            **wrf.timedelta_to_namelist_items(cycle.end - cycle.start),
-            **wrf.datetime_to_namelist_items(cycle.start, "start"),
-            **wrf.datetime_to_namelist_items(cycle.end, "end"),
-            "interval_seconds": exp.cfg.time_control.boundary_update_interval * 60,
-            "history_interval": history_interval,
-        },
-        "domains": {
-            "e_we": exp.cfg.domain_control.xy_size[0],
-            "e_sn": exp.cfg.domain_control.xy_size[1],
-            "dx": exp.cfg.domain_control.xy_resolution[0] * 1000,
-            "dy": exp.cfg.domain_control.xy_resolution[1] * 1000,
-            "grid_id": 1,
-            "parent_id": 0,
-            "max_dom": 1,
-        },
-    }
-    for name, group in exp.cfg.wrf_namelist.items():
-        if name in wrf_namelist:
-            wrf_namelist[name] |= group
-        else:
-            wrf_namelist[name] = group
+    # Update namelists
+    wrf.generate_wrf_namelist(
+        exp, cycle=next_cycle, chem_in_opt=True, paths=exp.paths.member_paths
+    )
 
     # Combine initial condition file w/ analysis by copying the cycled variables, for each member
     for member in exp.members:
@@ -665,11 +598,6 @@ def cycle(experiment_path: Path, use_forecast: bool):
             )
             logger.error(res.output)
             sys.exit(1)
-
-        # Write namelist
-        namelist_path = member.path / "namelist.input"
-        namelist.write_namelist(wrf_namelist, namelist_path)
-        logger.info(f"Member {member}: Wrote namelist to {namelist_path}")
 
         # Remove forecast files
         logger.info(f"Removing forecast files from member directory {member.path}")

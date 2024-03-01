@@ -5,7 +5,7 @@ from pathlib import Path
 import tomli
 from pydantic import BaseModel
 
-from wrf_ensembly import external, namelist, utils
+from wrf_ensembly import external, fortran_namelists, utils
 from wrf_ensembly.config import Config
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import Experiment
@@ -136,7 +136,7 @@ def join_obs_seq(
 
         # Write the namelist file
         namelist_path = tmp_dir / "input.nml"
-        namelist.write_namelist(nml, namelist_path)
+        fortran_namelists.write_namelist(nml, namelist_path)
 
         # Write all input files inside a text file
         filelist_path = tmp_dir / "input_list"
@@ -216,7 +216,7 @@ def obs_seq_to_nc(
                 "write_nml": "file",
             },
         }
-        namelist.write_namelist(nml, tmp_dir / "input.nml")
+        fortran_namelists.write_namelist(nml, tmp_dir / "input.nml")
 
         # Call obs_seq_to_netcdf
         res = external.run(external.ExternalProcess([binary_ln], cwd=tmp_dir))

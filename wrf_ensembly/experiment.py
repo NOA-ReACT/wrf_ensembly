@@ -128,6 +128,9 @@ class ExperimentPaths:
         self.work_wrf = self.work / "WRF"
         self.work_wps = self.work / "WPS"
         self.work_ensemble = self.work / "ensemble"
+        self.member_paths = [
+            self.member_path(i) for i in range(cfg.assimilation.n_members)
+        ]
 
         # Preprocessing
         self.work_preprocessing = self.work / "preprocessing"
