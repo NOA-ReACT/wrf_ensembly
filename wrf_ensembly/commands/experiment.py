@@ -37,7 +37,7 @@ def create(experiment_path: Path, template: str):
         sys.exit(1)
 
     config_template_path = pkg_resources.resource_filename(
-        "wrf_ensembly", f"templates/{template}.toml"
+        "wrf_ensembly", f"config_templates/{template}.toml"
     )
     config_template_path = Path(config_template_path)
     utils.copy(config_template_path, root / "config.toml")
