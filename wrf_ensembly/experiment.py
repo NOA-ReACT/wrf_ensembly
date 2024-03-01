@@ -91,11 +91,11 @@ class EnsembleMember:
             cycle=self.cycles,
         )
         cycle = {
-            str(k): filter_none_from_dict(v.dict()) for k, v in minfo.cycle.items()
+            str(k): filter_none_from_dict(v.to_dict()) for k, v in minfo.cycle.items()
         }
 
         with utils.atomic_binary_open(self.minfo_path) as f:
-            tomli_w.dump(minfo.dict() | {"cycle": cycle}, f)
+            tomli_w.dump(minfo.model_dump() | {"cycle": cycle}, f)
         logger.info(f"Member {self.i}: Wrote info file to {self.minfo_path}")
 
     def __str__(self) -> str:
@@ -200,7 +200,7 @@ class Experiment:
 
         self.ensure_same_cycle()
         for m in self.members:
-            cycle_info = m.current_cycle.dict()
+            cycle_info = m.current_cycle.to_dict()
             for k, v in state.items():
                 if k not in cycle_info or cycle_info[k] != v:
                     raise ValueError(
