@@ -7,9 +7,9 @@ Mainly used in `experiment.py` to validate the toml file after reading.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
-from pydantic import BaseModel
+from mashumaro.mixins.toml import DataClassTOMLMixin
 
 
 @dataclass
@@ -48,9 +48,10 @@ class CycleSection:
         }
 
 
-class MemberInfo(BaseModel):
-    metadata: dict[str, str] = field(default_factory=dict)
-
+@dataclass
+class MemberInfo(DataClassTOMLMixin):
     member: MemberSection
+
+    metadata: dict[str, str] = field(default_factory=dict)
 
     cycle: dict[int, CycleSection] = field(default_factory=dict)

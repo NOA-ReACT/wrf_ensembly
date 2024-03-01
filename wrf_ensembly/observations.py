@@ -1,9 +1,9 @@
 import datetime as dt
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
-import tomli
-from pydantic import BaseModel
+from mashumaro.mixins.toml import DataClassTOMLMixin
 
 from wrf_ensembly import external, fortran_namelists, utils
 from wrf_ensembly.config import Config
@@ -11,7 +11,8 @@ from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import Experiment
 
 
-class Observation(BaseModel):
+@dataclass
+class Observation:
     """Represents one observation file"""
 
     start_date: dt.datetime
@@ -24,7 +25,8 @@ class Observation(BaseModel):
     """Path to the physical file"""
 
 
-class ObservationGroup(BaseModel):
+@dataclass
+class ObservationGroup(DataClassTOMLMixin):
     """
     Represents one group of observations, in which all files share the same format, use
     the same observation operator and are of the same DART kind
@@ -74,9 +76,7 @@ class ObservationGroup(BaseModel):
 def read_observation_group(path: Path) -> ObservationGroup:
     """Read an observation group file from the disk"""
 
-    with open(path, "rb") as f:
-        obs = tomli.load(f)
-    return ObservationGroup(**obs)
+    return ObservationGroup.from_toml(path.read_text())
 
 
 def read_observations(dir: Path) -> dict[str, ObservationGroup]:

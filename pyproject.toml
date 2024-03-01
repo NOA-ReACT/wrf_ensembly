@@ -13,7 +13,6 @@ wrf-ensembly = "wrf_ensembly:wrf_ensembly.cli"
 python = "^3.10,<3.13"
 netcdf4 = "^1.6.2"
 tomli = "^2.0.1"
-pydantic = "^2.5.2"
 rich = "^13.3.5"
 jinja2 = "^3.1.2"
 scipy = "^1.10.1"
@@ -24,6 +23,8 @@ cartopy = "^0.22.0"
 pytest = "^7.4.3"
 click = "^8.1.7"
 setuptools = "^69.1.1"
+dataclass-binder = "^0.3.4"
+mashumaro = {extras = ["toml"], version = "^3.12"}
 
 
 [build-system]

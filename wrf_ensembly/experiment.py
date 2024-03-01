@@ -1,9 +1,6 @@
 from pathlib import Path
 from typing import Any, Optional
 
-import tomli
-import tomli_w
-
 from wrf_ensembly import config, cycling, member_info, utils
 from wrf_ensembly.console import logger
 from wrf_ensembly.utils import filter_none_from_dict
@@ -70,10 +67,7 @@ class EnsembleMember:
         """
         Reads the member info file for this member.
         """
-        with open(self.minfo_path, "rb") as f:
-            minfo = tomli.load(f)
-
-        minfo = member_info.MemberInfo(**minfo)
+        minfo = member_info.MemberInfo.from_toml(self.minfo_path.read_text())
 
         self.current_cycle_i = minfo.member.current_cycle
         self.metadata = minfo.metadata
@@ -94,8 +88,8 @@ class EnsembleMember:
             str(k): filter_none_from_dict(v.to_dict()) for k, v in minfo.cycle.items()
         }
 
-        with utils.atomic_binary_open(self.minfo_path) as f:
-            tomli_w.dump(minfo.model_dump() | {"cycle": cycle}, f)
+        with utils.atomic_binary_open(self.minfo_path, "w") as f:
+            f.write(minfo.to_toml())
         logger.info(f"Member {self.i}: Wrote info file to {self.minfo_path}")
 
     def __str__(self) -> str:

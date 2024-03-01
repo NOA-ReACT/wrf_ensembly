@@ -56,7 +56,7 @@ def copy(src: Path, dest: Path, ensure_dest_parent_exists=True):
 
 
 @contextmanager
-def atomic_binary_open(path: Path):
+def atomic_binary_open(path: Path, mode="wb"):
     """
     Opens a file in atomic mode, which means that the file is first opened in a temporary
     location and then moved to the final location after the file is closed.
@@ -65,16 +65,14 @@ def atomic_binary_open(path: Path):
     random prefix. So the process/user must have the appropriate permissions to create
     files in the same directory.
 
-    The `wb` mode is used to open the file.
-
     Args:
         path: Path to the file
-        mode: Mode to open the file in
+        mode: Mode to open the file in, default 'wb'
     """
 
     # Create a temp file
     tmp_file = path.parent / (path.name + ".tmp")
-    with open(tmp_file, "wb") as f:
+    with open(tmp_file, mode) as f:
         yield f
 
     # If the target exists, remove it

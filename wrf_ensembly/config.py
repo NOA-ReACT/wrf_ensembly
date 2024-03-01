@@ -5,9 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import rich
-import tomli
-import tomli_w
-from pydantic import BaseModel
+from mashumaro.mixins.toml import DataClassTOMLMixin
 
 from wrf_ensembly.console import console
 
@@ -201,12 +199,10 @@ class SlurmConfig:
     """SLURM directives to add to statistics jobs"""
 
 
-class Config(BaseModel):
+@dataclass
+class Config(DataClassTOMLMixin):
     metadata: MetadataConfig
     """Metadata about the experiment (name, ...)"""
-
-    environment: dict[str, str] = field(default_factory=dict)
-    """Environment variables to set when running the experiment"""
 
     directories: DirectoriesConfig
     """Info about where the experiment will run (in, out, models,...)"""
@@ -235,6 +231,9 @@ class Config(BaseModel):
     wrf_namelist: dict[str, dict[str, Any]]
     """Overrides for the WRF namelist"""
 
+    environment: dict[str, str] = field(default_factory=dict)
+    """Environment variables to set when running the experiment"""
+
 
 def read_config(path: Path, inject_environment=True) -> Config:
     """
@@ -244,28 +243,14 @@ def read_config(path: Path, inject_environment=True) -> Config:
         path: Path to the TOML configuration file
         inject_environment: Whether to inject variables from the [environment] group into the environment, defaults to True
     """
-    with open(path, "rb") as f:
-        cfg = tomli.load(f)
 
-    cfg = Config(**cfg)
+    cfg = Config.from_toml(path.read_text())
 
     if inject_environment:
         for k, v in cfg.environment.items():
             os.environ[k] = str(v)
 
     return cfg
-
-
-def write_config(path: Path, cfg: Config):
-    """
-    Writes a Config object to a TOML file.
-
-    Args:
-        path: Path to the TOML configuration file
-        cfg: Config object to write
-    """
-    with open(path, "wb") as f:
-        tomli_w.dump(cfg.model_dump(), f)
 
 
 def inspect(cfg: Config):

@@ -69,6 +69,7 @@ def create(experiment_path: Path, template: str):
     is_flag=True,
     help="If model directory already exists, remove and copy again",
 )
+@pass_experiment_path
 def copy_model(experiment_path: Path, force: bool):
     """Setup the experiment (i.e., copy WRF/WPS, generate namelists, ...)"""
 
@@ -118,6 +119,7 @@ def copy_model(experiment_path: Path, force: bool):
 
 
 @experiment_cli.command()
+@pass_experiment_path
 def cycle_info(experiment_path: Path):
     """Prints cycle information"""
 
