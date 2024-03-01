@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "wrf-ensembly"
-version = "0.2.8"
+version = "0.2.9"
 description = "Support scripts for using DART w/ WRF"
 authors = ["Thanasis Georgiou <ageorgiou@noa.gr>"]
 readme = "README.md"
@@ -24,7 +24,7 @@ pytest = "^7.4.3"
 click = "^8.1.7"
 setuptools = "^69.1.1"
 dataclass-binder = "^0.3.4"
-mashumaro = {extras = ["toml"], version = "^3.12"}
+mashumaro = { extras = ["toml"], version = "^3.12" }
 
 
 [build-system]
