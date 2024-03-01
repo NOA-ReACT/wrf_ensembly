@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Optional
 
-from wrf_ensembly import config, experiment, templates
+from wrf_ensembly import experiment, templates
 from wrf_ensembly.console import logger
 
 
