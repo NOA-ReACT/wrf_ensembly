@@ -1,10 +1,13 @@
 import datetime
+from gc import is_finalized
+from operator import is_
+import sys
 from pathlib import Path
 from typing import Optional
 
+import click
 import netCDF4
 import numpy as np
-import typer
 from rich.console import Console
 from rich.table import Table
 from typing_extensions import Annotated
@@ -21,12 +24,17 @@ from wrf_ensembly import (
     utils,
     wrf,
 )
+from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
 
-app = typer.Typer()
+
+@click.group(name="ensemble")
+def ensemble_cli():
+    pass
 
 
-@app.command()
+@ensemble_cli.command()
+@pass_experiment_path
 def setup(experiment_path: Path):
     """
     Generates namelists and copies initial/boundary conditions for each member.
@@ -41,7 +49,7 @@ def setup(experiment_path: Path):
 
     history_interval = exp.cfg.time_control.output_interval
     if first_cycle.output_interval is not None:
-        history_interval = cycle.output_interval
+        history_interval = first_cycle.output_interval
     wrf_namelist = {
         "time_control": {
             **wrf.timedelta_to_namelist_items(first_cycle.end - first_cycle.start),
@@ -104,7 +112,8 @@ def setup(experiment_path: Path):
     exp.write_all_member_info()
 
 
-@app.command()
+@ensemble_cli.command()
+@pass_experiment_path
 def apply_pertubations(
     experiment_path: Path,
 ):
@@ -199,7 +208,7 @@ def apply_pertubations(
                 logger.error(
                     f"Member {i}: bc_update.exe failed with exit code {res.returncode}"
                 )
-                raise typer.Exit(1)
+                sys.exit(1)
             logger.info(f"Member {i}: bc_update.exe finished successfully")
 
             # Move temporary file to original file
@@ -212,21 +221,15 @@ def apply_pertubations(
     return 0
 
 
-@app.command()
+@ensemble_cli.command()
+@click.argument("member", type=int)
+@pass_experiment_path
 def advance_member(
     experiment_path: Path,
     member: int,
-    skip_wrf: Annotated[Optional[bool], typer.Option()] = False,
 ):
     """
-    Advances the given member 1 cycle by running the model
-
-    Args:
-        experiment_path: Path to the experiment directory
-        member: The member to advance
-        skip_wrf: If True, skips the WRF run and assumes it has already been run.
-                  Useful when something goes wrong with wrf-ensembly but you know
-                  everything is OK with the model.
+    Advances the given MEMBER 1 cycle by running the model
     """
 
     logger.setup(f"ensemble-advance-member_{member}", experiment_path)
@@ -246,12 +249,7 @@ def advance_member(
     cmd = [exp.cfg.slurm.mpirun_command, wrf_exe_path]
 
     start_time = datetime.datetime.now()
-    if skip_wrf:
-        res = external.ExternalProcessResult(
-            cmd, member_dir, 0, "--skip-wrf used, mock run!"
-        )
-    else:
-        res = external.runc(cmd, member_dir, log_filename=f"wrf.log")
+    res = external.runc(cmd, member_dir, log_filename=f"wrf.log")
     end_time = datetime.datetime.now()
 
     for f in member_dir.glob("rsl.*"):
@@ -260,12 +258,12 @@ def advance_member(
     rsl_file = member_dir / "rsl.out.0000"
     if not rsl_file.exists():
         logger.error(f"Member {member}: rsl.out.0000 does not exist")
-        raise typer.Exit(1)
+        sys.exit(1)
     rsl_content = rsl_file.read_text()
 
     if "SUCCESS COMPLETE WRF" not in rsl_content:
         logger.error(f"Member {member}: wrf.exe failed with exit code {res.returncode}")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     # Copy wrfout to the forecasts directory
     forecasts_dir = exp.paths.forecast_path(minfo.current_cycle_i, member)
@@ -285,7 +283,8 @@ def advance_member(
     minfo.write_minfo()
 
 
-@app.command()
+@ensemble_cli.command()
+@pass_experiment_path
 def filter(experiment_path: Path):
     """
     Runs the assimilation filter for the current cycle
@@ -312,7 +311,7 @@ def filter(experiment_path: Path):
         logger.warning(
             f"No observations found for cycle {current_cycle} ({obs_file}), skipping filter!"
         )
-        raise typer.Exit(0)
+        sys.exit(0)
     else:
         utils.copy(obs_file, obs_seq)
         logger.info(f"Added observations!")
@@ -353,7 +352,7 @@ def filter(experiment_path: Path):
     res = external.runc(cmd, dart_dir, log_filename="filter.log")
     if res.returncode != 0 or "Finished ... at" not in res.output:
         logger.error(f"filter failed with exit code {res.returncode}")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     # Keep obs_seq.final, convert to netcdf
     obs_seq_final = dart_dir / "obs_seq.final"
@@ -370,7 +369,8 @@ def filter(experiment_path: Path):
     exp.write_all_member_info()
 
 
-@app.command()
+@ensemble_cli.command()
+@pass_experiment_path
 def analysis(experiment_path: Path):
     """
     Combines the DART output files and the forecast to create the analysis.
@@ -402,7 +402,7 @@ def analysis(experiment_path: Path):
         dart_file = dart_out_dir / f"dart_analysis_member_{member:02d}.nc"
         if not dart_file.exists():
             logger.error(f"Member {member}: {dart_file} does not exist")
-            raise typer.Exit(1)
+            sys.exit(1)
 
         # Copy the state variables from the dart file to the analysis file
         logger.info(f"Member {member}: Copying state variables from {dart_file}")
@@ -429,33 +429,35 @@ def analysis(experiment_path: Path):
         exp.members[member].write_minfo()
 
 
-@app.command()
+@ensemble_cli.command()
+@click.option(
+    "--cycle",
+    type=int,
+    help="Cycle to compute statistics for. Will compute for all cycles if missing.",
+)
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    default=4,
+    help="How many NCO commands to execute in parallel",
+)
+@click.option(
+    "--remove-member-forecasts",
+    is_flag=True,
+    help="Remove the individual member forecast files after computing the statistics",
+)
+@click.option(
+    "--remove-member-analysis",
+    is_flag=True,
+    help="Remove the individual member analysis files after computing the statistics",
+)
+@pass_experiment_path
 def statistics(
     experiment_path: Path,
-    cycle: Annotated[
-        Optional[int],
-        typer.Argument(
-            ..., help="Cycle to compute statistics for. Current cycle if not set"
-        ),
-    ] = None,
-    jobs: Annotated[
-        int,
-        typer.Option(..., help="How many NCO commands to execute in parallel", min=1),
-    ] = 4,
-    remove_member_forecasts: Annotated[
-        bool,
-        typer.Option(
-            ...,
-            help="Remove the individual member forecast files after computing the statistics",
-        ),
-    ] = False,
-    remove_member_analysis: Annotated[
-        bool,
-        typer.Option(
-            ...,
-            help="Remove the individual member analysis files after computing the statistics",
-        ),
-    ] = False,
+    cycle: Optional[int],
+    jobs: int,
+    remove_member_forecasts: bool,
+    remove_member_analysis: bool,
 ):
     """
     Calculates the mean and standard deviation of the analysis files
@@ -518,7 +520,7 @@ def statistics(
 
     if failure:
         logger.error("One or more nco commands failed, exiting")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     # Remove files if required
     if remove_member_forecasts:
@@ -535,8 +537,14 @@ def statistics(
             d.rmdir()
 
 
-@app.command()
-def cycle(experiment_path: Path, use_forecast: bool = False):
+@ensemble_cli.command()
+@click.option(
+    "--use-forecast",
+    is_flag=True,
+    help="Cycle with the latest forecast instead of the analysis",
+)
+@pass_experiment_path
+def cycle(experiment_path: Path, use_forecast: bool):
     """
     Prepares the experiment for the next cycle by copying the cycled variables from the analysis
     to the initial conditions and preparing the namelist.
@@ -557,7 +565,7 @@ def cycle(experiment_path: Path, use_forecast: bool = False):
             logger.error(
                 "Either run the analysis or use `--use-forecast` to cycle w/ the latest forecast"
             )
-            raise typer.Exit(1)
+            sys.exit(1)
 
         if use_forecast:
             logger.warning(
@@ -570,7 +578,7 @@ def cycle(experiment_path: Path, use_forecast: bool = False):
 
     if next_cycle >= len(exp.cycles):
         logger.error(f"Experiment is finished! No cycle {next_cycle}")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     if use_forecast:
         analysis_dir = exp.paths.forecast_path(current_cycle)
@@ -657,7 +665,7 @@ def cycle(experiment_path: Path, use_forecast: bool = False):
                 f"Member {member}: bc_update.exe failed with exit code {res.returncode}"
             )
             logger.error(res.output)
-            raise typer.Exit(1)
+            sys.exit(1)
 
         # Write namelist
         namelist_path = member.path / "namelist.input"
@@ -682,7 +690,8 @@ def cycle(experiment_path: Path, use_forecast: bool = False):
         member.write_minfo()
 
 
-@app.command()
+@ensemble_cli.command()
+@pass_experiment_path
 def status(experiment_path: Path):
     """Prints the current status of all members (i.e., which cycles have been completed)"""
 

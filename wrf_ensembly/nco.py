@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import typer
 from wrf_ensembly.console import logger
 from wrf_ensembly.external import ExternalProcess
 

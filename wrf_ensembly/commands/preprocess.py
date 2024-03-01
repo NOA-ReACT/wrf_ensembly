@@ -1,18 +1,25 @@
+from email.policy import default
 import os
 import shutil
 from itertools import chain
 from pathlib import Path
 from typing import Optional
+import sys
 
-import typer
+import click
 from typing_extensions import Annotated
 from wrf_ensembly import config, experiment, external, namelist, utils, wrf
+from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
 
-app = typer.Typer()
+
+@click.group(name="preprocess")
+def preprocess_cli():
+    pass
 
 
-@app.command()
+@preprocess_cli.command()
+@pass_experiment_path
 def wps_namelist(experiment_path: Path):
     """Generates the WPS namelist for the whole experiment period."""
 
@@ -63,13 +70,13 @@ def wps_namelist(experiment_path: Path):
     logger.info(f"Wrote WPS namelist to {namelist_path}")
 
 
-@app.command()
-def wrf_namelist(
-    experiment_path: Path, cycle: Annotated[Optional[int], typer.Argument()] = None
-):
+@preprocess_cli.command()
+@click.argument("cycle", required=False, type=int)
+@pass_experiment_path
+def wrf_namelist(experiment_path: Path, cycle: Optional[int] = None):
     """
     Generates the WRF namelist, for use by real.exe for creating initial and boundary conditions.
-    If cycle is specified, the namelist will be generated for that cycle only.
+    If CYCLE is specified, the namelist will be generated for that cycle only.
     """
 
     logger.setup("preprocess-wrf-namelist", experiment_path)
@@ -134,7 +141,8 @@ def wrf_namelist(
     logger.info(f"Wrote WRF namelist to {namelist_path}")
 
 
-@app.command()
+@preprocess_cli.command()
+@pass_experiment_path
 def setup(experiment_path: Path):
     """
     Setups the preprocessing environment by copying WRF/WPS to the correct places and
@@ -155,7 +163,8 @@ def setup(experiment_path: Path):
     logger.info("Preprocessing ready to run")
 
 
-@app.command()
+@preprocess_cli.command()
+@pass_experiment_path
 def geogrid(experiment_path: Path):
     """
     Runs geogrid.exe for the experiment.
@@ -167,12 +176,12 @@ def geogrid(experiment_path: Path):
 
     if (wps_dir / "geo_em.d01.nc").exists():
         logger.warning("geo_em.d01.nc already exists, skipping geogrid.exe")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     # Link the correct table
     if exp.cfg.geogrid.table is None:
         logger.error("No GEOGRID.TBL specified in config.toml")
-        raise typer.Exit(1)
+        sys.exit(1)
     table_path = (wps_dir / "geogrid" / exp.cfg.geogrid.table).resolve()
 
     table_target = wps_dir / "geogrid" / "GEOGRID.TBL"
@@ -186,12 +195,12 @@ def geogrid(experiment_path: Path):
     geogrid_path = wps_dir / "geogrid.exe"
     if not geogrid_path.is_file():
         logger.error("Could not find geogrid.exe at {geogrid_path}")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     res = external.runc([geogrid_path], wps_dir, "geogrid.log")
     if res.returncode != 0:
         logger.error("Error is fatal")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     logger.info("Geogrid finished successfully!")
     logger.debug(f"stdout:\n{res.output}")
@@ -199,7 +208,8 @@ def geogrid(experiment_path: Path):
     return 0
 
 
-@app.command()
+@preprocess_cli.command()
+@pass_experiment_path
 def ungrib(experiment_path: Path):
     """
     Runs ungrib.exe for the experiment, after linking the grib files into the WPS directory
@@ -228,7 +238,7 @@ def ungrib(experiment_path: Path):
         ).resolve()
     if not vtable_path.is_file() or vtable_path.is_symlink():
         logger.error(f"Vtable {vtable_path} does not exist")
-        raise typer.Exit(1)
+        sys.exit(1)
     logger.info(f"[green]Linking Vtable[/green] {vtable_path}")
     (wps_dir / "Vtable").unlink(missing_ok=True)
     (wps_dir / "Vtable").symlink_to(vtable_path)
@@ -241,29 +251,31 @@ def ungrib(experiment_path: Path):
         logger.debug(f"Created symlink for {grib_file} at {link_path}")
     if i == 0:
         logger.error("No GRIB files found")
-        raise typer.Exit(1)
+        sys.exit(1)
     logger.info(f"Linked {i+1} GRIB files to {wps_dir} from {data_dir}")
 
     # Run ungrib.exe
     ungrib_path = wps_dir / "ungrib.exe"
     if not ungrib_path.is_file():
         logger.error("Could not find ungrib.exe at {ungrib_path}")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     res = external.runc([ungrib_path], wps_dir, "ungrib.log")
     if res.returncode != 0 or "Successful completion of ungrib" not in res.output:
         logger.error("Ungrib could not finish successfully")
         logger.error("Check the `ungrib.log` file for more info.")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     logger.info("Ungrib finished successfully!")
     return 0
 
 
-@app.command()
-def metgrid(
-    experiment_path: Path, force: Annotated[Optional[bool], typer.Option()] = False
-):
+@preprocess_cli.command()
+@click.option(
+    "--force", is_flag=True, help="Force metgrid to run even if met_em files exist"
+)
+@pass_experiment_path
+def metgrid(experiment_path: Path, force: bool):
     """
     Run metgrid.exe to produce the `met_em*.nc` files.
     """
@@ -275,7 +287,7 @@ def metgrid(
     if len(list(wps_dir.glob("met_em*.nc"))) > 0:
         if not force:
             logger.warning("met_em files seem to exist, skipping metgrid.exe")
-            raise typer.Exit(0)
+            sys.exit(0)
         else:
             for f in wps_dir.glob("met_em*.nc"):
                 logger.debug(f"Removing old met_em file {f}")
@@ -289,22 +301,27 @@ def metgrid(
     metgrid_path = wps_dir / "metgrid.exe"
     if not metgrid_path.is_file():
         logger.error(f"Could not find metgrid.exe at {metgrid_path}")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     res = external.runc([metgrid_path], wps_dir, "metgrid.log")
     if res.returncode != 0 or "Successful completion of metgrid" not in res.output:
         logger.error("Metgrid could not finish successfully")
         logger.error("Check the `metgrid.log` file for more info.")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     logger.info("Metgrid finished successfully!")
 
 
-@app.command()
-def real(experiment_path: Path, cycle: int, cores=None):
+@preprocess_cli.command()
+@click.argument("cycle", required=True, type=int)
+@click.option(
+    "--cores", type=int, help="Number of cores to use for real.exe", default=None
+)
+@pass_experiment_path
+def real(experiment_path: Path, cycle: int, cores):
     """
-    Run real.exe to produce the initial (wrfinput) and boundary (wrfbdy) conditions for
-    one cycle. You should run this for all cycles to have initial/boundary conditions for
+    Run real.exe to produce the initial (wrfinput) and boundary (wrfbdy) conditions the
+    given CYCLE. You should run this for all cycles to have initial/boundary conditions for
     your experiment.
     """
 
@@ -328,7 +345,7 @@ def real(experiment_path: Path, cycle: int, cores=None):
 
     if count == 0:
         logger.error("No met_em files found")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     logger.info(f"Linked {count} met_em files to {wrf_dir}")
 
@@ -351,7 +368,7 @@ def real(experiment_path: Path, cycle: int, cores=None):
     real_path = wrf_dir / "real.exe"
     if not real_path.is_file():
         logger.error("[red]Could not find real.exe at[/red] {real_path}")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     cmd = [
         exp.cfg.slurm.mpirun_command,
@@ -366,12 +383,12 @@ def real(experiment_path: Path, cycle: int, cores=None):
     rsl_path = wrf_dir / "rsl.out.0000"
     if not rsl_path.is_file():
         logger.error("Could not find rsl.out.0000, wrf did not execute probably.")
-        raise typer.Exit(1)
+        sys.exit(1)
     else:
         rsl = rsl_path.read_text()
         if "SUCCESS COMPLETE REAL_EM INIT" not in rsl:
             logger.error("real.exe could not complete, check logs.")
-            raise typer.Exit(1)
+            sys.exit(1)
 
     logger.info("real finished successfully")
 
@@ -393,7 +410,8 @@ def real(experiment_path: Path, cycle: int, cores=None):
     )
 
 
-@app.command()
+@preprocess_cli.command()
+@pass_experiment_path
 def clean(experiment_path: Path):
     """
     Deletes the preprocessing directory and all its contents. Specifically removes:

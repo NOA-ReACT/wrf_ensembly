@@ -1,13 +1,16 @@
-from pathlib import Path
-import re
 import datetime as dt
+import re
 from itertools import chain
+from pathlib import Path
+
+import click
 import tomli_w
 
-import typer
 
-
-def create_aeolus_l2b_obsgroup(dir: Path, output: Path):
+@click.command()
+@click.argument("dir", type=click.Path(exists=True, path_type=Path))
+@click.argument("output", type=click.Path(), path_type=Path)
+def create_aeolus_l2b_obsgroup(dir_path: Path, output_path: Path):
     """
     Creates the observation group file for the given directory of AEOLUS L2B DBL files
     """
@@ -16,13 +19,13 @@ def create_aeolus_l2b_obsgroup(dir: Path, output: Path):
     date_regex = re.compile(r"(\d{8}T\d{6})_(\d{8}T\d{6})")
 
     files = []
-    for dbl in chain(dir.glob("*.dbl"), dir.glob("*.DBL")):
-        print(f"Processing {dbl}")
+    for dbl in chain(dir_path.glob("*.dbl"), dir_path.glob("*.DBL")):
+        click.echo(f"Processing {dbl}")
 
         # Sample file name: AE_OPER_ALD_U_N_2B_20210901T003156_20210901T015956_0001.DBL
         name = dbl.name
         if name[: len(prefix)] != prefix:
-            print(f"File prefix is not {prefix}!")
+            click.echo(f"File prefix is not {prefix}!")
             continue
 
         start, end = date_regex.findall(name)[0]
@@ -34,7 +37,7 @@ def create_aeolus_l2b_obsgroup(dir: Path, output: Path):
         files.append({"start_date": start, "end_date": end, "path": str(dbl.resolve())})
 
     if not files:
-        print("No files found!")
+        click.echo("No files found!")
         return
 
     # Sort files by start date, easier to browse the file this way
@@ -45,10 +48,10 @@ def create_aeolus_l2b_obsgroup(dir: Path, output: Path):
         "converter": "/path/to/convert_aeolus_l2b",
         "files": files,
     }
-    with open(output, "wb") as f:
+    with open(output_path, "wb") as f:
         tomli_w.dump(obsgroup, f)
-    print(f"Wrote info about {len(files)} files to {output}")
+    click.echo(f"Wrote info about {len(files)} files to {output_path}")
 
 
 if __name__ == "__main__":
-    typer.run(create_aeolus_l2b_obsgroup)
+    create_aeolus_l2b_obsgroup()

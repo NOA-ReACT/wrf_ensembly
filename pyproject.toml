@@ -7,11 +7,10 @@ readme = "README.md"
 packages = [{ include = "wrf_ensembly" }]
 
 [tool.poetry.scripts]
-wrf-ensembly = "wrf_ensembly:main"
+wrf-ensembly = "wrf_ensembly:wrf_ensembly.cli"
 
 [tool.poetry.dependencies]
 python = "^3.10,<3.13"
-typer = "^0.9.0"
 netcdf4 = "^1.6.2"
 tomli = "^2.0.1"
 pydantic = "^2.5.2"
@@ -23,6 +22,8 @@ tomli-w = "^1.0.0"
 xarray = "^2023.5.0"
 cartopy = "^0.22.0"
 pytest = "^7.4.3"
+click = "^8.1.7"
+setuptools = "^69.1.1"
 
 
 [build-system]

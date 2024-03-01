@@ -1,32 +1,31 @@
-from genericpath import exists
 import shutil
+import sys
 from pathlib import Path
-import pkg_resources
 
-import typer
+import click
+import pkg_resources
 from rich.console import Console
 from rich.table import Column, Table
-from typing_extensions import Annotated
 
 from wrf_ensembly import config, cycling, experiment, utils
+from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
 
-app = typer.Typer()
+
+@click.group(name="experiment")
+def experiment_cli():
+    pass
 
 
-@app.command()
-def create(
-    experiment_path: Annotated[
-        Path,
-        typer.Argument(..., help="Where the experiment directory should be created"),
-    ],
-    template: Annotated[
-        str,
-        typer.Argument(..., help="Name of the config template to use")
-    ],
-):
+@experiment_cli.command()
+@click.argument(
+    "template",
+    required=True,
+    type=click.STRING,
+)
+@pass_experiment_path
+def create(experiment_path: Path, template: str):
     """Create a new experiment directory."""
-
     logger.setup("experiment-create", experiment_path)
 
     # Create directory tree, add config file
@@ -35,7 +34,7 @@ def create(
         root.mkdir(parents=True, exist_ok=True)
     except OSError as ex:
         logger.error(f"Could not create directory `{root}`: {ex}")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     config_template_path = pkg_resources.resource_filename(
         "wrf_ensembly", f"templates/{template}.toml"
@@ -64,16 +63,13 @@ def create(
     logger.info("Experiment created successfully!")
 
 
-@app.command()
-def copy_model(
-    experiment_path: Path,
-    force: Annotated[
-        bool,
-        typer.Option(
-            ..., help="If model directory already exists, remove and copy again"
-        ),
-    ] = False,
-):
+@experiment_cli.command()
+@click.option(
+    "--force",
+    is_flag=True,
+    help="If model directory already exists, remove and copy again",
+)
+def copy_model(experiment_path: Path, force: bool):
     """Setup the experiment (i.e., copy WRF/WPS, generate namelists, ...)"""
 
     logger.setup("experiment-copy-model", experiment_path)
@@ -86,14 +82,14 @@ def copy_model(
             shutil.rmtree(exp.paths.work_wrf)
         else:
             logger.error(f"WRF directory {exp.paths.work_wrf} already exists")
-            raise typer.Exit(1)
+            sys.exit(1)
     if exp.paths.work_wps.exists():
         if force:
             logger.info(f"Removing existing WPS directory {exp.paths.work_wps}")
             shutil.rmtree(exp.paths.work_wps)
         else:
             logger.error(f"WPS directory {exp.paths.work_wps} already exists")
-            raise typer.Exit(1)
+            sys.exit(1)
 
     # Copy WRF/WPS in the work directory
     shutil.copytree(
@@ -115,13 +111,13 @@ def copy_model(
                 shutil.rmtree(member_dir)
             else:
                 logger.error(f"Member directory {member_dir} already exists")
-                raise typer.Exit(1)
+                sys.exit(1)
 
         shutil.copytree(exp.paths.work_wrf, member_dir, dirs_exist_ok=True)
         logger.info(f"Copied WRF to {member_dir}")
 
 
-@app.command()
+@experiment_cli.command()
 def cycle_info(experiment_path: Path):
     """Prints cycle information"""
 

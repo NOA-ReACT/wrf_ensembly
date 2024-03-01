@@ -4,12 +4,12 @@ Functions related to running external commands
 
 import os
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
 
-import typer
 from wrf_ensembly.console import logger
 
 
@@ -104,4 +104,4 @@ def assert_all_successful(results: list[ExternalProcessResult]):
 
     for res in results:
         if res.returncode != 0:
-            raise typer.Exit(1)
+            sys.exit(1)

@@ -1,16 +1,23 @@
 import datetime as dt
+import sys
 from pathlib import Path
 from typing import Optional
 
-import typer
+import click
 
 from wrf_ensembly import config, cycling, experiment, observations
+from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
 
-app = typer.Typer()
+
+@click.group(name="observations")
+def observations_cli():
+    pass
 
 
-@app.command()
+@observations_cli.command()
+@click.argument("cycle", required=False, type=int)
+@pass_experiment_path
 def prepare(experiment_path: Path, cycle: Optional[int] = None):
     """Converts observation files to DART obs_seq format"""
 
@@ -29,7 +36,7 @@ def prepare(experiment_path: Path, cycle: Optional[int] = None):
 
     if len(names) == 0:
         logger.error("No observation groups found!")
-        raise typer.Exit(1)
+        sys.exit(1)
 
     logger.info(f"Found observation groups: {', '.join(names)}")
 
@@ -77,7 +84,12 @@ def prepare(experiment_path: Path, cycle: Optional[int] = None):
             f.unlink()
 
 
-@app.command()
+@observations_cli.command()
+@click.argument(
+    "obs_seq_path", required=True, type=click.Path(exists=True, path_type=Path)
+)
+@click.argument("nc_path", required=True, type=click.Path(path_type=Path))
+@pass_experiment_path
 def obs_seq_to_nc(experiment_path: Path, obs_seq_path: Path, nc_path: Path):
     """Convert the given obs_seq file to netCDF format"""
 

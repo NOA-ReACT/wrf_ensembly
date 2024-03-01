@@ -1,20 +1,22 @@
+import sys
 from pathlib import Path
 from typing import Optional
 
-import typer
-from typing_extensions import Annotated
+import click
+
 from wrf_ensembly import experiment, external, jobfiles
+from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
 
-app = typer.Typer()
+
+@click.group(name="slurm")
+def slurm_cli():
+    pass
 
 
-@app.command()
-def preprocessing(
-    experiment_path: Annotated[
-        Path, typer.Argument(..., help="Path to the experiment directory")
-    ]
-):
+@slurm_cli.command()
+@pass_experiment_path
+def preprocessing(experiment_path: Path):
     """Creates a jobfile for running all preprocessing steps. Useful if you want to run WPS and real on your processing nodes."""
 
     logger.setup("slurm-preprocessing", experiment_path)
@@ -22,19 +24,10 @@ def preprocessing(
     jobfiles.generate_preprocess_jobfile(exp)
 
 
-@app.command()
-def advance_members(
-    experiment_path: Annotated[
-        Path, typer.Argument(..., help="Path to the experiment directory")
-    ],
-    cycle: Annotated[
-        Optional[int],
-        typer.Argument(
-            ...,
-            help="Cycle to advance members to",
-        ),
-    ] = None,
-):
+@slurm_cli.command()
+@click.option("--cycle", type=int, help="Cycle to advance members to")
+@pass_experiment_path
+def advance_members(experiment_path: Path, cycle: Optional[int]):
     """Create a SLURM jobfile to advance each member of the ensemble"""
 
     logger.setup(f"slurm-advance-members", experiment_path)
@@ -50,13 +43,10 @@ def advance_members(
     jobfiles.generate_advance_jobfiles(exp, cycle)
 
 
-@app.command()
-def make_analysis(
-    experiment_path: Annotated[
-        Path, typer.Argument(..., help="Path to the experiment directory")
-    ],
-    cycle: Annotated[int, typer.Argument(..., help="Current cycle")],
-):
+@slurm_cli.command()
+@click.argument("cycle", type=int)
+@pass_experiment_path
+def make_analysis(experiment_path: Path, cycle: int):
     """
     Creates a SLURM jobfile for the `filter`, `analysis` and `cycle` steps. At runtime,
     the job script will check whether there are observations available for the current
@@ -69,32 +59,28 @@ def make_analysis(
     jobfiles.generate_make_analysis_jobfile(exp, cycle)
 
 
-@app.command()
+@slurm_cli.command()
+@click.option(
+    "--all-cycles/--next-cycle-only",
+    help="After the current cycle, automatically queue next cycle, until experiment is over",
+    default=True,
+)
+@click.option(
+    "--compute-statistics",
+    is_flag=True,
+    help="Compute statistics for the current cycle after the analysis step",
+)
+@click.option(
+    "--delete-members",
+    is_flag=True,
+    help="Requires --compute-statistics. If set, the individual member's forecasts are deleted.",
+)
+@pass_experiment_path
 def run_experiment(
-    experiment_path: Annotated[
-        Path, typer.Argument(..., help="Path to the experiment directory")
-    ],
-    all_cycles: Annotated[
-        bool,
-        typer.Option(
-            ...,
-            help="After the current cycle, automatically queue next cycle, until experiment is over",
-        ),
-    ] = True,
-    compute_statistics: Annotated[
-        bool,
-        typer.Option(
-            ...,
-            help="Compute statistics for the current cycle after the analysis step",
-        ),
-    ] = False,
-    delete_members: Annotated[
-        bool,
-        typer.Option(
-            ...,
-            help="Requires --compute-statistics. If set, the individual member's forecasts are deleted.",
-        ),
-    ] = False,
+    experiment_path: Path,
+    all_cycles: bool,
+    compute_statistics: bool,
+    delete_members: bool,
 ):
     """
     Creates jobfiles for all experiment steps and queues them in the correct order. This
@@ -122,7 +108,7 @@ def run_experiment(
         try:
             exp.ensure_current_cycle_state({"advanced": True})
             logger.error("Last cycle already advanced, experiment finished")
-            raise typer.Exit(1)
+            sys.exit(1)
         except ValueError:
             pass
 
