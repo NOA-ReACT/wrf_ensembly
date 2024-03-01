@@ -23,12 +23,6 @@ class MemberSection:
 
 @dataclass
 class CycleSection:
-    runtime: Optional[datetime]
-    """When the cycle was processed"""
-
-    walltime_s: Optional[int]
-    """Walltime in seconds"""
-
     advanced: bool
     """Whether the cycle was advanced or not"""
 
@@ -37,6 +31,12 @@ class CycleSection:
 
     analysis: bool
     """Whether the posterior was postprocessed or not"""
+
+    runtime: Optional[datetime] = None
+    """When the cycle was processed"""
+
+    walltime_s: Optional[int] = None
+    """Walltime in seconds"""
 
     def to_dict(self) -> dict[str, Union[datetime, int, bool, None]]:
         return {
