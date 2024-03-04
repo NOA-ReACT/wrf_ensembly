@@ -3,7 +3,7 @@ name = "aris_chem_4.5.2"
 description = """\
 Configuration sample for WRF-CHEM, v4.5.2 on ARIS
 Domain consist of the general North Atlantic region, 30x30 km resolution
-Time period is September 2021, 01 00:00 - 14 00:00
+Time period is September 2021
 """
 
 [environment]
@@ -48,7 +48,7 @@ table = "GEOGRID.TBL.ARW_CHEM"
 wps_geog = "/work2/pr005/ageorg/wrf/WPS_GEOG"
 meteorology = "/work2/pr005/ageorg/L2A/data/ERA5_CDS_September_2021"
 meteorology_vtable = "Vtable.ERA-interim.pl"
-
+manage_chem_ic = true
 
 [pertubations.variables.V]
 mean = 1
@@ -61,7 +61,7 @@ sd = 8
 rounds = 5
 
 [assimilation]
-n_members = 32
+n_members = 24
 # Which variables to carry forward from the previous cycle
 cycled_variables = [
   'U',
@@ -86,13 +86,23 @@ cycled_variables = [
   'TSLB',
   'SMOIS',
   'TSK',
+  'DUST_1',
+  'DUST_2',
+  'DUST_3',
+  'DUST_4',
+  'DUST_5',
+  'SEAS_1',
+  'SEAS_2',
+  'SEAS_3',
+  'SEAS_4',
+  'SEAS_5',
 ]
 # Which variables to use in the state vector
 # Should probably match the DART namelist!
 state_variables = ['U', 'V', 'W', 'PH', 'T', 'MU', 'QVAPOR', 'PSFC']
 
 [slurm]
-python_command = "source /users/pr005/ageorg/pyenvs/wrf/bin/activate && python"
+command_prefix = "micromamba run -n wrf "
 env_modules = [
   "gnu/8",
   "jasper/1.900.1",
@@ -105,6 +115,7 @@ env_modules = [
   "udunits2",
   "nco",
 ]
+mpirun_command = "srun"
 
 [slurm.directives_large]
 partition = "compute"
@@ -152,7 +163,7 @@ debug_level = 0
 diag_print = 0
 
 [wrf_namelist.domains]
-time_step = 120             # 6*dx in km https://esrl.noaa.gov/gsd/wrfportal/namelist_input_options.html
+time_step = 100             # 6*dx in km https://esrl.noaa.gov/gsd/wrfportal/namelist_input_options.html
 time_step_fract_num = 0
 time_step_fract_den = 1
 max_dom = 1
@@ -206,7 +217,8 @@ cu_rad_feedback = true
 
 [wrf_namelist.dynamics]
 hybrid_opt = 2
-w_damping = 0
+w_damping = 1
+epssm = 0.5
 diff_opt = 2
 km_opt = 4             # eddy coefficient, recommended value for real runs
 khdif = 0
@@ -230,19 +242,41 @@ spec_bdy_width = 5
 specified = true
 
 [wrf_namelist.chem]
-chem_dt = 0     # Use met. model timestep
-chem_in_opt = 0 # Do not read ic/bc from a wrfchemi file, either read from wrfinput or use idealized profiles
-
-chem_opt = 300 # GOCART aerosols without chemistry
-dust_opt = 3   # AFWA emission scheme
-emiss_opt = 0  # No anthropogenic emissions
-seas_opt = 1   # Use seasalt
-
-# Disable various chemical processes
-phot_opt = 0
-gaschem_onoff = 0
-gas_drydep_opt = 0
-
-# Radiative effects
-aer_ra_feedback = 0
-cu_rad_feedback = false
+kemit = 1              # Emission levels
+chem_opt = 300         # GOCART aerosols without chemistry
+bioemdt = 0            # Update interval for biogenic emissions
+photdt = 0             # Update interval for photolysis
+chemdt = 0             # Chemistry timestep (minutes), zero to match WRF timestep
+io_style_emissions = 0 # 0 = No emission data
+emiss_opt = 0          # No anthropogenic emissions
+emiss_opt_vol = 0      # No volcanic emissions
+emiss_ash_hgt = 20000  # ?
+chem_in_opt = 0        # Do not read ic/bc from a wrfchemi file, either read from wrfinput or use idealized profiles
+phot_opt = 0           # No photolysis
+gas_drydep_opt = 1     # Dry deposition of gas species
+aer_drydep_opt = 1     # Dry deposition of aerosols
+bio_emiss_opt = 0      # No biogenic emissions
+dust_opt = 3           # GOCART dust emission scheme
+dust_alpha = 1.0       # ?
+dmsemis_opt = 0        # no GOCART dms emissions from sea surface
+seas_opt = 1           # Enable sea salt
+depo_fact = 0.25
+gas_bc_opt = 0         # ICBC from wrfinput
+gas_ic_opt = 0         # ...
+aer_bc_opt = 0         # ...
+aer_ic_opt = 0         # ...
+gaschem_onoff = 0      # No gas phase chemistry
+aerchem_onoff = 1      # Aerosol chemistry
+wetscav_onoff = 0      # No wet scavenging
+cldchem_onoff = 0      # NO cloud chemistry
+vertmix_onoff = 1      # Enable vertical turbulent mixing
+chem_conv_tr = 0       # No subgrid convertive transport
+conv_tr_wetscav = 0    # No subgrid wet scavenging
+conv_tr_aqchem = 0     # No subgrid aqueous chemistry
+biomass_burn_opt = 0   # No biomass burning
+plumerisefire_frq = 30 # Unused, for biomass burning
+have_bcs_chem = true   # Use boundary from wrfbdy
+aer_ra_feedback = 0    # No radiative feedback
+aer_op_opt = 0         # No aerosol optical properties in output, we calculate our own in post
+opt_pars_out = 0       # No optical properties in output
+diagnostic_chem = 0    # No debug
