@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from wrf_ensembly import fortran_namelists
+from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import Experiment
 
 
@@ -156,6 +157,8 @@ def generate_wrf_namelist(
             wrf_namelist["chem"]["chem_in_opt"] = 1 if chem_in_opt else 0
         else:
             wrf_namelist["chem"] = {"chem_in_opt": 1 if chem_in_opt else 0}
+    else:
+        logger.warning("!!! manage_chem_ic is set to False !!!")
 
     # Write namelist(s)
     if not isinstance(paths, list):
@@ -164,3 +167,4 @@ def generate_wrf_namelist(
         if path.is_dir():
             path = path / "namelist.input"
         fortran_namelists.write_namelist(wrf_namelist, path)
+        logger.info(f"Wrote namelist to {path}")
