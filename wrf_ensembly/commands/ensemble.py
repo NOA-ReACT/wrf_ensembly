@@ -387,7 +387,7 @@ def analysis(experiment_path: Path):
 @click.option(
     "--cycle",
     type=int,
-    help="Cycle to compute statistics for. Will compute for all cycles if missing.",
+    help="Cycle to compute statistics for. Will compute for all current cycle if missing.",
 )
 @click.option(
     "--jobs",

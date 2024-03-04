@@ -205,7 +205,7 @@ def generate_statistics_jobfile(
 
     cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path} ensemble statistics --jobs {jobs}"
     if cycle is not None:
-        cmd += f" {cycle}"
+        cmd += f" --cycle {cycle}"
     if delete_members:
         cmd += " --remove-member-forecasts --remove-member-analysis"
 
