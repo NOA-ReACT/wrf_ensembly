@@ -1,6 +1,7 @@
 import datetime
 import sys
 from pathlib import Path
+import os
 from typing import Optional
 
 import click
@@ -178,13 +179,22 @@ def apply_pertubations(
 
 @ensemble_cli.command()
 @click.argument("member", type=int)
+@click.option(
+    "--cores",
+    type=int,
+    help="Number of cores to use for wrf.exe. ",
+)
 @pass_experiment_path
 def advance_member(
     experiment_path: Path,
     member: int,
+    cores: int,
 ):
     """
     Advances the given MEMBER 1 cycle by running the model
+
+    You can control how many cores to use with --cores. If omitted, will check for
+    `SLURM_NTASKS` in the environment and use that. If missing, will use 1 core.
     """
 
     logger.setup(f"ensemble-advance-member_{member}", experiment_path)
@@ -198,10 +208,19 @@ def advance_member(
         )
         return 0
 
+    # Determine number of cores
+    if cores is None:
+        if "SLURM_NTASKS" in os.environ:
+            cores = int(os.environ["SLURM_NTASKS"])
+        else:
+            cores = 1
+            logger.warning("No --cores no SLURM_NTASKS, will use 1 core!")
+    logger.info(f"Using {cores} cores for wrf.exe")
+
     logger.info(f"Advancing member {member} to cycle {minfo.current_cycle_i + 1}")
 
     wrf_exe_path = (member_dir / "wrf.exe").resolve()
-    cmd = [exp.cfg.slurm.mpirun_command, wrf_exe_path]
+    cmd = [exp.cfg.slurm.mpirun_command, "-n", str(cores), wrf_exe_path]
 
     start_time = datetime.datetime.now()
     res = external.runc(cmd, member_dir, log_filename=f"wrf.log")
