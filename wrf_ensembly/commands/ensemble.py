@@ -64,8 +64,17 @@ def setup(experiment_path: Path):
         exp, cycle=0, chem_in_opt=True, paths=exp.paths.member_paths
     )
 
-    # Create member info file
-    exp.write_all_member_info()
+    # Create member info files
+    for member in exp.members:
+        member.current_cycle_i = 0
+        member.current_cycle = member_info.CycleSection(
+            runtime=None,
+            walltime_s=None,
+            advanced=False,
+            filter=False,
+            analysis=False,
+        )
+        member.write_minfo()
 
 
 @ensemble_cli.command()
