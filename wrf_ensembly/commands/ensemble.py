@@ -642,7 +642,7 @@ def cycle(experiment_path: Path, use_forecast: bool):
             filter=False,
             analysis=False,
         )
-        member.write_minfo()
+    exp.write_all_member_info()
 
 
 @ensemble_cli.command()
