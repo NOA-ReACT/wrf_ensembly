@@ -99,9 +99,10 @@ def run_experiment(
     exp = experiment.Experiment(experiment_path)
     slurm_command = exp.cfg.slurm.sbatch_command
 
-    # If we need to resume, grab current cycle and filter the cycles list
-    exp.ensure_same_cycle()
-    current_cycle = exp.cycles[exp.members[0].current_cycle_i]
+    # If we need to resume, grab the minimum cycle and filter the cycles list
+    member_cycles = [m.current_cycle_i for m in exp.members]
+    current_cycle = exp.cycles[min(member_cycles)]
+    logger.info(f"Running experiment from cycle {current_cycle.index}")
 
     # Check if the current cycle is the last one
     if current_cycle.index == len(exp.cycles) - 1:
