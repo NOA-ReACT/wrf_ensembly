@@ -64,11 +64,17 @@ class DomainControlConfig:
     truelat1: float
     """True latitude 1 for the projection"""
 
-    truelat2: float
+    truelat2: Optional[float] = None
     """True latitude 2 for the projection"""
 
-    stand_lon: float
+    stand_lon: Optional[float] = None
     """Standard longitude for the projection"""
+
+    pole_lat: Optional[float] = None
+    """Pole latitude for the projection"""
+
+    pole_lon: Optional[float] = None
+    """Pole longitude for the projection"""
 
 
 @dataclass
