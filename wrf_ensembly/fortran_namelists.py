@@ -96,6 +96,8 @@ def write_namelist(namelist: dict, path: str | Path):
         for group, values in namelist.items():
             print(f"&{group}", file=f)
             for key, value in values.items():
+                if value is None:
+                    continue
                 value = convert_to_string(value)
                 print(f"    {key} = {value},", file=f)
             print("/", file=f)
