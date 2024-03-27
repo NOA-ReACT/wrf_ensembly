@@ -60,9 +60,11 @@ def setup(experiment_path: Path):
         logger.info(f"Member {i}: Copied wrfbdy_d01_cycle_0")
 
     # Generate namelists for 1st cycle
-    wrf.generate_wrf_namelist(
-        exp, cycle=0, chem_in_opt=True, paths=exp.paths.member_paths
-    )
+    for member in exp.members:
+        member_dir = exp.paths.member_path(member.i)
+        wrf.generate_wrf_namelist(
+            exp, cycle=0, chem_in_opt=True, paths=member_dir, member=member.i
+        )
 
     # Create member info files
     for member in exp.members:
@@ -572,9 +574,11 @@ def cycle(experiment_path: Path, use_forecast: bool):
     logger.info(f"Configuring members for cycle {next_cycle}: {str(cycle)}")
 
     # Update namelists
-    wrf.generate_wrf_namelist(
-        exp, cycle=next_cycle, chem_in_opt=True, paths=exp.paths.member_paths
-    )
+    for member in exp.members:
+        member_dir = exp.paths.member_path(member.i)
+        wrf.generate_wrf_namelist(
+            exp, cycle=next_cycle, chem_in_opt=True, paths=member_dir, member=member.i
+        )
 
     # Combine initial condition file w/ analysis by copying the cycled variables, for each member
     for member in exp.members:

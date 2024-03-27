@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 from wrf_ensembly import fortran_namelists
 from wrf_ensembly.console import logger
@@ -98,7 +99,11 @@ def generate_wps_namelist(experiment: Experiment, path: Path):
 
 
 def generate_wrf_namelist(
-    experiment: Experiment, cycle: int, chem_in_opt: bool, paths: Path | list[Path]
+    experiment: Experiment,
+    cycle: int,
+    chem_in_opt: bool,
+    paths: Path | list[Path],
+    member: Optional[int] = None,
 ):
     """
     Generates the WRF namelist for the experiment and a specific cycle, at the given path.
@@ -112,6 +117,8 @@ def generate_wrf_namelist(
                write the same namelist in all of them. If any path points to a directory,
                the namelist will be written inside that directory with the name
                `namelist.input`.
+        member: The ensemble member to generate the namelist for. If specified, any member-specific
+                overrides from the `wrf_namelist_per_member` configuration group will be applied.
     """
 
     cfg = experiment.cfg
@@ -150,6 +157,13 @@ def generate_wrf_namelist(
             wrf_namelist[name] |= group
         else:
             wrf_namelist[name] = group
+    if member is not None and str(member) in cfg.wrf_namelist_per_member:
+        member_group = cfg.wrf_namelist_per_member[str(member)]
+        for name, group in member_group.items():
+            if name in wrf_namelist:
+                wrf_namelist[name] |= group
+            else:
+                wrf_namelist[name] = group
 
     # Handle chem_in_opt
     if cfg.data.manage_chem_ic:

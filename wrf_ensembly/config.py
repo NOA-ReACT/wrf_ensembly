@@ -237,6 +237,11 @@ class Config(DataClassTOMLMixin):
     wrf_namelist: dict[str, dict[str, Any]]
     """Overrides for the WRF namelist"""
 
+    wrf_namelist_per_member: dict[str, dict[str, dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    """Overrides for the WRF namelist per ensemble member"""
+
     environment: dict[str, str] = field(default_factory=dict)
     """Environment variables to set when running the experiment"""
 
