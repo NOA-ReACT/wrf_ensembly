@@ -290,6 +290,9 @@ def advance_member(
 
     logger.setup(f"ensemble-advance-member_{member}", experiment_path)
     exp = experiment.Experiment(experiment_path)
+    if member < 0 or member >= exp.cfg.assimilation.n_members - 1:
+        logger.error(f"Member {member} does not exist")
+        sys.exit(1)
 
     member_dir = exp.paths.member_path(member)
     minfo = exp.members[member]
@@ -297,7 +300,7 @@ def advance_member(
         logger.info(
             f"Member {member} is already advanced to cycle {minfo.current_cycle_i}"
         )
-        return 0
+        sys.exit(1)
 
     # Determine number of cores
     if cores is None:
