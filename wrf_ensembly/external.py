@@ -54,6 +54,7 @@ def run(proc: ExternalProcess):
     )
     if p.returncode != 0:
         logger.error(f"Command {proc.command} failed with return code {p.returncode}")
+        logger.error(p.stdout)
 
     # Write stdout/err to this command's log directory
     if proc.log_filename is not None:
