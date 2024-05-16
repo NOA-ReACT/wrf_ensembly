@@ -403,6 +403,15 @@ def filter(experiment_path: Path):
     dart_output_txt.write_text("\n".join([str(f.resolve()) for f in dart_output]))
     logger.info(f"Wrote output_list.txt")
 
+    # Link wrfinput, required by filter to read coordinates
+    wrfinput_path = dart_dir / "wrfinput_d01"
+    wrfinput_path.unlink(missing_ok=True)
+    wrfinput_cur_cycle_path = (
+        exp.paths.data_icbc / f"wrfinput_d01_cycle_{current_cycle}"
+    )
+    wrfinput_path.symlink_to(wrfinput_cur_cycle_path)
+    logger.info(f"Linked {wrfinput_path} to {wrfinput_cur_cycle_path}")
+
     # Run filter
     if exp.cfg.assimilation.filter_mpi_tasks == 1:
         cmd = ["./filter"]
