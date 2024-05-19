@@ -1,25 +1,20 @@
-import datetime
+import os
 import sys
 from pathlib import Path
-import os
 from typing import Optional
 
 import click
 import netCDF4
 import numpy as np
-from rich.console import Console
-from rich.table import Table
 
 from wrf_ensembly import (
     experiment,
     external,
-    member_info,
     nco,
     observations,
     pertubations,
     update_bc,
     utils,
-    wrf,
 )
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
@@ -58,25 +53,6 @@ def setup(experiment_path: Path):
             member_dir / "wrfbdy_d01",
         )
         logger.info(f"Member {i}: Copied wrfbdy_d01_cycle_0")
-
-    # Generate namelists for 1st cycle
-    for member in exp.members:
-        member_dir = exp.paths.member_path(member.i)
-        wrf.generate_wrf_namelist(
-            exp, cycle=0, chem_in_opt=True, paths=member_dir, member=member.i
-        )
-
-    # Create member info files
-    for member in exp.members:
-        member.current_cycle_i = 0
-        member.current_cycle = member_info.CycleSection(
-            runtime=None,
-            walltime_s=None,
-            advanced=False,
-            filter=False,
-            analysis=False,
-        )
-        member.write_minfo()
 
 
 @ensemble_cli.command()
@@ -294,14 +270,6 @@ def advance_member(
         logger.error(f"Member {member} does not exist")
         sys.exit(1)
 
-    member_dir = exp.paths.member_path(member)
-    minfo = exp.members[member]
-    if minfo.current_cycle.advanced:
-        logger.info(
-            f"Member {member} is already advanced to cycle {minfo.current_cycle_i}"
-        )
-        sys.exit(1)
-
     # Determine number of cores
     if cores is None:
         if "SLURM_NTASKS" in os.environ:
@@ -311,43 +279,12 @@ def advance_member(
             logger.warning("No --cores no SLURM_NTASKS, will use 1 core!")
     logger.info(f"Using {cores} cores for wrf.exe")
 
-    logger.info(f"Advancing member {member} to cycle {minfo.current_cycle_i + 1}")
-
-    wrf_exe_path = (member_dir / "wrf.exe").resolve()
-    cmd = [exp.cfg.slurm.mpirun_command, "-n", str(cores), wrf_exe_path]
-
-    start_time = datetime.datetime.now()
-    res = external.runc(cmd, member_dir, log_filename=f"wrf.log")
-    end_time = datetime.datetime.now()
-
-    for f in member_dir.glob("rsl.*"):
-        logger.add_log_file(f)
-
-    rsl_file = member_dir / "rsl.out.0000"
-    if not rsl_file.exists():
-        logger.error(f"Member {member}: rsl.out.0000 does not exist")
-        sys.exit(1)
-    rsl_content = rsl_file.read_text()
-
-    if "SUCCESS COMPLETE WRF" not in rsl_content:
-        logger.error(f"Member {member}: wrf.exe failed with exit code {res.returncode}")
+    # Run WRF!
+    success = exp.advance_member(member, cores=cores)
+    if not success:
         sys.exit(1)
 
-    # Copy wrfout to the forecasts directory
-    forecasts_dir = exp.paths.forecast_path(minfo.current_cycle_i, member)
-    forecasts_dir.mkdir(parents=True, exist_ok=True)
-    for wrfout in member_dir.glob("wrfout*"):
-        logger.info(f"Member {member}: Moving {wrfout} to {forecasts_dir}")
-        wrfout.rename(forecasts_dir / wrfout.name)
-
-    minfo.current_cycle = member_info.CycleSection(
-        runtime=start_time,
-        walltime_s=int((end_time - start_time).total_seconds()),
-        advanced=True,
-        filter=False,
-        analysis=False,
-    )
-    minfo.write_minfo()
+    exp.write_status()
 
 
 @ensemble_cli.command()
@@ -362,21 +299,26 @@ def filter(experiment_path: Path):
     dart_dir = exp.cfg.directories.dart_root / "models" / "wrf" / "work"
     dart_dir = dart_dir.resolve()
 
-    # Establish which cycle we are running and that all member priors are pre-processed
-    exp.ensure_same_cycle()
-    exp.ensure_current_cycle_state({"advanced": True})
+    if not exp.all_members_advanced:
+        logger.error(
+            "Not all members have advanced to the next cycle, cannot run filter!"
+        )
+        sys.exit(1)
+    if exp.filter_run:
+        logger.error("Filter already run for this cycle, skipping!")
+        sys.exit(0)
 
-    current_cycle = exp.members[0].current_cycle_i
-    cycle_info = exp.cycles[current_cycle]
+    cycle_i = exp.current_cycle_i
+    cycle = exp.current_cycle
 
     # Grab observations if they exist for this cycle
     obs_seq = dart_dir / "obs_seq.out"
     obs_seq.unlink(missing_ok=True)
 
-    obs_file = exp.paths.obs / f"cycle_{current_cycle}.obs_seq"
+    obs_file = exp.paths.obs / f"cycle_{cycle_i}.obs_seq"
     if not obs_file.exists():
         logger.warning(
-            f"No observations found for cycle {current_cycle} ({obs_file}), skipping filter!"
+            f"No observations found for cycle {cycle} ({obs_file}), skipping filter!"
         )
         sys.exit(0)
     else:
@@ -385,15 +327,13 @@ def filter(experiment_path: Path):
 
     # Write input/output file lists
     # For each member, we need the latest forecast only!
-    wrfout_name = "wrfout_d01_" + cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
-    priors = list(
-        (exp.paths.forecast_path(current_cycle)).glob(f"member_*/{wrfout_name}")
-    )
+    wrfout_name = "wrfout_d01_" + cycle.end.strftime("%Y-%m-%d_%H:%M:%S")
+    priors = list((exp.paths.forecast_path(cycle_i)).glob(f"member_*/{wrfout_name}"))
     dart_output = [
-        exp.paths.dart_path(current_cycle) / f"dart_analysis_{prior.parent.name}.nc"
+        exp.paths.dart_path(cycle_i) / f"dart_analysis_{prior.parent.name}.nc"
         for prior in priors
     ]
-    exp.paths.dart_path(current_cycle).mkdir(parents=True, exist_ok=True)
+    exp.paths.dart_path(cycle_i).mkdir(parents=True, exist_ok=True)
 
     dart_input_txt = dart_dir / "input_list.txt"
     dart_input_txt.write_text("\n".join([str(prior.resolve()) for prior in priors]))
@@ -406,9 +346,7 @@ def filter(experiment_path: Path):
     # Link wrfinput, required by filter to read coordinates
     wrfinput_path = dart_dir / "wrfinput_d01"
     wrfinput_path.unlink(missing_ok=True)
-    wrfinput_cur_cycle_path = (
-        exp.paths.data_icbc / f"wrfinput_d01_cycle_{current_cycle}"
-    )
+    wrfinput_cur_cycle_path = exp.paths.data_icbc / f"wrfinput_d01_cycle_{cycle_i}"
     wrfinput_path.symlink_to(wrfinput_cur_cycle_path)
     logger.info(f"Linked {wrfinput_path} to {wrfinput_cur_cycle_path}")
 
@@ -434,15 +372,14 @@ def filter(experiment_path: Path):
     obs_seq_final = dart_dir / "obs_seq.final"
     utils.copy(
         obs_seq_final,
-        exp.paths.data_diag / f"cycle_{current_cycle}.obs_seq.final",
+        exp.paths.data_diag / f"cycle_{cycle_i}.obs_seq.final",
     )
-    obs_seq_nc = exp.paths.data_diag / f"cycle_{current_cycle}.nc"
+    obs_seq_nc = exp.paths.data_diag / f"cycle_{cycle_i}.nc"
     observations.obs_seq_to_nc(exp, obs_seq_final, obs_seq_nc)
 
     # Mark filter as completed
-    for m in exp.members:
-        m.cycles[current_cycle].filter = True
-    exp.write_all_member_info()
+    exp.filter_run = True
+    exp.write_status()
 
 
 @ensemble_cli.command()
@@ -456,21 +393,21 @@ def analysis(experiment_path: Path):
     logger.setup("ensemble-analysis", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    # Establish which cycle we are running and that all member priors are pre-processed
-    exp.ensure_same_cycle()
-    exp.ensure_current_cycle_state({"advanced": True, "filter": True})
+    if not exp.filter_run:
+        logger.error("Filter has not been run, cannot run analysis!")
+        sys.exit(1)
 
-    current_cycle = exp.members[0].current_cycle_i
-    cycle_info = exp.cycles[current_cycle]
+    cycle_i = exp.current_cycle_i
+    cycle = exp.current_cycle
 
-    forecast_dir = exp.paths.forecast_path(current_cycle)
-    analysis_dir = exp.paths.analysis_path(current_cycle)
-    dart_out_dir = exp.paths.dart_path(current_cycle)
+    forecast_dir = exp.paths.forecast_path(cycle_i)
+    analysis_dir = exp.paths.analysis_path(cycle_i)
+    dart_out_dir = exp.paths.dart_path(cycle_i)
 
     # Postprocess analysis files
     for member in range(exp.cfg.assimilation.n_members):
         # Copy forecasts to analysis directory
-        wrfout_name = "wrfout_d01_" + cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
+        wrfout_name = "wrfout_d01_" + cycle.end.strftime("%Y-%m-%d_%H:%M:%S")
         forecast_file = forecast_dir / f"member_{member:02d}" / wrfout_name
         analysis_file = analysis_dir / f"member_{member:02d}" / wrfout_name
         utils.copy(forecast_file, analysis_file)
@@ -496,13 +433,13 @@ def analysis(experiment_path: Path):
             # Add experiment name and current cycle information to attributes
             # TODO Standardize this somehow? We must add metadata to all files!
             nc_analysis.experiment_name = exp.cfg.metadata.name
-            nc_analysis.current_cycle = current_cycle
-            nc_analysis.cycle_start = cycle_info.start.strftime("%Y-%m-%d_%H:%M:%S")
-            nc_analysis.cycle_end = cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
+            nc_analysis.current_cycle = cycle_i
+            nc_analysis.cycle_start = cycle.start.strftime("%Y-%m-%d_%H:%M:%S")
+            nc_analysis.cycle_end = cycle.end.strftime("%Y-%m-%d_%H:%M:%S")
 
-        # Update member info
-        exp.members[member].current_cycle.analysis = True
-        exp.members[member].write_minfo()
+        # Update experiment status
+        exp.analysis_run = True
+        exp.write_status()
 
 
 @ensemble_cli.command()
@@ -541,10 +478,14 @@ def statistics(
 
     logger.setup("statistics", experiment_path)
     exp = experiment.Experiment(experiment_path)
-    exp.ensure_same_cycle()
+    if exp.all_members_advanced:
+        logger.error(
+            "Not all members have advanced to the next cycle, cannot run statistics without at least forecasts!"
+        )
+        sys.exit(1)
 
     if cycle is None:
-        cycle = exp.members[0].current_cycle_i
+        cycle = exp.current_cycle_i
 
     logger.info(f"Cycle: {exp.cycles[cycle]}")
 
@@ -588,7 +529,6 @@ def statistics(
     failure = False
     logger.info(f"Executing {len(commads)} nco commands in parallel, using {jobs} jobs")
     for res in external.run_in_parallel(commads, jobs):
-        str_cmd = " ".join(res.command)
         if res.returncode != 0:
             logger.error(f"nco command failed with exit code {res.returncode}")
             logger.error(res.output)
@@ -629,63 +569,51 @@ def cycle(experiment_path: Path, use_forecast: bool):
     logger.setup("cycle", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    exp.ensure_same_cycle()
-
-    # Establish which cycle we are running and that all member have the analysis prepared
-    exp.ensure_current_cycle_state({"advanced": True})
-    try:
-        exp.ensure_current_cycle_state({"filter": True, "analysis": True})
-    except ValueError:
-        if not use_forecast:
-            logger.error("Not all members have completed the analysis step")
-            logger.error(
-                "Either run the analysis or use `--use-forecast` to cycle w/ the latest forecast"
-            )
-            sys.exit(1)
-
-        if use_forecast:
-            logger.warning(
-                "Not all members have completed the analysis step, using forecasts for cycling"
-            )
-
-    current_cycle = exp.members[0].current_cycle_i
-    cycle_info = exp.cycles[current_cycle]
-    next_cycle = current_cycle + 1
-
-    if next_cycle >= len(exp.cycles):
-        logger.error(f"Experiment is finished! No cycle {next_cycle}")
+    if not exp.all_members_advanced:
+        logger.error("Not all members have advanced to the next cycle, cannot cycle!")
+        sys.exit(1)
+    if not use_forecast and not exp.analysis_run:
+        logger.error(
+            "Analysis step is not done for this cycle, either run it or use --use-forecast to cycle w/ the latest forecast"
+        )
         sys.exit(1)
 
     if use_forecast:
-        analysis_dir = exp.paths.forecast_path(current_cycle)
+        logger.warning("Cycling using the latest forecast")
+
+    cycle_i = exp.current_cycle_i
+    cycle = exp.current_cycle
+    next_cycle_i = cycle_i + 1
+
+    if next_cycle_i >= len(exp.cycles):
+        logger.error(f"Experiment is finished! No cycle {next_cycle_i}")
+        sys.exit(1)
+
+    if use_forecast:
+        analysis_dir = exp.paths.forecast_path(cycle_i)
     else:
-        analysis_dir = exp.paths.analysis_path(current_cycle)
+        analysis_dir = exp.paths.analysis_path(cycle_i)
 
     # Prepare namelist contents, same for all members
-    cycle = exp.cycles[next_cycle]
-    logger.info(f"Configuring members for cycle {next_cycle}: {str(cycle)}")
-
-    # Update namelists
-    for member in exp.members:
-        member_dir = exp.paths.member_path(member.i)
-        wrf.generate_wrf_namelist(
-            exp, cycle=next_cycle, chem_in_opt=True, paths=member_dir, member=member.i
-        )
+    cycle = exp.cycles[next_cycle_i]
+    logger.info(f"Configuring members for cycle {next_cycle_i}: {str(cycle)}")
 
     # Combine initial condition file w/ analysis by copying the cycled variables, for each member
     for member in exp.members:
-        # Copy the initial & boundary condition files for the next cycle, as is
-        icbc_file = exp.paths.data_icbc / f"wrfinput_d01_cycle_{next_cycle}"
-        bdy_file = exp.paths.data_icbc / f"wrfbdy_d01_cycle_{next_cycle}"
+        member_path = exp.paths.member_path(member.i)
 
-        icbc_target_file = member.path / "wrfinput_d01"
-        bdy_target_file = member.path / "wrfbdy_d01"
+        # Copy the initial & boundary condition files for the next cycle, as is
+        icbc_file = exp.paths.data_icbc / f"wrfinput_d01_cycle_{next_cycle_i}"
+        bdy_file = exp.paths.data_icbc / f"wrfbdy_d01_cycle_{next_cycle_i}"
+
+        icbc_target_file = member_path / "wrfinput_d01"
+        bdy_target_file = member_path / "wrfbdy_d01"
 
         utils.copy(icbc_file, icbc_target_file)
         utils.copy(bdy_file, bdy_target_file)
 
         # Copy the cycled variables from the analysis file to the initial condition file
-        wrfout_name = "wrfout_d01_" + cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
+        wrfout_name = "wrfout_d01_" + cycle.end.strftime("%Y-%m-%d_%H:%M:%S")
         analysis_file = analysis_dir / f"member_{member.i:02d}" / wrfout_name
 
         logger.info(
@@ -723,22 +651,18 @@ def cycle(experiment_path: Path, use_forecast: bool):
             logger.error(res.output)
             sys.exit(1)
 
-        # Remove forecast files
-        logger.info(f"Removing forecast files from member directory {member.path}")
-        for f in member.path.glob("wrfout*"):
+        # Remove forecast files, log files
+        logger.info(f"Cleaning up member directory {member_path}")
+        for f in member_path.glob("wrfout*"):
             logger.debug(f"Removing forecast file {f}")
             f.unlink()
+        for f in member_path.glob("rsl*"):
+            logger.debug(f"Removing log file {f}")
+            f.unlink()
 
-        # Update member info
-        member.current_cycle_i += 1
-        member.current_cycle = member_info.CycleSection(
-            runtime=None,
-            walltime_s=None,
-            advanced=False,
-            filter=False,
-            analysis=False,
-        )
-    exp.write_all_member_info()
+    # Update experiment status
+    exp.set_next_cycle()
+    exp.write_status()
 
 
 @ensemble_cli.command()
@@ -749,22 +673,10 @@ def status(experiment_path: Path):
     logger.setup("experiment-status", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    table = Table(
-        "Member",
-        "Current cycle",
-        "advanced",
-        "filter",
-        "analysis",
-        title="Experiment status",
-    )
+    logger.info(f"Current cycle: {exp.current_cycle_i}")
+    logger.info(f"Members: {exp.cfg.assimilation.n_members}")
+    logger.info(f"Filter run: {exp.filter_run}")
+    logger.info(f"Analysis run: {exp.analysis_run}")
 
-    for i, member in enumerate(exp.members):
-        table.add_row(
-            str(i),
-            str(member.current_cycle_i),
-            utils.bool_to_console_str(member.current_cycle.advanced),
-            utils.bool_to_console_str(member.current_cycle.filter),
-            utils.bool_to_console_str(member.current_cycle.analysis),
-        )
-
-    Console().print(table)
+    for member in exp.members:
+        logger.info(f"Member {member.i} advanced: {member.advanced}")

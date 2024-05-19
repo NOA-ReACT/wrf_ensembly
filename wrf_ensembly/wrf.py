@@ -3,7 +3,9 @@ from pathlib import Path
 from typing import Optional
 
 from wrf_ensembly import fortran_namelists
+from wrf_ensembly.config import Config
 from wrf_ensembly.console import logger
+from wrf_ensembly.cycling import CycleInformation
 from wrf_ensembly.experiment import Experiment
 
 
@@ -99,8 +101,8 @@ def generate_wps_namelist(experiment: Experiment, path: Path):
 
 
 def generate_wrf_namelist(
-    experiment: Experiment,
-    cycle: int,
+    cfg: Config,
+    cycle: CycleInformation,
     chem_in_opt: bool,
     paths: Path | list[Path],
     member: Optional[int] = None,
@@ -109,7 +111,7 @@ def generate_wrf_namelist(
     Generates the WRF namelist for the experiment and a specific cycle, at the given path.
 
     Args:
-        experiment: The experiment to generate the namelist for
+        cfg: Configuration of the experiment
         cycle: The cycle to generate the namelist for
         chem_in_opt: If true, chem_in_opt will be set to 1, otherwise 0. Use False when running real.exe and True
                      when running wrf.exe. Ignored if cfg.data.manage_chem_in is False.
@@ -121,12 +123,9 @@ def generate_wrf_namelist(
                 overrides from the `wrf_namelist_per_member` configuration group will be applied.
     """
 
-    cfg = experiment.cfg
-
     # Determine start/end times
-    cur_cycle = experiment.cycles[cycle]
-    start = cur_cycle.start
-    end = cur_cycle.end
+    start = cycle.start
+    end = cycle.end
 
     # Add time and domain control
     wrf_namelist = {
@@ -136,8 +135,8 @@ def generate_wrf_namelist(
             **datetime_to_namelist_items(end, "end"),
             "interval_seconds": cfg.time_control.boundary_update_interval * 60,
             "history_interval": (
-                cur_cycle.output_interval
-                if cur_cycle.output_interval is not None
+                cycle.output_interval
+                if cycle.output_interval is not None
                 else cfg.time_control.output_interval
             ),
         },

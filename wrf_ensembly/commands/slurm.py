@@ -25,22 +25,15 @@ def preprocessing(experiment_path: Path):
 
 
 @slurm_cli.command()
-@click.option("--cycle", type=int, help="Cycle to advance members to")
 @pass_experiment_path
-def advance_members(experiment_path: Path, cycle: Optional[int]):
+def advance_members(experiment_path: Path):
     """Create a SLURM jobfile to advance each member of the ensemble"""
 
     logger.setup(f"slurm-advance-members", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    # If a cycle is passed by the user, generate jobfiles for that cycle,
-    # otherwise grab the current cycle
-    if cycle is None:
-        exp.ensure_same_cycle()
-        cycle = exp.members[0].current_cycle_i
-
-    logger.info(f"Writing jobfiles for cycle {cycle}")
-    jobfiles.generate_advance_jobfiles(exp, cycle)
+    logger.info(f"Writing jobfiles advancing members...")
+    jobfiles.generate_advance_jobfiles(exp)
 
 
 @slurm_cli.command()
@@ -99,21 +92,15 @@ def run_experiment(
     exp = experiment.Experiment(experiment_path)
     slurm_command = exp.cfg.slurm.sbatch_command
 
-    # If we need to resume, grab current cycle and filter the cycles list
-    exp.ensure_same_cycle()
-    current_cycle = exp.cycles[exp.members[0].current_cycle_i]
+    current_cycle = exp.current_cycle
 
-    # Check if the current cycle is the last one
-    if current_cycle.index == len(exp.cycles) - 1:
-        try:
-            exp.ensure_current_cycle_state({"advanced": True})
-            logger.error("Last cycle already advanced, experiment finished")
-            sys.exit(1)
-        except ValueError:
-            pass
+    # Check if the current cycle is the last one and if it's done
+    if current_cycle.index == len(exp.cycles) - 1 and exp.all_members_advanced:
+        logger.error("Last cycle already advanced, experiment finished")
+        sys.exit(1)
 
     # Generate all member jobfiles, queue them and keep jobids
-    jfs = jobfiles.generate_advance_jobfiles(exp, current_cycle.index)
+    jfs = jobfiles.generate_advance_jobfiles(exp)
 
     ids = []
     for jf in jfs:

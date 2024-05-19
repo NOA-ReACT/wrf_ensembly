@@ -47,7 +47,7 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
     return jobfile
 
 
-def generate_advance_jobfiles(exp: experiment.Experiment, cycle: int) -> list[Path]:
+def generate_advance_jobfiles(exp: experiment.Experiment) -> list[Path]:
     """
     Generates a SLURM jobfile to advance a given member in a given cycle.
 
@@ -62,18 +62,12 @@ def generate_advance_jobfiles(exp: experiment.Experiment, cycle: int) -> list[Pa
 
     files = []
     for member in exp.members:
-        if member.cycles[cycle].advanced:
-            logger.info(
-                f"Member {member.i} has already been advanced to cycle {cycle}. Skipping..."
-            )
-            continue
-
         i = member.i
-        jobfile = exp.paths.jobfiles / f"cycle_{cycle}_advance_member_{i}.job.sh"
+        jobfile = exp.paths.jobfiles / f"advance_member_{i}.job.sh"
 
         dynamic_directives = {
-            "job-name": f"{exp.cfg.metadata.name}_cycle_{cycle}_member_{i}",
-            "output": f"{exp.paths.logs_slurm.resolve()}/%j-advance_cycle_{cycle}_member_{i}.out",
+            "job-name": f"{exp.cfg.metadata.name}_advance_member_{i}",
+            "output": f"{exp.paths.logs_slurm.resolve()}/%j-advance_member_{i}.out",
         }
 
         jobfile.write_text(

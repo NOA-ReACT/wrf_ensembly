@@ -45,6 +45,8 @@ def run(proc: ExternalProcess):
         else:
             command.append(c)
 
+    logger.debug(f"Running command: {' '.join(command)}")
+
     p = subprocess.run(
         command,
         cwd=proc.cwd,

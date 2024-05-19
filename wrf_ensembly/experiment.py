@@ -1,96 +1,59 @@
+import datetime as dt
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
-from wrf_ensembly import config, cycling, member_info, utils
+from mashumaro.mixins.toml import DataClassTOMLMixin
+
+from wrf_ensembly import config, cycling, external, wrf
 from wrf_ensembly.console import logger
-from wrf_ensembly.utils import filter_none_from_dict
 
 
-class EnsembleMember:
-    """Represents a member of the ensemble"""
+@dataclass
+class RuntimeStatistics:
+    """Contains runtime information for one cycle"""
+
+    cycle: int
+    """Which cycle are these statistics for"""
+
+    start: dt.datetime
+    """Start of model execution"""
+
+    end: dt.datetime
+    """End of model execution"""
+
+    duration_s: int
+    """Duration of model execution in seconds"""
+
+
+@dataclass
+class MemberStatus:
+    """Status of a single ensemble member"""
 
     i: int
-    """Index of the member"""
+    """The member ID"""
 
-    current_cycle_i: int
-    """Currentcycle of the member, i.e. which cycle should now run"""
+    advanced: bool
+    """Has WRF been run for the current cycle?"""
 
-    path: Path
-    """Path to the member directory"""
+    runtime_statistics: list[RuntimeStatistics]
 
-    minfo_path: Path
-    """Path to the member info toml file"""
 
-    metadata: dict[str, str]
-    """Metadata stored in the member info file"""
+@dataclass
+class ExperimentStatus(DataClassTOMLMixin):
+    """Status of the entire experiment"""
 
-    cycles: dict[int, member_info.CycleSection]
-    """History of the member, i.e. all cycles that have been run"""
+    current_cycle: int
+    """The experiment's current cycle"""
 
-    @property
-    def current_cycle(self) -> member_info.CycleSection:
-        """
-        Returns the current cycle of the member.
-        """
-        return self.cycles[self.current_cycle_i]
+    filter_run: bool
+    """True is the filter has been run for the current cycle"""
 
-    @current_cycle.setter
-    def current_cycle(self, cycle: member_info.CycleSection):
-        """Update the current cycle"""
-        self.cycles[self.current_cycle_i] = cycle
+    analysis_run: bool
+    """True if the analysis has been run for the current cycle"""
 
-    def __init__(self, experiment_path: Path, i: int, cycle_count: int):
-        self.i = i
-        self.path = experiment_path / "work" / "ensemble" / f"member_{self.i:02d}"
-        self.minfo_path = (
-            experiment_path / "work" / "ensemble" / f"member_{self.i:02d}.toml"
-        )
-
-        # Read member info, or initialize it if it does not exist
-        try:
-            self.read_minfo()
-        except FileNotFoundError:
-            self.current_cycle_i = 0
-            self.metadata = {}
-            self.cycles = {
-                i: member_info.CycleSection(
-                    runtime=None,
-                    walltime_s=None,
-                    advanced=False,
-                    filter=False,
-                    analysis=False,
-                )
-                for i in range(cycle_count)
-            }
-
-    def read_minfo(self):
-        """
-        Reads the member info file for this member.
-        """
-        minfo = member_info.MemberInfo.from_toml(self.minfo_path.read_text())
-
-        self.current_cycle_i = minfo.member.current_cycle
-        self.metadata = minfo.metadata
-        self.cycles = {int(k): v for k, v in minfo.cycle.items()}
-
-    def write_minfo(self):
-        """
-        Writes the member info file for this member.
-        """
-        minfo = member_info.MemberInfo(
-            member=member_info.MemberSection(
-                i=self.i, current_cycle=self.current_cycle_i
-            ),
-            metadata=self.metadata,
-            cycle={str(k): v for k, v in self.cycles.items()},
-        )
-
-        with utils.atomic_binary_open(self.minfo_path, "w") as f:
-            f.write(minfo.to_toml())
-        logger.info(f"Member {self.i}: Wrote info file to {self.minfo_path}")
-
-    def __str__(self) -> str:
-        return f"Member {self.i}"
+    members: list[MemberStatus]
+    """Status for each ensemble member individually"""
 
 
 class ExperimentPaths:
@@ -165,42 +128,176 @@ class Experiment:
 
     cfg: config.Config
     cycles: list[cycling.CycleInformation]
+    current_cycle_i: int
+    filter_run: bool
+    analysis_run: bool
     paths: ExperimentPaths
-    members: list[EnsembleMember] = []
+    members: list[MemberStatus] = []
 
     def __init__(self, experiment_path: Path):
         self.cfg = config.read_config(experiment_path / "config.toml")
         self.cycles = cycling.get_cycle_information(self.cfg)
 
-        for i in range(self.cfg.assimilation.n_members):
-            self.members.append(EnsembleMember(experiment_path, i, len(self.cycles)))
+        # Read experiment status from status.toml
+        status_file_path = experiment_path / "status.toml"
+        if status_file_path.exists():
+            status = ExperimentStatus.from_toml(status_file_path.read_text())
+            self.current_cycle_i = status.current_cycle
+            self.filter_run = status.filter_run
+            self.analysis_run = status.analysis_run
+            self.members = [
+                MemberStatus(
+                    i=member_status.i,
+                    advanced=member_status.advanced,
+                    runtime_statistics=member_status.runtime_statistics,
+                )
+                for member_status in status.members
+            ]
+
+            # Make sure list is of the correct length and sorted correctly
+            if len(self.members) != self.cfg.assimilation.n_members:
+                raise ValueError(
+                    f"Number of members in status file ({len(self.members)}) does not match configuration ({self.cfg.assimilation.n_members})"
+                )
+            self.members.sort(key=lambda m: m.i)
+        else:
+            # If the file does not exist, maybe this is a fresh experiment. Assume we are at cycle 0
+            self.current_cycle_i = 0
+            self.filter_run = False
+            self.analysis_run = False
+            self.members = [
+                MemberStatus(i=i, advanced=False, runtime_statistics=[])
+                for i in range(self.cfg.assimilation.n_members)
+            ]
 
         self.paths = ExperimentPaths(experiment_path, self.cfg)
 
-    def ensure_same_cycle(self):
+    def write_status(self):
         """
-        Ensures that all members have the same current cycle. Raises a ValueError otherwise.
+        Write the current status of the experiment to status.toml
         """
-        for m in self.members:
-            if m.current_cycle_i != self.members[0].current_cycle_i:
-                raise ValueError(
-                    f"Member {m.i} has cycle {m.current_cycle} but member 0 has cycle {self.members[0].current_cycle}"
-                )
 
-    def ensure_current_cycle_state(self, state: dict[str, Any]):
-        """Ensures that all members have the same state for the current cycle"""
+        status = ExperimentStatus(
+            self.current_cycle_i, self.filter_run, self.analysis_run, self.members
+        )
+        (self.paths.experiment_path / "status.toml").write_text(status.to_toml())
 
-        logger.debug(f"Checking state for cycle {self.members[0].current_cycle_i}")
+    def set_next_cycle(self):
+        """
+        Update status to the next cycle
+        """
 
-        self.ensure_same_cycle()
-        for m in self.members:
-            cycle_info = m.current_cycle.to_dict()
-            for k, v in state.items():
-                if k not in cycle_info or cycle_info[k] != v:
-                    raise ValueError(
-                        f"Member {m.i} has a different {k} than the expected {v}"
-                    )
+        self.current_cycle_i += 1
+        if self.current_cycle_i >= len(self.cycles):
+            raise ValueError("No more cycles to run")
+        self.filter_run = False
+        self.analysis_run = False
+        for member in self.members:
+            member.advanced = False
 
-    def write_all_member_info(self):
-        for m in self.members:
-            m.write_minfo()
+    def advance_member(self, member_idx: int, cores: int) -> bool:
+        """
+        Run WRF to advance a member to the next cycle.
+        Initial and boundary condition files must already be present in the member directory.
+        Will generate the appropriate namelist. Will move forecasts to the output directory.
+
+        Args:
+            member: Index of the member to advance
+            cores: Number of cores to use
+
+        Returns:
+            True if the member was advanced successfully
+        """
+
+        member = self.members[member_idx]
+        member_path = self.paths.member_path(member_idx)
+        cycle = self.cycles[self.current_cycle_i]
+
+        # Refuse to run model if already advanced
+        if member.advanced:
+            logger.error(f"Member {member_idx} already advanced")
+            return False
+
+        # Locate WRF executable, icbc, ensure they all exist
+        wrf_exe_path = (member_path / "wrf.exe").resolve()
+        if not wrf_exe_path.exists():
+            logger.error(
+                f"Member {member_idx}: WRF executable not found at {wrf_exe_path}"
+            )
+            return False
+
+        ic_path = (member_path / "wrfinput_d01").resolve()
+        bc_path = (member_path / "wrfbdy_d01").resolve()
+        if not ic_path.exists() or not bc_path.exists():
+            logger.error(
+                f"Member {member_idx}: Initial/boundary conditions not found at {ic_path} or {bc_path}"
+            )
+            return False
+
+        # Generate namelist
+        wrf_namelist_path = member_path / "namelist.input"
+        wrf.generate_wrf_namelist(self.cfg, cycle, True, wrf_namelist_path, member_idx)
+
+        # Clean old log files
+        for f in member_path.glob("rsl.*"):
+            f.unlink()
+
+        # Run WRF
+        logger.info(f"Running WRF for member {member_idx}...")
+        cmd = [self.cfg.slurm.mpirun_command, "-n", str(cores), str(wrf_exe_path)]
+
+        start_time = dt.datetime.now()
+        res = external.runc(cmd, cwd=member_path)
+        end_time = dt.datetime.now()
+
+        # Check output logs
+        for f in member_path.glob("rsl.*"):
+            logger.add_log_file(f)
+        rsl_file = member_path / "rsl.out.0000"
+        if not rsl_file.exists():
+            logger.error(f"Member {member_idx}: RSL file not found at {rsl_file}")
+            return False
+
+        rsl_content = rsl_file.read_text()
+
+        if "SUCCESS COMPLETE WRF" not in rsl_content:
+            logger.error(
+                f"Member {member_idx}: wrf.exe failed with exit code {res.returncode}"
+            )
+            return False
+
+        # Copy wrfout files to the forecasts directory
+        forecasts_dir = self.paths.forecast_path(self.current_cycle_i, member_idx)
+        forecasts_dir.mkdir(parents=True, exist_ok=True)
+        for f in member_path.glob("wrfout*"):
+            logger.info(f"Member {member_idx}: Copying {f} to {forecasts_dir}")
+            f.rename(forecasts_dir / f.name)
+
+        # Update member status
+        member.advanced = True
+        member.runtime_statistics.append(
+            RuntimeStatistics(
+                cycle=self.current_cycle_i,
+                start=start_time,
+                end=end_time,
+                duration_s=int((end_time - start_time).total_seconds()),
+            )
+        )
+
+        return True
+
+    @property
+    def current_cycle(self) -> cycling.CycleInformation:
+        """
+        Get the current cycle
+        """
+
+        return self.cycles[self.current_cycle_i]
+
+    @property
+    def all_members_advanced(self) -> bool:
+        """
+        Check if all ensemble members have been advanced
+        """
+
+        return all(m.advanced for m in self.members)
