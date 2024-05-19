@@ -34,15 +34,6 @@ class DirectoriesConfig:
     dart_root: Path
     """Root directory of the DART. Should contain a `models/wrf` directory, compiled."""
 
-    output_sub: Path = Path("./data")
-    """Where to store the output analysis files, relative to the experiment root."""
-
-    observations_sub: Path = Path("./obs")
-    """Where to store the observations files, relative to the experiment root."""
-
-    work_sub: Path = Path("./work")
-    """Work directory for pre-processing and ensemble members, relative to the experiment root."""
-
 
 @dataclass
 class DomainControlConfig:

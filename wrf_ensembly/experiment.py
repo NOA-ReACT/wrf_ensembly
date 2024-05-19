@@ -68,7 +68,7 @@ class ExperimentPaths:
         self.jobfiles = experiment_path / "jobfiles"
 
         # Data directories
-        self.data = experiment_path / cfg.directories.output_sub
+        self.data = experiment_path / "data"
         self.data_icbc = self.data / "initial_boundary"
         self.data_forecasts = self.data / "forecasts"
         self.data_dart = self.data / "dart"
@@ -78,7 +78,7 @@ class ExperimentPaths:
         self.obs = experiment_path / "obs"
 
         # Work directories
-        self.work = experiment_path / cfg.directories.work_sub
+        self.work = experiment_path / "work"
         self.work_wrf = self.work / "WRF"
         self.work_wps = self.work / "WPS"
         self.work_ensemble = self.work / "ensemble"
