@@ -221,9 +221,7 @@ def real(experiment_path: Path, cycle: int, cores):
     logger.info(f"Linked {count} met_em files to {wrf_dir}")
 
     # Generate namelist
-    wrf.generate_wrf_namelist(
-        exp.cfg, exp.cycles[cycle], False, wrf_dir / "namelist.input"
-    )
+    wrf.generate_wrf_namelist(exp, exp.cycles[cycle], False, wrf_dir / "namelist.input")
     logger.info(f"Generated namelist at {wrf_dir / 'namelist.input'}")
 
     # Determine number of cores

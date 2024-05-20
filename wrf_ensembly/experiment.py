@@ -71,7 +71,6 @@ class ExperimentPaths:
         self.data = experiment_path / "data"
         self.data_icbc = self.data / "initial_boundary"
         self.data_forecasts = self.data / "forecasts"
-        self.data_dart = self.data / "dart"
         self.data_analysis = self.data / "analysis"
         self.data_diag = self.data / "diagnostics"
 
@@ -95,6 +94,35 @@ class ExperimentPaths:
         self.logs = experiment_path / "logs"
         self.logs_slurm = self.logs / "slurm"
 
+        # Scratch
+        self.scratch = cfg.directories.scratch_root
+        if not self.scratch.is_absolute():
+            self.scratch = experiment_path / self.scratch
+        self.scratch_forecasts = self.scratch / "forecasts"
+        self.scratch_analysis = self.scratch / "analysis"
+        self.scratch_dart = self.scratch / "dart"
+
+    def create_directories(self):
+        """Creates all required directories"""
+        self.obs.mkdir()
+        self.work.mkdir()
+        self.work_preprocessing.mkdir()
+        self.jobfiles.mkdir()
+
+        self.data.mkdir()
+        self.data_analysis.mkdir()
+        self.data_forecasts.mkdir()
+        self.data_icbc.mkdir()
+        self.data_diag.mkdir()
+
+        self.scratch.mkdir()
+        self.scratch_forecasts.mkdir()
+        self.scratch_analysis.mkdir()
+        self.scratch_dart.mkdir()
+
+        self.logs.mkdir(exist_ok=True)
+        self.logs_slurm.mkdir()
+
     def member_path(self, i: int) -> Path:
         """
         Get the work directory for given ensemble member
@@ -115,10 +143,24 @@ class ExperimentPaths:
             return self.data_analysis
         return self.data_analysis / f"cycle_{cycle:03d}"
 
-    def dart_path(self, cycle: Optional[int] = None) -> Path:
+    def scratch_forecasts_path(
+        self, cycle: Optional[int] = None, member: Optional[int] = None
+    ) -> Path:
         if cycle is None:
-            return self.data_dart
-        return self.data_dart / f"cycle_{cycle:03d}"
+            return self.scratch_forecasts
+        if member is None:
+            return self.scratch_forecasts / f"cycle_{cycle:03d}"
+        return self.scratch_forecasts / f"cycle_{cycle:03d}" / f"member_{member:02d}"
+
+    def scratch_analysis_path(self, cycle: Optional[int] = None) -> Path:
+        if cycle is None:
+            return self.scratch_analysis
+        return self.scratch_analysis / f"cycle_{cycle:03d}"
+
+    def scratch_dart_path(self, cycle: Optional[int] = None) -> Path:
+        if cycle is None:
+            return self.scratch_dart
+        return self.scratch_dart / f"cycle_{cycle:03d}"
 
 
 class Experiment:
@@ -236,7 +278,7 @@ class Experiment:
 
         # Generate namelist
         wrf_namelist_path = member_path / "namelist.input"
-        wrf.generate_wrf_namelist(self.cfg, cycle, True, wrf_namelist_path, member_idx)
+        wrf.generate_wrf_namelist(self, cycle, True, wrf_namelist_path, member_idx)
 
         # Clean old log files
         for f in member_path.glob("rsl.*"):
@@ -265,13 +307,6 @@ class Experiment:
                 f"Member {member_idx}: wrf.exe failed with exit code {res.returncode}"
             )
             return False
-
-        # Copy wrfout files to the forecasts directory
-        forecasts_dir = self.paths.forecast_path(self.current_cycle_i, member_idx)
-        forecasts_dir.mkdir(parents=True, exist_ok=True)
-        for f in member_path.glob("wrfout*"):
-            logger.info(f"Member {member_idx}: Copying {f} to {forecasts_dir}")
-            f.rename(forecasts_dir / f.name)
 
         # Update member status
         member.advanced = True

@@ -18,14 +18,11 @@ def experiment_cli():
 
 
 @experiment_cli.command()
-@click.argument(
-    "template",
-    required=True,
-    type=click.STRING,
-)
+@click.argument("template", required=True)
 @pass_experiment_path
 def create(experiment_path: Path, template: str):
     """Create a new experiment directory."""
+
     logger.setup("experiment-create", experiment_path)
 
     # Create directory tree, add config file
@@ -43,22 +40,8 @@ def create(experiment_path: Path, template: str):
     utils.copy(config_template_path, root / "config.toml")
 
     exp = experiment.Experiment(experiment_path)
-
-    # Create sub-directories
-    exp.paths.obs.mkdir()
-    exp.paths.work.mkdir()
-    exp.paths.work_preprocessing.mkdir()
-    exp.paths.jobfiles.mkdir()
-
-    exp.paths.data.mkdir()
-    exp.paths.data_analysis.mkdir()
-    exp.paths.data_forecasts.mkdir()
-    exp.paths.data_dart.mkdir()
-    exp.paths.data_icbc.mkdir()
-    exp.paths.data_diag.mkdir()
-
-    exp.paths.logs.mkdir(exist_ok=True)
-    exp.paths.logs_slurm.mkdir()
+    exp.paths.create_directories()
+    exp.write_status()
 
     logger.info("Experiment created successfully!")
 

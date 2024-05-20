@@ -330,10 +330,10 @@ def filter(experiment_path: Path):
     wrfout_name = "wrfout_d01_" + cycle.end.strftime("%Y-%m-%d_%H:%M:%S")
     priors = list((exp.paths.forecast_path(cycle_i)).glob(f"member_*/{wrfout_name}"))
     dart_output = [
-        exp.paths.dart_path(cycle_i) / f"dart_analysis_{prior.parent.name}.nc"
+        exp.paths.scratch_dart_path(cycle_i) / f"dart_analysis_{prior.parent.name}.nc"
         for prior in priors
     ]
-    exp.paths.dart_path(cycle_i).mkdir(parents=True, exist_ok=True)
+    exp.paths.scratch_dart_path(cycle_i).mkdir(parents=True, exist_ok=True)
 
     dart_input_txt = dart_dir / "input_list.txt"
     dart_input_txt.write_text("\n".join([str(prior.resolve()) for prior in priors]))
@@ -402,7 +402,7 @@ def analysis(experiment_path: Path):
 
     forecast_dir = exp.paths.forecast_path(cycle_i)
     analysis_dir = exp.paths.analysis_path(cycle_i)
-    dart_out_dir = exp.paths.dart_path(cycle_i)
+    dart_out_dir = exp.paths.scratch_dart_path(cycle_i)
 
     # Postprocess analysis files
     for member in range(exp.cfg.assimilation.n_members):

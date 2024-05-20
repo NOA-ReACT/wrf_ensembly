@@ -101,27 +101,29 @@ def generate_wps_namelist(experiment: Experiment, path: Path):
 
 
 def generate_wrf_namelist(
-    cfg: Config,
+    exp: Experiment,
     cycle: CycleInformation,
     chem_in_opt: bool,
-    paths: Path | list[Path],
+    path: Path,
     member: Optional[int] = None,
 ):
     """
     Generates the WRF namelist for the experiment and a specific cycle, at the given path.
 
     Args:
-        cfg: Configuration of the experiment
+        experiment: Experiment object
         cycle: The cycle to generate the namelist for
         chem_in_opt: If true, chem_in_opt will be set to 1, otherwise 0. Use False when running real.exe and True
                      when running wrf.exe. Ignored if cfg.data.manage_chem_in is False.
-        paths: The path or paths to write the namelist to. If a list of paths, will
-               write the same namelist in all of them. If any path points to a directory,
+        paths: The path to write the namelist to. If it points to a directory,
                the namelist will be written inside that directory with the name
                `namelist.input`.
-        member: The ensemble member to generate the namelist for. If specified, any member-specific
-                overrides from the `wrf_namelist_per_member` configuration group will be applied.
+        member: The ensemble member to generate the namelist for. If set, the &time_control.history_outname
+                variable will be set to the member's scratch directory and any overrides in the configuration
+                will be applied. Omit this parameter when generating a namelist for preprocessing/real.exe.
     """
+
+    cfg = exp.cfg
 
     # Determine start/end times
     start = cycle.start
@@ -139,6 +141,7 @@ def generate_wrf_namelist(
                 if cycle.output_interval is not None
                 else cfg.time_control.output_interval
             ),
+            "history_outname": "wrfout_d<domain>_<date>",
         },
         "domains": {
             "e_we": cfg.domain_control.xy_size[0],
@@ -150,13 +153,20 @@ def generate_wrf_namelist(
             "max_dom": 1,
         },
     }
+    if member is not None:
+        wrfout_dest = exp.paths.scratch_forecasts_path(cycle.index, member)
+        wrfout_dest.mkdir(parents=True, exist_ok=True)
+        wrf_namelist["time_control"][
+            "history_outname"
+        ] = f"{wrfout_dest}/wrfout_d<domain>_<date>"
+
     # Add overrides
     for name, group in cfg.wrf_namelist.items():
         if name in wrf_namelist:
             wrf_namelist[name] |= group
         else:
             wrf_namelist[name] = group
-    if member is not None and str(member) in cfg.wrf_namelist_per_member:
+    if str(member) in cfg.wrf_namelist_per_member:
         member_group = cfg.wrf_namelist_per_member[str(member)]
         for name, group in member_group.items():
             if name in wrf_namelist:
@@ -174,10 +184,7 @@ def generate_wrf_namelist(
         logger.warning("!!! manage_chem_ic is set to False !!!")
 
     # Write namelist(s)
-    if not isinstance(paths, list):
-        paths = [paths]
-    for path in paths:
-        if path.is_dir():
-            path = path / "namelist.input"
-        fortran_namelists.write_namelist(wrf_namelist, path)
-        logger.info(f"Wrote namelist to {path}")
+    if path.is_dir():
+        path = path / "namelist.input"
+    fortran_namelists.write_namelist(wrf_namelist, path)
+    logger.info(f"Wrote namelist to {path}")

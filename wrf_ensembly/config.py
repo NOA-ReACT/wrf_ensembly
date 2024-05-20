@@ -34,6 +34,12 @@ class DirectoriesConfig:
     dart_root: Path
     """Root directory of the DART. Should contain a `models/wrf` directory, compiled."""
 
+    scratch_root: Path = Path("./scratch")
+    """
+    Scratch directory used for temporarily storing model output files before post-processing them.
+    If relative, will be inside the experiment directory
+    """
+
 
 @dataclass
 class DomainControlConfig:
