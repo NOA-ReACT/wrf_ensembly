@@ -7,6 +7,7 @@ from wrf_ensembly.commands.experiment import experiment_cli
 from wrf_ensembly.commands.observations import observations_cli
 from wrf_ensembly.commands.preprocess import preprocess_cli
 from wrf_ensembly.commands.slurm import slurm_cli
+from wrf_ensembly.commands.postprocess import postprocess_cli
 
 
 @click.group()
@@ -26,6 +27,7 @@ cli.add_command(preprocess_cli)
 cli.add_command(ensemble_cli)
 cli.add_command(observations_cli)
 cli.add_command(slurm_cli)
+cli.add_command(postprocess_cli)
 
 if __name__ == "__main__":
     cli()

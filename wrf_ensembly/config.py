@@ -203,6 +203,25 @@ class SlurmConfig:
 
 
 @dataclass
+class PostprocessConfig:
+    extract_vars: list[str]
+    """
+    List of variables to include in the output files. Some essential variables are included
+    regardless if they appear in this list: XTIME, XLAT, XLAT_U, XLAT_V, XLONG, XLONG_U, XLONG_V, Time, ZNU, ZNW, PH, PHB, PC, P, PB, FNM, FNP, DN, HGT, P_TOP, T00, P00
+    """
+
+    # postprocessing_scripts: list[str]
+    # """
+    # List to postprocessing scripts to run on each output analysis and forecast file.
+    # The string can be any command. The script should mutate/replace the given file.
+    # The following placeholders will be replaced:
+    # - {in}: path to the input file (analysis or forecast, netCDF4)
+    # - {d} member number
+    # - {c} cycle number
+    # """
+
+
+@dataclass
 class Config(DataClassTOMLMixin):
     metadata: MetadataConfig
     """Metadata about the experiment (name, ...)"""
@@ -230,6 +249,9 @@ class Config(DataClassTOMLMixin):
 
     slurm: SlurmConfig
     """Configuration related to SLURM jobfiles."""
+
+    postprocess: PostprocessConfig
+    """Configuration related to wrfout postprocessing"""
 
     wrf_namelist: dict[str, dict[str, Any]]
     """Overrides for the WRF namelist"""

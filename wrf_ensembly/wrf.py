@@ -8,6 +8,35 @@ from wrf_ensembly.console import logger
 from wrf_ensembly.cycling import CycleInformation
 from wrf_ensembly.experiment import Experiment
 
+ESSENTIAL_VARIABLES = set(
+    [
+        "XTIME",
+        "XLAT",
+        "XLAT_U",
+        "XLAT_V",
+        "XLONG",
+        "XLONG_U",
+        "XLONG_V",
+        "Time",
+        "ZNU",
+        "ZNW",
+        "PH",
+        "PHB",
+        "PC",
+        "P",
+        "PB",
+        "FNM",
+        "FNP",
+        "DN",
+        "HGT",
+        "P_TOP",
+        "T00",
+        "P00",
+        "VAR",
+        "VAR_SSO",
+    ]
+)
+
 
 def datetime_to_namelist_items(dt: datetime, prefix: str) -> dict[str, int]:
     """
