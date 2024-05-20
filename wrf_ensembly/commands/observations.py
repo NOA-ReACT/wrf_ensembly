@@ -160,4 +160,4 @@ def obs_seq_to_nc(experiment_path: Path, obs_seq_path: Path, nc_path: Path):
     exp = experiment.Experiment(experiment_path)
     logger.setup("observations-convert-obs-seq", experiment_path)
 
-    observations.obs_seq_to_nc(exp, obs_seq_path, nc_path)
+    observations.obs_seq_to_nc(exp.cfg.directories.dart_root, obs_seq_path, nc_path)

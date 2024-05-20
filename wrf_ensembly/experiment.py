@@ -5,7 +5,7 @@ from typing import Optional
 
 from mashumaro.mixins.toml import DataClassTOMLMixin
 
-from wrf_ensembly import config, cycling, external, wrf
+from wrf_ensembly import config, cycling, external, observations, utils, wrf
 from wrf_ensembly.console import logger
 
 
@@ -319,6 +319,100 @@ class Experiment:
             )
         )
 
+        return True
+
+    def filter(self) -> bool:
+        """
+        Run the Kalman Filter for the current cycle
+
+        Returns:
+            True if the filter was run successfully
+        """
+
+        if self.filter_run:
+            logger.error("Filter already run for current cycle")
+            return False
+        if not self.all_members_advanced:
+            logger.error("Not all members have been advanced")
+            return False
+
+        dart_dir = self.cfg.directories.dart_root / "models" / "wrf" / "work"
+
+        # Grab observations
+        obs_seq = dart_dir / "obs_seq.out"
+        obs_seq.unlink(missing_ok=True)
+
+        obs_file = self.paths.obs / f"cycle_{self.current_cycle_i}.obs_seq"
+        if not obs_file.exists():
+            logger.error(f"Observation file for current cycle not found at {obs_file}")
+            return False
+        utils.copy(obs_file, obs_seq)
+
+        # Write lists of input and output files
+        # The input list is the latest forecast for each member
+        wrfout_name = "wrfout_d01_" + self.current_cycle.end.strftime(
+            "%Y-%m-%d_%H:%M:%S"
+        )
+        priors = [
+            self.paths.scratch_forecasts_path(self.current_cycle_i, member_i)
+            / wrfout_name
+            for member_i in range(0, self.cfg.assimilation.n_members)
+        ]
+        posterior = [
+            self.paths.scratch_dart_path(self.current_cycle_i)
+            / f"dart_{prior.parent.name}"
+            for prior in priors
+        ]
+
+        dart_input_txt = dart_dir / "input_list.txt"
+        dart_input_txt.write_text("\n".join(str(prior.resolve()) for prior in priors))
+        logger.info(f"Wrote {dart_input_txt}")
+        dart_output_txt = dart_dir / "output_list.txt"
+        dart_output_txt.write_text("\n".join(str(post.resolve()) for post in posterior))
+        logger.info(f"Wrote {dart_output_txt}")
+
+        self.paths.scratch_dart_path(self.current_cycle_i).mkdir(exist_ok=True)
+
+        # Link wrfinput, required by filter to read coordinates
+        wrfinput_path = dart_dir / "wrfinput_d01"
+        wrfinput_path.unlink(missing_ok=True)
+        wrfinput_cur_cycle_path = (
+            self.paths.data_icbc / f"wrfinput_d01_cycle_{self.current_cycle_i}"
+        )
+        wrfinput_path.symlink_to(wrfinput_cur_cycle_path)
+        logger.info(f"Linked {wrfinput_path} to {wrfinput_cur_cycle_path}")
+
+        # Run filter
+        if self.cfg.assimilation.filter_mpi_tasks == 1:
+            logger.info("Running filter w/out MPI")
+            cmd = ["./filter"]
+        else:
+            logger.info(
+                f"Using MPI to run filter, n={self.cfg.assimilation.filter_mpi_tasks}"
+            )
+            cmd = [
+                self.cfg.slurm.mpirun_command,
+                "-n",
+                str(self.cfg.assimilation.filter_mpi_tasks),
+                "./filter",
+            ]
+        res = external.runc(cmd, dart_dir, log_filename="filter.log")
+        if res.returncode != 0 or "Finished ... at" not in res.output:
+            logger.error(f"filter failed with exit code {res.returncode}")
+            return False
+
+        # Keep obs_seq.final for diagnostics, convert to netcdf
+        obs_seq_final = dart_dir / "obs_seq.final"
+        utils.copy(
+            obs_seq,
+            self.paths.data_diag / f"cycle_{self.current_cycle_i}.obs_seq.final",
+        )
+        obs_seq_final_nc = self.paths.data_diag / f"cycle_{self.current_cycle_i}.nc"
+        observations.obs_seq_to_nc(
+            self.cfg.directories.dart_root, obs_seq_final, obs_seq_final_nc
+        )
+
+        self.filter_run = True
         return True
 
     @property

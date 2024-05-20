@@ -161,7 +161,7 @@ def join_obs_seq(
 
 
 def obs_seq_to_nc(
-    exp: Experiment,
+    dart_root: Path,
     obs_seq: Path,
     nc: Path,
     binary_obs_sequence: bool = False,
@@ -170,17 +170,17 @@ def obs_seq_to_nc(
     Uses the `obs_seq_to_netcdf` program to convert the given obs_seq file to netcdf format
 
     Args:
+        dart_root: Path to the DART root directory
         obs_seq: Path to obs_seq file
         nc: Path to output netcdf file
+        binary_obs_sequence: Whether the obs_seq file is binary or not, defaults to False
 
     Returns:
         The result of the external process
     """
 
     # Locate executable
-    binary = (
-        exp.cfg.directories.dart_root / "models" / "wrf" / "work" / "obs_seq_to_netcdf"
-    )
+    binary = dart_root / "models" / "wrf" / "work" / "obs_seq_to_netcdf"
     binary = binary.resolve()
     if not binary.exists():
         raise RuntimeError(f"obs_seq_to_netcdf binary not found at {binary}")
