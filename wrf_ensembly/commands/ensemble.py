@@ -305,7 +305,6 @@ def filter(experiment_path: Path):
 def analysis(experiment_path: Path):
     """
     Combines the DART output files and the forecast to create the analysis.
-    Also creates the mean and standard deviation analysis files.
     """
 
     logger.setup("ensemble-analysis", experiment_path)
@@ -318,8 +317,8 @@ def analysis(experiment_path: Path):
     cycle_i = exp.current_cycle_i
     cycle = exp.current_cycle
 
-    forecast_dir = exp.paths.forecast_path(cycle_i)
-    analysis_dir = exp.paths.analysis_path(cycle_i)
+    forecast_dir = exp.paths.scratch_forecasts_path(cycle_i)
+    analysis_dir = exp.paths.scratch_analysis_path(cycle_i)
     dart_out_dir = exp.paths.scratch_dart_path(cycle_i)
 
     # Postprocess analysis files
@@ -355,9 +354,9 @@ def analysis(experiment_path: Path):
             nc_analysis.cycle_start = cycle.start.strftime("%Y-%m-%d_%H:%M:%S")
             nc_analysis.cycle_end = cycle.end.strftime("%Y-%m-%d_%H:%M:%S")
 
-        # Update experiment status
-        exp.analysis_run = True
-        exp.write_status()
+    # Update experiment status
+    exp.analysis_run = True
+    exp.write_status()
 
 
 @ensemble_cli.command()
