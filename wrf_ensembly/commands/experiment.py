@@ -1,6 +1,9 @@
+import csv
+from os import write
 import shutil
 import sys
 from pathlib import Path
+from typing import Optional
 
 import click
 import pkg_resources
@@ -102,8 +105,11 @@ def copy_model(experiment_path: Path, force: bool):
 
 
 @experiment_cli.command()
+@click.option(
+    "--to-csv", type=click.Path(path_type=Path), help="Write cycle info to CSV file"
+)
 @pass_experiment_path
-def cycle_info(experiment_path: Path):
+def cycle_info(experiment_path: Path, to_csv: Optional[Path]):
     """Prints cycle information"""
 
     logger.setup("experiment-cycle-info", experiment_path)
@@ -128,3 +134,17 @@ def cycle_info(experiment_path: Path):
         )
 
     Console().print(table)
+
+    if to_csv is not None:
+        with open(to_csv, "w", newline="") as fout:
+            writer = csv.writer(fout)
+            writer.writerow(["cycle_i", "start", "end", "duration_h"])
+            for c in cycles:
+                writer.writerow(
+                    [
+                        c.index,
+                        c.start.strftime("%Y-%m-%d %H:%M"),
+                        c.end.strftime("%Y-%m-%d %H:%M"),
+                        int((c.end - c.start).total_seconds() // 60 // 60),
+                    ]
+                )
