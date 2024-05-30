@@ -116,11 +116,6 @@ def statistics(
 
     logger.setup("postprocess-statistics", experiment_path)
     exp = experiment.Experiment(experiment_path)
-    if not exp.all_members_advanced:
-        logger.error(
-            "Not all members have advanced to the next cycle, cannot run statistics without at least forecasts!"
-        )
-        sys.exit(1)
 
     if cycle is None:
         cycle = exp.current_cycle_i
