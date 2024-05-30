@@ -208,7 +208,7 @@ def generate_postprocess_jobfile(
             "slurm_job.sh.j2",
             slurm_directives=exp.cfg.slurm.directives_postprocess | dynamic_directives,
             env_modules=exp.cfg.slurm.env_modules,
-            commands=[commands],
+            commands=commands,
             pre_commands=exp.cfg.slurm.pre_commands,
         )
     )
