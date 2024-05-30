@@ -1,14 +1,13 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Optional
 
 import click
 import netCDF4
 
-from wrf_ensembly import external, nco, wrf
+from wrf_ensembly import experiment, external, nco, wrf
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
-from wrf_ensembly import experiment
 
 
 @click.group(name="postprocess")
@@ -262,3 +261,53 @@ def concat(
     if failure:
         logger.error("One or more nco commands failed, exiting")
         sys.exit(1)
+
+
+@postprocess_cli.command()
+@click.option(
+    "--cycle",
+    type=int,
+    help="Cycle to clean up. Will clean for current cycle if missing.",
+)
+@click.option(
+    "--remove-wrfout",
+    default=True,
+    is_flag=True,
+    help="Remove the raw wrfout files",
+)
+@click.option(
+    "--remove-small",
+    default=True,
+    is_flag=True,
+    help="Remove the small wrfout files (_small)",
+)
+@pass_experiment_path
+def clean(
+    experiment_path: Path, cycle: Optional[int], remove_wrfout: bool, remove_small: bool
+):
+    """
+    Clean up the scratch directory for the given cycle. Use after running the other
+    postprocessing commands to save disk space.
+    """
+
+    logger.setup("postprocess-statistics", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    if cycle is None:
+        cycle = exp.current_cycle_i
+
+    logger.info(f"Cleaning scratch for cycle {cycle}")
+
+    scratch_dirs = [
+        exp.paths.scratch_forecasts_path(cycle),
+        exp.paths.scratch_analysis_path(cycle),
+    ]
+    for dir in scratch_dirs:
+        if remove_wrfout:
+            for f in dir.rglob("wrfout*"):
+                logger.info(f"Removing {f}")
+                f.unlink()
+        if remove_small:
+            for f in dir.rglob("wrfout*_small"):
+                logger.info(f"Removing {f}")
+                f.unlink()
