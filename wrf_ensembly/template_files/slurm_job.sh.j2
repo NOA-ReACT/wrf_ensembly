@@ -7,6 +7,10 @@
 # Stop on errors
 set -e
 
+{% for cmd in pre_commands %}
+{{ cmd }}
+{% endfor %}
+
 {% if env_modules %}
 module purge
 {% for name in env_modules -%}

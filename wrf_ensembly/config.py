@@ -192,6 +192,9 @@ class SlurmConfig:
     env_modules: list[str] = field(default_factory=list)
     """List of environment modules to load in each job"""
 
+    pre_commands: list[str] = field(default_factory=list)
+    """Commands to run at the start of a job"""
+
     directives_large: dict[str, str | int] = field(default_factory=dict)
     """SLURM directives to add to the jobfile for big jobs (i.e., ensemble member advance)"""
 

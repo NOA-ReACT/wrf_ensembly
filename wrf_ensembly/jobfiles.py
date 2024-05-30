@@ -40,6 +40,7 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
             slurm_directives=exp.cfg.slurm.directives_large | dynamic_directives,
             env_modules=exp.cfg.slurm.env_modules,
             commands=commands,
+            pre_commands=exp.cfg.slurm.pre_commands,
         )
     )
     logger.info(f"Wrote jobfile to {jobfile}")
@@ -76,6 +77,7 @@ def generate_advance_jobfiles(exp: experiment.Experiment) -> list[Path]:
                 slurm_directives=exp.cfg.slurm.directives_large | dynamic_directives,
                 env_modules=exp.cfg.slurm.env_modules,
                 commands=[f"{base_cmd} {i}"],
+                pre_commands=exp.cfg.slurm.pre_commands,
             )
         )
 
@@ -152,6 +154,7 @@ def generate_make_analysis_jobfile(
             slurm_directives=exp.cfg.slurm.directives_small | dynamic_directives,
             env_modules=exp.cfg.slurm.env_modules,
             commands=commands,
+            pre_commands=exp.cfg.slurm.pre_commands,
         )
     )
     logger.info(f"Wrote jobfile to {jobfile}")
@@ -209,6 +212,7 @@ def generate_statistics_jobfile(
             slurm_directives=exp.cfg.slurm.directives_statistics | dynamic_directives,
             env_modules=exp.cfg.slurm.env_modules,
             commands=[cmd],
+            pre_commands=exp.cfg.slurm.pre_commands,
         )
     )
     logger.info(f"Wrote jobfile to {jobfile}")
