@@ -388,13 +388,14 @@ def cycle(experiment_path: Path, use_forecast: bool):
         sys.exit(1)
 
     if use_forecast:
-        analysis_dir = exp.paths.forecast_path(cycle_i)
+        analysis_dir = exp.paths.scratch_forecasts_path(cycle_i)
     else:
-        analysis_dir = exp.paths.analysis_path(cycle_i)
+        analysis_dir = exp.paths.scratch_analysis_path(cycle_i)
 
     # Prepare namelist contents, same for all members
-    cycle = exp.cycles[next_cycle_i]
-    logger.info(f"Configuring members for cycle {next_cycle_i}: {str(cycle)}")
+    logger.info(
+        f"Configuring members for cycle {next_cycle_i}: {str(exp.cycles[next_cycle_i])}"
+    )
 
     # Combine initial condition file w/ analysis by copying the cycled variables, for each member
     for member in exp.members:
@@ -423,28 +424,28 @@ def cycle(experiment_path: Path, use_forecast: bool):
         ):
             for name in exp.cfg.assimilation.cycled_variables:
                 if name not in nc_analysis.variables:
-                    logger.warning(f"Member {member}: {name} not in analysis file")
+                    logger.warning(f"Member {member.i}: {name} not in analysis file")
                     continue
-                logger.info(f"Member {member}: Copying {name}")
+                logger.info(f"Member {member.i}: Copying {name}")
                 nc_icbc[name][:] = nc_analysis[name][:]
 
             # Add experiment name to attributes
             nc_icbc.experiment_name = exp.cfg.metadata.name
 
         # Update the boundary conditions to match the new initial conditions
-        logger.info(f"Member {member}: Updating boundary conditions")
+        logger.info(f"Member {member.i}: Updating boundary conditions")
         res = update_bc.update_wrf_bc(
             exp.cfg,
             icbc_target_file,
             bdy_target_file,
-            log_filename=f"da_update_bc_analysis_member_{member}.log",
+            log_filename=f"da_update_bc_analysis_member_{member.i}.log",
         )
         if (
             res.returncode != 0
             or "update_wrf_bc Finished successfully" not in res.output
         ):
             logger.error(
-                f"Member {member}: bc_update.exe failed with exit code {res.returncode}"
+                f"Member {member.i}: bc_update.exe failed with exit code {res.returncode}"
             )
             logger.error(res.output)
             sys.exit(1)
