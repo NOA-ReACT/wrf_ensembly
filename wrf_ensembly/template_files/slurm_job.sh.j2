@@ -7,10 +7,12 @@
 # Stop on errors
 set -e
 
+{% if env_modules %}
 module purge
 {% for name in env_modules -%}
 module load {{name}}
 {% endfor %}
+{% endif %}
 
 ulimit -s unlimited
 
