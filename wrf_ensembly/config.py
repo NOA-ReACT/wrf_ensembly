@@ -201,7 +201,7 @@ class SlurmConfig:
     directives_small: dict[str, str | int] = field(default_factory=dict)
     """SLURM directives to add to small jobs (i.e., wrf-ensembly python steps)"""
 
-    directives_statistics: dict[str, str | int] = field(default_factory=dict)
+    directives_postprocess: dict[str, str | int] = field(default_factory=dict)
     """SLURM directives to add to statistics jobs"""
 
 

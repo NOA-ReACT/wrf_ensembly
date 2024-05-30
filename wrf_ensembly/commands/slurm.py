@@ -60,33 +60,30 @@ def make_analysis(experiment_path: Path, cycle: int):
     default=True,
 )
 @click.option(
-    "--compute-statistics",
+    "--run-postprocess",
     is_flag=True,
     help="Compute statistics for the current cycle after the analysis step",
 )
 @click.option(
-    "--delete-members",
+    "--clean-scratch",
     is_flag=True,
-    help="Requires --compute-statistics. If set, the individual member's forecasts are deleted.",
+    help="Requires --run-postprocess. If set, the individual member's forecasts are deleted from the scratch directories",
 )
 @pass_experiment_path
 def run_experiment(
     experiment_path: Path,
     all_cycles: bool,
-    compute_statistics: bool,
-    delete_members: bool,
+    run_postprocess: bool,
+    clean_scratch: bool,
 ):
     """
     Creates jobfiles for all experiment steps and queues them in the correct order. This
     does not deal with the initial steps (setup, initial/boundary conditions, ...), only
-    the member advancing, analysis and cycling.
+    the member advancing, analysis and cycling. Postprocessing will be queued if you use
+    `--run_postprocess`.
 
     If for some cycle there are not prepared observations (in the `obs` directory), the
     generated job will skip the analysis step and go straight to cycling.
-
-    If there is a job limit on your local HPC and you cannot queue the whole experiment,
-    use the `--in-waves` option that only queues the current cycle. At the last job, the
-    next cycle will be queued.
     """
 
     logger.setup(f"slurm-run-experiment", experiment_path)
@@ -121,7 +118,7 @@ def run_experiment(
 
     # Generate the analysis jobfile, queue it and keep jobid
     jf = jobfiles.generate_make_analysis_jobfile(
-        exp, current_cycle.index, all_cycles, compute_statistics, delete_members
+        exp, current_cycle.index, all_cycles, run_postprocess, clean_scratch
     )
     dependency = "--dependency=afterok:" + ":".join(map(str, ids))
     res = external.runc([*slurm_command.split(" "), dependency, str(jf.resolve())])
@@ -129,9 +126,9 @@ def run_experiment(
     ids.append(analysis_jobid)
     logger.info(f"Queued {jf} with ID {analysis_jobid}")
 
-    if compute_statistics:
-        jf = jobfiles.generate_statistics_jobfile(
-            exp, current_cycle.index, delete_members
+    if run_postprocess:
+        jf = jobfiles.generate_postprocess_jobfile(
+            exp, current_cycle.index, clean_scratch
         )
         res = external.runc(
             [

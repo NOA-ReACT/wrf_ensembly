@@ -90,7 +90,7 @@ def generate_make_analysis_jobfile(
     exp: experiment.Experiment,
     cycle: Optional[int] = None,
     queue_next_cycle: bool = False,
-    compute_statistics: bool = False,
+    compute_postprocess: bool = False,
     delete_members: bool = False,
 ):
     """
@@ -103,7 +103,7 @@ def generate_make_analysis_jobfile(
         exp: The experiment
         cycle: The cycle for which to run the analysis command. If None, all cycles will be processed.
         queue_next_cycle: Whether to queue the next cycle after the current one is done.
-        compute_statistics: Whether to compute statistics after the analysis step.
+        compute_postprocess: Whether to compute postprocess after the analysis step.
         delete_members: Whether to delete the members' forecasts after processing them.
 
     Returns:
@@ -139,8 +139,8 @@ def generate_make_analysis_jobfile(
 
     if queue_next_cycle:
         args = ""
-        if compute_statistics:
-            args += " --compute-statistics"
+        if compute_postprocess:
+            args += " --compute-postprocess"
             if delete_members:
                 args += " --delete-members"
 
@@ -162,18 +162,18 @@ def generate_make_analysis_jobfile(
     return jobfile
 
 
-def generate_statistics_jobfile(
+def generate_postprocess_jobfile(
     exp: experiment.Experiment,
-    cycle: Optional[int] = None,
-    delete_members: bool = False,
+    cycle: int,
+    clean: bool = False,
 ) -> Path:
     """
-    Generates a jobfile to run the `statistics` step.
+    Generates a jobfile to run the `postprocessing` steps.
 
     Args:
         exp: The experiment
-        cycle: The cycle for which to run the statistics command. If None, all cycles will be processed.
-        delete_members: Whether to delete the members' forecasts after processing them.
+        cycle: The cycle for which to run the postprocess commands.
+        clean: Whether to clean the scratch directory after postprocessing.
 
     Returns:
         A Path object to the jobfile
@@ -181,37 +181,34 @@ def generate_statistics_jobfile(
 
     exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
 
-    jobs = exp.cfg.slurm.directives_statistics.get("ntasks", -1)
+    jobs = exp.cfg.slurm.directives_postprocess.get("ntasks", -1)
     if jobs == -1:
         logger.warning(
             "ntasks not set in `slurm.directives_small``. Using default value of 1"
         )
         jobs = 1
 
-    if cycle is not None:
-        job_name = f"{exp.cfg.metadata.name}_statistics_cycle_{cycle}"
-        jobfile = exp.paths.jobfiles / f"cycle_{cycle}_statistics.job.sh"
-    else:
-        job_name = f"{exp.cfg.metadata.name}_statistics"
-        jobfile = exp.paths.jobfiles / "statistics.job.sh"
-
+    jobfile = exp.paths.jobfiles / f"cycle_{cycle}_postprocess.job.sh"
     dynamic_directives = {
-        "job-name": job_name,
-        "output": f"{exp.paths.logs_slurm.resolve()}/%j-statistics.out",
+        "job-name": f"{exp.cfg.metadata.name}_postprocess_cycle_{cycle}",
+        "output": f"{exp.paths.logs_slurm.resolve()}/%j-postprocess.out",
     }
 
-    cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path} ensemble statistics --jobs {jobs}"
-    if cycle is not None:
-        cmd += f" --cycle {cycle}"
-    if delete_members:
-        cmd += " --remove-member-forecasts --remove-member-analysis"
+    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} postprocess %SUBCOMMAND% --cycle {cycle}"
+    commands = [
+        base_cmd.replace("%SUBCOMMAND%", "extract-vars"),
+        base_cmd.replace("%SUBCOMMAND%", "statistics"),
+        base_cmd.replace("%SUBCOMMAND%", "concat"),
+    ]
+    if clean:
+        commands.append(base_cmd.replace("%SUBCOMMAND%", "clean"))
 
     jobfile.write_text(
         templates.generate(
             "slurm_job.sh.j2",
-            slurm_directives=exp.cfg.slurm.directives_statistics | dynamic_directives,
+            slurm_directives=exp.cfg.slurm.directives_postprocess | dynamic_directives,
             env_modules=exp.cfg.slurm.env_modules,
-            commands=[cmd],
+            commands=[commands],
             pre_commands=exp.cfg.slurm.pre_commands,
         )
     )

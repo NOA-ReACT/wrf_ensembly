@@ -193,7 +193,7 @@ mail-type = "END,FAIL"
 account = "pr014048_thin"
 cpus-per-task = 1
 
-[slurm.directives_statistics]
+[slurm.directives_postproce]
 partition = "compute"
 nodes = 1
 ntasks-per-node = 20
