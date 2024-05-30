@@ -58,7 +58,7 @@ def extract_vars(experiment_path: Path, cycle: Optional[int]):
     # Find all files to process in the given cycle
     fc_dir = exp.paths.scratch_forecasts_path(cycle)
     an_dir = exp.paths.scratch_analysis_path(cycle)
-    files = list(fc_dir.glob("wrfout*")) + list(an_dir.glob("wrfout*"))
+    files = list(fc_dir.rglob("**/wrfout*")) + list(an_dir.rglob("**/wrfout*"))
     for in_path in files:
         member_i = in_path.parent.name.split("_")[-1]
         out_path = in_path.parent / f"{in_path.stem}_small"
@@ -117,7 +117,7 @@ def statistics(
 
     logger.setup("postprocess-statistics", experiment_path)
     exp = experiment.Experiment(experiment_path)
-    if exp.all_members_advanced:
+    if not exp.all_members_advanced:
         logger.error(
             "Not all members have advanced to the next cycle, cannot run statistics without at least forecasts!"
         )
@@ -185,6 +185,17 @@ def statistics(
 
 
 @postprocess_cli.command()
+@click.option(
+    "--cycle",
+    type=int,
+    help="Cycle to compute statistics for. Will compute for all current cycle if missing.",
+)
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    default=4,
+    help="How many NCO commands to execute in parallel",
+)
 @pass_experiment_path
 def concat(
     experiment_path: Path,
