@@ -6,7 +6,7 @@ from wrf_ensembly import fortran_namelists
 from wrf_ensembly.config import Config
 from wrf_ensembly.console import logger
 from wrf_ensembly.cycling import CycleInformation
-from wrf_ensembly.experiment import Experiment
+from wrf_ensembly.experiment.paths import ExperimentPaths
 
 ESSENTIAL_VARIABLES = set(
     [
@@ -81,12 +81,11 @@ def timedelta_to_namelist_items(td: timedelta, prefix: str = "run") -> dict[str,
     }
 
 
-def generate_wps_namelist(experiment: Experiment, path: Path):
+def generate_wps_namelist(cfg: Config, path: Path):
     """
     Generates the WPS namelist for the experiment, at the given path.
     """
 
-    cfg = experiment.cfg
     wps_namelist = {
         "share": {
             "wrf_core": "ARW",
@@ -130,17 +129,18 @@ def generate_wps_namelist(experiment: Experiment, path: Path):
 
 
 def generate_wrf_namelist(
-    exp: Experiment,
+    cfg: Config,
     cycle: CycleInformation,
     chem_in_opt: bool,
     path: Path,
     member: Optional[int] = None,
+    paths: Optional[ExperimentPaths] = None,
 ):
     """
     Generates the WRF namelist for the experiment and a specific cycle, at the given path.
 
     Args:
-        experiment: Experiment object
+        experiment: The experiment config object
         cycle: The cycle to generate the namelist for
         chem_in_opt: If true, chem_in_opt will be set to 1, otherwise 0. Use False when running real.exe and True
                      when running wrf.exe. Ignored if cfg.data.manage_chem_in is False.
@@ -150,9 +150,13 @@ def generate_wrf_namelist(
         member: The ensemble member to generate the namelist for. If set, the &time_control.history_outname
                 variable will be set to the member's scratch directory and any overrides in the configuration
                 will be applied. Omit this parameter when generating a namelist for preprocessing/real.exe.
+        paths: Paths of the experiment, required if member is set.
     """
 
-    cfg = exp.cfg
+    if member is not None and paths is None:
+        raise ValueError(
+            "paths must be provided when generating a member-specific namelist"
+        )
 
     # Determine start/end times
     start = cycle.start
@@ -182,8 +186,8 @@ def generate_wrf_namelist(
             "max_dom": 1,
         },
     }
-    if member is not None:
-        wrfout_dest = exp.paths.scratch_forecasts_path(cycle.index, member)
+    if member is not None and paths is not None:
+        wrfout_dest = paths.scratch_forecasts_path(cycle.index, member)
         wrfout_dest.mkdir(parents=True, exist_ok=True)
         wrf_namelist["time_control"][
             "history_outname"

@@ -8,7 +8,6 @@ from mashumaro.mixins.toml import DataClassTOMLMixin
 from wrf_ensembly import external, fortran_namelists, utils
 from wrf_ensembly.config import Config
 from wrf_ensembly.console import logger
-from wrf_ensembly.experiment import Experiment
 
 
 @dataclass

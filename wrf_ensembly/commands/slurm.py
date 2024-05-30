@@ -4,9 +4,10 @@ from typing import Optional
 
 import click
 
-from wrf_ensembly import experiment, external, jobfiles
+from wrf_ensembly import external, jobfiles
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
+from wrf_ensembly import experiment
 
 
 @click.group(name="slurm")

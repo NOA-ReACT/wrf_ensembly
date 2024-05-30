@@ -7,15 +7,7 @@ import click
 import netCDF4
 import numpy as np
 
-from wrf_ensembly import (
-    experiment,
-    external,
-    nco,
-    observations,
-    pertubations,
-    update_bc,
-    utils,
-)
+from wrf_ensembly import experiment, pertubations, update_bc, utils
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
 

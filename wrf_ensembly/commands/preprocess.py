@@ -6,9 +6,10 @@ from pathlib import Path
 
 import click
 
-from wrf_ensembly import experiment, external, utils, wrf
+from wrf_ensembly import external, utils, wrf
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
+from wrf_ensembly import experiment
 
 
 @click.group(name="preprocess")
@@ -39,7 +40,7 @@ def setup(experiment_path: Path, only_namelist: bool):
         shutil.copytree(exp.paths.work_wps, exp.paths.work_preprocessing_wps)
         logger.info(f"Copied WPS to {exp.paths.work_preprocessing_wps}")
 
-    wrf.generate_wps_namelist(exp, exp.paths.work_preprocessing_wps)
+    wrf.generate_wps_namelist(exp.cfg, exp.paths.work_preprocessing_wps)
     logger.info(f"Generated WPS namelist at {exp.paths.work_preprocessing_wps}")
 
     logger.info("Preprocessing ready to run")
@@ -221,7 +222,9 @@ def real(experiment_path: Path, cycle: int, cores):
     logger.info(f"Linked {count} met_em files to {wrf_dir}")
 
     # Generate namelist
-    wrf.generate_wrf_namelist(exp, exp.cycles[cycle], False, wrf_dir / "namelist.input")
+    wrf.generate_wrf_namelist(
+        exp.cfg, exp.cycles[cycle], False, wrf_dir / "namelist.input"
+    )
     logger.info(f"Generated namelist at {wrf_dir / 'namelist.input'}")
 
     # Determine number of cores
