@@ -258,7 +258,7 @@ def advance_member(
 
     logger.setup(f"ensemble-advance-member_{member}", experiment_path)
     exp = experiment.Experiment(experiment_path)
-    if member < 0 or member >= exp.cfg.assimilation.n_members - 1:
+    if member < 0 or member >= exp.cfg.assimilation.n_members:
         logger.error(f"Member {member} does not exist")
         sys.exit(1)
 
