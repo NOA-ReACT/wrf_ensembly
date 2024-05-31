@@ -121,12 +121,12 @@ def ungrib(experiment_path: Path):
     (wps_dir / "Vtable").symlink_to(vtable_path)
 
     # Make symlinks for grib files
-    i = 0
+    i = -1
     for i, grib_file in enumerate(data_dir.glob(exp.cfg.data.meteorology_glob)):
         link_path = wps_dir / f"GRIBFILE.{utils.int_to_letter_numeral(i + 1)}"
         link_path.symlink_to(grib_file)
         logger.debug(f"Created symlink for {grib_file} at {link_path}")
-    if i == 0:
+    if i == -1:
         logger.error("No GRIB files found")
         sys.exit(1)
     logger.info(f"Linked {i+1} GRIB files to {wps_dir} from {data_dir}")
