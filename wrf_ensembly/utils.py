@@ -3,6 +3,7 @@ import shutil
 import string
 from contextlib import contextmanager
 from pathlib import Path
+import time
 
 from wrf_ensembly.console import logger
 
@@ -111,3 +112,51 @@ def bool_to_console_str(b: bool):
     """
 
     return "✅" if b else "❌"
+
+
+class LockFile:
+    """
+    A simple lock file that can be used to prevent multiple processes from running the same code at the same time. It is implemented by creating a second file with the .lock suffix.
+
+    Args:
+        path: Path to the lock file
+    """
+
+    path: Path
+    """The file to lock"""
+
+    lockfile: Path
+    """Path to the lockfile (.lock)"""
+
+    timeout: int
+    """Max amount of seconds to wait for a lockfile to clear"""
+
+    pooling_interval = 5
+    """How often to pool an existing lockfile"""
+
+    def __init__(self, path: Path, timeout=10 * 60):
+        self.path = path
+        self.lockfile = path.with_suffix(".lock")
+        self.timeout = timeout
+
+    def __del__(self):
+        self.path.unlink(missing_ok=True)
+
+    def __enter__(self):
+        waiting_for = 0
+        while self.lockfile.exists() and waiting_for <= self.timeout:
+            logger.debug(f"Waiting for lockfile to be removed: {self.lockfile}")
+            time.sleep(self.pooling_interval)
+            waiting_for += self.pooling_interval
+
+        logger.debug(f"Creating lockfile: {self.lockfile}")
+        self.lockfile.touch()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        logger.debug(f"Removing lockfile: {self.lockfile}")
+
+        if exc_val is not None:
+            logger.error(f"An exception occurred: {exc_val}")
+        if self.lockfile.is_file:
+            self.lockfile.unlink()

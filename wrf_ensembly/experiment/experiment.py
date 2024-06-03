@@ -21,32 +21,16 @@ class Experiment:
     paths: ExperimentPaths
     members: list[MemberStatus] = []
 
+    status_file_path: Path
+
     def __init__(self, experiment_path: Path):
         self.cfg = config.read_config(experiment_path / "config.toml")
         self.cycles = cycling.get_cycle_information(self.cfg)
 
         # Read experiment status from status.toml
-        status_file_path = experiment_path / "status.toml"
-        if status_file_path.exists():
-            status = ExperimentStatus.from_toml(status_file_path.read_text())
-            self.current_cycle_i = status.current_cycle
-            self.filter_run = status.filter_run
-            self.analysis_run = status.analysis_run
-            self.members = [
-                MemberStatus(
-                    i=member_status.i,
-                    advanced=member_status.advanced,
-                    runtime_statistics=member_status.runtime_statistics,
-                )
-                for member_status in status.members
-            ]
-
-            # Make sure list is of the correct length and sorted correctly
-            if len(self.members) != self.cfg.assimilation.n_members:
-                raise ValueError(
-                    f"Number of members in status file ({len(self.members)}) does not match configuration ({self.cfg.assimilation.n_members})"
-                )
-            self.members.sort(key=lambda m: m.i)
+        self.status_file_path = experiment_path / "status.toml"
+        if self.status_file_path.exists():
+            self.read_status()
         else:
             # If the file does not exist, maybe this is a fresh experiment. Assume we are at cycle 0
             self.current_cycle_i = 0
@@ -59,6 +43,29 @@ class Experiment:
 
         self.paths = ExperimentPaths(experiment_path, self.cfg)
 
+    def read_status(self):
+        """Read the status of the experiment from status.toml"""
+
+        status = ExperimentStatus.from_toml(self.status_file_path.read_text())
+        self.current_cycle_i = status.current_cycle
+        self.filter_run = status.filter_run
+        self.analysis_run = status.analysis_run
+        self.members = [
+            MemberStatus(
+                i=member_status.i,
+                advanced=member_status.advanced,
+                runtime_statistics=member_status.runtime_statistics,
+            )
+            for member_status in status.members
+        ]
+
+        # Make sure list is of the correct length and sorted correctly
+        if len(self.members) != self.cfg.assimilation.n_members:
+            raise ValueError(
+                f"Number of members in status file ({len(self.members)}) does not match configuration ({self.cfg.assimilation.n_members})"
+            )
+        self.members.sort(key=lambda m: m.i)
+
     def write_status(self):
         """
         Write the current status of the experiment to status.toml
@@ -67,7 +74,8 @@ class Experiment:
         status = ExperimentStatus(
             self.current_cycle_i, self.filter_run, self.analysis_run, self.members
         )
-        (self.paths.experiment_path / "status.toml").write_text(status.to_toml())
+
+        self.status_file_path.write_text(status.to_toml())
 
     def set_next_cycle(self):
         """
@@ -155,16 +163,25 @@ class Experiment:
             )
             return False
 
-        # Update member status
-        member.advanced = True
-        member.runtime_statistics.append(
-            RuntimeStatistics(
-                cycle=self.current_cycle_i,
-                start=start_time,
-                end=end_time,
-                duration_s=int((end_time - start_time).total_seconds()),
+        # Update member status, take some basic precautions against other processes
+        # doing the same.
+        with utils.LockFile(self.status_file_path):
+            # First read the status file again to make sure it hasn't changed
+            self.read_status()
+
+            # Add info about the current run
+            member.advanced = True
+            member.runtime_statistics.append(
+                RuntimeStatistics(
+                    cycle=self.current_cycle_i,
+                    start=start_time,
+                    end=end_time,
+                    duration_s=int((end_time - start_time).total_seconds()),
+                )
             )
-        )
+
+            # Write to disk
+            self.write_status()
 
         return True
 

@@ -276,8 +276,6 @@ def advance_member(
     if not success:
         sys.exit(1)
 
-    exp.write_status()
-
 
 @ensemble_cli.command()
 @pass_experiment_path
