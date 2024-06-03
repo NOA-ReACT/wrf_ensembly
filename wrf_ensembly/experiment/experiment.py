@@ -170,8 +170,8 @@ class Experiment:
             self.read_status()
 
             # Add info about the current run
-            member.advanced = True
-            member.runtime_statistics.append(
+            self.members[member_idx].advanced = True
+            self.members[member_idx].runtime_statistics.append(
                 RuntimeStatistics(
                     cycle=self.current_cycle_i,
                     start=start_time,
