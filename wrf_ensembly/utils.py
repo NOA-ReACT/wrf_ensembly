@@ -139,9 +139,6 @@ class LockFile:
         self.lockfile = path.with_suffix(".lock")
         self.timeout = timeout
 
-    def __del__(self):
-        self.path.unlink(missing_ok=True)
-
     def __enter__(self):
         waiting_for = 0
         while self.lockfile.exists() and waiting_for <= self.timeout:
