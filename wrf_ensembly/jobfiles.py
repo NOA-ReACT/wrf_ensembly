@@ -140,7 +140,7 @@ def generate_make_analysis_jobfile(
     if queue_next_cycle:
         args = ""
         if compute_postprocess:
-            args += " --compute-postprocess"
+            args += " --run-postprocess"
             if delete_members:
                 args += " --delete-members"
 
