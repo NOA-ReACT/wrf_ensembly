@@ -151,9 +151,10 @@ class LockFile:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        logger.debug(f"Removing lockfile: {self.lockfile}")
+        logger.debug(f"Releasing lockfile: {self.lockfile}")
 
         if exc_val is not None:
             logger.error(f"An exception occurred: {exc_val}")
-        if self.lockfile.is_file:
-            self.lockfile.unlink()
+        if self.lockfile.is_file():
+            logger.debug(f"Removing lockfile: {self.lockfile}")
+            self.lockfile.unlink(missing_ok=True)
