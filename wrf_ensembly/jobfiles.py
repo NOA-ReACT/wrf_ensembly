@@ -91,7 +91,7 @@ def generate_make_analysis_jobfile(
     cycle: Optional[int] = None,
     queue_next_cycle: bool = False,
     compute_postprocess: bool = False,
-    delete_members: bool = False,
+    clean_scratch: bool = False,
 ):
     """
     Generates a jobfile for the `filter`, `analysis` and `cycle` steps. At runtime, the
@@ -141,8 +141,8 @@ def generate_make_analysis_jobfile(
         args = ""
         if compute_postprocess:
             args += " --run-postprocess"
-            if delete_members:
-                args += " --delete-members"
+            if clean_scratch:
+                args += " --clean-scratch"
 
         commands.append(
             f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path} slurm run-experiment {args}"
