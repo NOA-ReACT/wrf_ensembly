@@ -63,6 +63,10 @@ def generate_advance_jobfiles(exp: experiment.Experiment) -> list[Path]:
 
     files = []
     for member in exp.members:
+        if member.advanced:
+            logger.info(f"Member {member.i} already advanced. Skipping...")
+            continue
+
         i = member.i
         jobfile = exp.paths.jobfiles / f"advance_member_{i}.job.sh"
 
