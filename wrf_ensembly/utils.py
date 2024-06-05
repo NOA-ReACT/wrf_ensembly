@@ -141,13 +141,30 @@ class LockFile:
 
     def __enter__(self):
         waiting_for = 0
-        while self.lockfile.exists() and waiting_for <= self.timeout:
-            logger.debug(f"Waiting for lockfile to be removed: {self.lockfile}")
-            time.sleep(self.pooling_interval)
-            waiting_for += self.pooling_interval
 
-        logger.debug(f"Creating lockfile: {self.lockfile}")
-        self.lockfile.touch()
+        pooling = True
+        while pooling:
+            if self.lockfile.exists():
+                logger.debug(f"Waiting for lockfile to be removed: {self.lockfile}")
+                time.sleep(self.pooling_interval)
+                waiting_for += self.pooling_interval
+            else:
+                try:
+                    logger.debug(f"Creating lockfile: {self.lockfile}")
+                    self.lockfile.touch(exist_ok=False)
+                    pooling = False
+                except FileExistsError:
+                    logger.debug(
+                        f"Lockfile was created by another process: {self.lockfile}"
+                    )
+                    time.sleep(self.pooling_interval)
+                    waiting_for += self.pooling_interval
+
+            if waiting_for > self.timeout:
+                raise TimeoutError(
+                    f"Lockfile was not removed after {self.timeout} seconds: {self.lockfile}"
+                )
+
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
