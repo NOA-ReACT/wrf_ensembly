@@ -122,9 +122,10 @@ def run_experiment(
     )
     if len(ids) > 0:
         dependency = "--dependency=afterok:" + ":".join(map(str, ids))
+        res = external.runc([*slurm_command.split(" "), dependency, str(jf.resolve())])
     else:
-        dependency = ""
-    res = external.runc([*slurm_command.split(" "), dependency, str(jf.resolve())])
+        res = external.runc([*slurm_command.split(" "), str(jf.resolve())])
+
     analysis_jobid = int(res.output.strip())
     ids.append(analysis_jobid)
     logger.info(f"Queued {jf} with ID {analysis_jobid}")
