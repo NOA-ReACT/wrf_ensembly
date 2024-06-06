@@ -120,7 +120,10 @@ def run_experiment(
     jf = jobfiles.generate_make_analysis_jobfile(
         exp, current_cycle.index, all_cycles, run_postprocess, clean_scratch
     )
-    dependency = "--dependency=afterok:" + ":".join(map(str, ids))
+    if len(ids) > 0:
+        dependency = "--dependency=afterok:" + ":".join(map(str, ids))
+    else:
+        dependency = ""
     res = external.runc([*slurm_command.split(" "), dependency, str(jf.resolve())])
     analysis_jobid = int(res.output.strip())
     ids.append(analysis_jobid)
