@@ -127,14 +127,13 @@ def statistics(
 
     # Compute analysis statistics
     scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
-    analysis_dir = exp.paths.analysis_path(cycle)
     analysis_files = list(scratch_analysis_dir.rglob("member_*/wrfout*_small"))
     if len(analysis_files) != 0:
-        analysis_mean_file = analysis_dir / f"{analysis_files[0].name}_mean"
+        analysis_mean_file = scratch_analysis_dir / f"{analysis_files[0].name}_mean"
         analysis_mean_file.unlink(missing_ok=True)
         commands.append(nco.average(analysis_files, analysis_mean_file))
 
-        analysis_sd_file = analysis_dir / f"{analysis_files[0].name}_sd"
+        analysis_sd_file = scratch_analysis_dir / f"{analysis_files[0].name}_sd"
         analysis_sd_file.unlink(missing_ok=True)
         commands.append(nco.standard_deviation(analysis_files, analysis_sd_file))
     else:
@@ -142,7 +141,6 @@ def statistics(
 
     # Compute forecast statistics
     scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
-    forecast_dir = exp.paths.forecast_path(cycle)
     forecast_filenames = [
         x.name for x in scratch_forecast_dir.rglob("member_00/wrfout*_small")
     ]
@@ -154,11 +152,11 @@ def statistics(
             logger.warning(f"No forecast files found for {name}!")
             continue
 
-        forecast_mean_file = forecast_dir / f"{name}_mean"
+        forecast_mean_file = scratch_forecast_dir / f"{name}_mean"
         forecast_mean_file.unlink(missing_ok=True)
         commands.append(nco.average(forecast_files, forecast_mean_file))
 
-        forecast_sd_file = forecast_dir / f"{name}_sd"
+        forecast_sd_file = scratch_forecast_dir / f"{name}_sd"
         forecast_sd_file.unlink(missing_ok=True)
         commands.append(nco.standard_deviation(forecast_files, forecast_sd_file))
 
@@ -211,14 +209,15 @@ def concat(
 
     # Find all forecast files
     forecast_dir = exp.paths.forecast_path(cycle)
-    forecast_files = sorted(forecast_dir.rglob("*_mean"))
+    scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
+    forecast_files = sorted(scratch_forecast_dir.rglob("*_mean"))
     if len(forecast_files) > 0:
         commands.append(
             nco.concatenate(
                 forecast_files, forecast_dir / f"forecast_mean_cycle_{cycle:03d}.nc"
             )
         )
-    forecast_files = sorted(forecast_dir.rglob("*_sd"))
+    forecast_files = sorted(scratch_forecast_dir.rglob("*_sd"))
     if len(forecast_files) > 0:
         commands.append(
             nco.concatenate(
@@ -228,14 +227,15 @@ def concat(
 
     # Find all analysis files
     analysis_dir = exp.paths.analysis_path(cycle)
-    analysis_files = sorted(analysis_dir.rglob("*_mean"))
+    scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
+    analysis_files = sorted(scratch_analysis_dir.rglob("*_mean"))
     if len(analysis_files) > 0:
         commands.append(
             nco.concatenate(
                 analysis_files, analysis_dir / f"analysis_mean_cycle_{cycle:03d}.nc"
             )
         )
-    analysis_files = sorted(analysis_dir.rglob("*_sd"))
+    analysis_files = sorted(scratch_analysis_dir.rglob("*_sd"))
     if len(analysis_files) > 0:
         commands.append(
             nco.concatenate(
