@@ -208,7 +208,7 @@ def apply_pertubations_from_file(
                     # Apply pertubation field
                     field_var = perts_nc.variables[f"{variable}_pert"]
                     field = field_var[i, :]
-                    ds[variable][:] += field
+                    ds[variable][:] *= field
                     ds[variable].perts = str(pertubation)
 
             # Update BC to match
