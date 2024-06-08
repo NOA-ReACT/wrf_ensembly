@@ -19,82 +19,6 @@ def postprocess_cli():
 @click.option(
     "--cycle",
     type=int,
-    default=None,
-    help="Cycle to extract the variables from. If not provided, will extract from the current cycle.",
-)
-@pass_experiment_path
-def extract_vars(experiment_path: Path, cycle: Optional[int]):
-    """
-    Extract a set of desired variables from forecast/analysis wrfout files to create
-    smaller files.
-
-    The extracted variables are defined in the configuration file (`postprocess.extract_vars`).
-
-    For each wrfout file in the scratch directory, a new file will be created with the
-    `_small` prefix that only contains the desired variables.
-    """
-
-    logger.setup("postprocess-extract-vars", experiment_path)
-    exp = experiment.Experiment(experiment_path)
-
-    # Sanity checking in regards to the cycle
-    if cycle is None:
-        cycle = exp.current_cycle_i
-
-    if cycle > exp.current_cycle_i:
-        logger.error(f"Cycle {cycle} is in the future, cannot extract variables.")
-        sys.exit(1)
-    if cycle < 0 or cycle >= len(exp.cycles):
-        logger.error(f"Cycle {cycle} is out of bounds, cannot extract variables.")
-        sys.exit(1)
-    if cycle == exp.current_cycle_i and not exp.all_members_advanced:
-        logger.error("Not all members have advanced, cannot extract variables.")
-        sys.exit(1)
-
-    # Create set of required variables based on config
-    required_vars = set(exp.cfg.postprocess.extract_vars) | wrf.ESSENTIAL_VARIABLES
-
-    # Find all files to process in the given cycle
-    fc_dir = exp.paths.scratch_forecasts_path(cycle)
-    an_dir = exp.paths.scratch_analysis_path(cycle)
-    files = list(fc_dir.rglob("**/wrfout*")) + list(an_dir.rglob("**/wrfout*"))
-    for in_path in files:
-        member_i = in_path.parent.name.split("_")[-1]
-        out_path = in_path.parent / f"{in_path.stem}_small"
-        logger.info(
-            f"Extracting variables from {in_path} (member {member_i}) into {out_path}"
-        )
-
-        with (
-            netCDF4.Dataset(in_path, "r") as ds_in,  # type: ignore
-            netCDF4.Dataset(out_path, "w") as ds_out,  # type: ignore
-        ):
-            # Add some metadata to the attributes
-            ds_out.setncattr("wrf_ensembly_experiment_name", exp.cfg.metadata.name)
-            ds_out.setncattr("wrf_ensembly_cycle", cycle)
-            ds_out.setncattr("wrf_ensembly_member", member_i)
-
-            # Copy global attributes
-            ds_out.setncatts({k: ds_in.getncattr(k) for k in ds_in.ncattrs()})
-
-            # Copy dimensions
-            for name, dim in ds_in.dimensions.items():
-                ds_out.createDimension(
-                    name, len(dim) if not dim.isunlimited() else None
-                )
-
-            # Copy variables
-            for name, var in ds_in.variables.items():
-                if name in required_vars:
-                    out_var = ds_out.createVariable(name, var.datatype, var.dimensions)
-                    out_var.setncatts({k: var.getncattr(k) for k in var.ncattrs()})
-                    out_var[:] = var[:]
-
-
-@postprocess_cli.command()
-@click.option(
-    "--cycle",
-    type=int,
     help="Cycle to compute statistics for. Will compute for all current cycle if missing.",
 )
 @click.option(
@@ -189,7 +113,7 @@ def statistics(
     help="How many NCO commands to execute in parallel",
 )
 @pass_experiment_path
-def concat(
+def concatenate(
     experiment_path: Path,
     cycle: Optional[int],
     jobs: int,
@@ -207,6 +131,18 @@ def concat(
 
     commands = []
 
+    # Prepare compression related arguments
+    cmp_args = []
+    if len(exp.cfg.postprocess.ppc_filter) > 0:
+        cmp_args = ["-ppc", exp.cfg.postprocess.ppc_filter]
+    if len(exp.cfg.postprocess.compression_filters) > 0:
+        cmp_args.append(f"--cmp={exp.cfg.postprocess.compression_filters}")
+
+    if len(cmp_args) == 0:
+        logger.warning("No compression filters set, output files will be uncompressed")
+    else:
+        logger.info(f"Using compression filters: {' '.join(cmp_args)}")
+
     # Find all forecast files
     forecast_dir = exp.paths.forecast_path(cycle)
     scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
@@ -214,14 +150,18 @@ def concat(
     if len(forecast_files) > 0:
         commands.append(
             nco.concatenate(
-                forecast_files, forecast_dir / f"forecast_mean_cycle_{cycle:03d}.nc"
+                forecast_files,
+                forecast_dir / f"forecast_mean_cycle_{cycle:03d}.nc",
+                cmp_args,
             )
         )
     forecast_files = sorted(scratch_forecast_dir.rglob("*_sd"))
     if len(forecast_files) > 0:
         commands.append(
             nco.concatenate(
-                forecast_files, forecast_dir / f"forecast_sd_cycle_{cycle:03d}.nc"
+                forecast_files,
+                forecast_dir / f"forecast_sd_cycle_{cycle:03d}.nc",
+                cmp_args,
             )
         )
 
@@ -232,14 +172,18 @@ def concat(
     if len(analysis_files) > 0:
         commands.append(
             nco.concatenate(
-                analysis_files, analysis_dir / f"analysis_mean_cycle_{cycle:03d}.nc"
+                analysis_files,
+                analysis_dir / f"analysis_mean_cycle_{cycle:03d}.nc",
+                cmp_args,
             )
         )
     analysis_files = sorted(scratch_analysis_dir.rglob("*_sd"))
     if len(analysis_files) > 0:
         commands.append(
             nco.concatenate(
-                analysis_files, analysis_dir / f"analysis_sd_cycle_{cycle:03d}.nc"
+                analysis_files,
+                analysis_dir / f"analysis_sd_cycle_{cycle:03d}.nc",
+                cmp_args,
             )
         )
 
@@ -270,16 +214,8 @@ def concat(
     is_flag=True,
     help="Remove the raw wrfout files",
 )
-@click.option(
-    "--remove-small",
-    default=True,
-    is_flag=True,
-    help="Remove the small wrfout files (_small)",
-)
 @pass_experiment_path
-def clean(
-    experiment_path: Path, cycle: Optional[int], remove_wrfout: bool, remove_small: bool
-):
+def clean(experiment_path: Path, cycle: Optional[int], remove_wrfout: bool):
     """
     Clean up the scratch directory for the given cycle. Use after running the other
     postprocessing commands to save disk space.
@@ -300,9 +236,5 @@ def clean(
     for dir in scratch_dirs:
         if remove_wrfout:
             for f in dir.rglob("wrfout*"):
-                logger.info(f"Removing {f}")
-                f.unlink()
-        if remove_small:
-            for f in dir.rglob("wrfout*_small"):
                 logger.info(f"Removing {f}")
                 f.unlink()

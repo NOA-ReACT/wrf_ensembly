@@ -200,9 +200,8 @@ def generate_postprocess_jobfile(
 
     base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} postprocess %SUBCOMMAND% --cycle {cycle}"
     commands = [
-        base_cmd.replace("%SUBCOMMAND%", "extract-vars"),
         base_cmd.replace("%SUBCOMMAND%", "statistics"),
-        base_cmd.replace("%SUBCOMMAND%", "concat"),
+        base_cmd.replace("%SUBCOMMAND%", "concatenate"),
     ]
     if clean:
         commands.append(base_cmd.replace("%SUBCOMMAND%", "clean"))

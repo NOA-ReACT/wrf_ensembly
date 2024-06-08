@@ -207,10 +207,20 @@ class SlurmConfig:
 
 @dataclass
 class PostprocessConfig:
-    extract_vars: list[str]
+    compression_filters: str = "shf|zst,3"
     """
-    List of variables to include in the output files. Some essential variables are included
-    regardless if they appear in this list: XTIME, XLAT, XLAT_U, XLAT_V, XLONG, XLONG_U, XLONG_V, Time, ZNU, ZNW, PH, PHB, PC, P, PB, FNM, FNP, DN, HGT, P_TOP, T00, P00
+    Which compression filter to apply when producing the final cycle files
+    (during `postprocess concatenate`). Consult the NCO manual for exact options available.
+    This refers to lossless compression and is always a good idea but the default ZST
+    algorithm might not be available on your system. Set to empty string to disable compression.
+    """
+
+    ppc_filter: str = "default=3#Z.*=6#X.*=6"
+    """
+    Controls lossy quantization, which is applied during `postprocess concatenate`. This
+    affects the precision of the output files. Consult the NCO manual for exact options available. The default value applies the granular BR algorithm with 3 significant digits
+    to all variables, except for those starting with Z or X, which get 6 significant digits.
+    A small investigation has yielded that these values are a good compromise between file size and precision, at least for dust and wind related fields. Set to empty string to disable quantization.
     """
 
     # postprocessing_scripts: list[str]
