@@ -133,7 +133,7 @@ def concatenate(
     # Prepare compression related arguments
     cmp_args = []
     if len(exp.cfg.postprocess.ppc_filter) > 0:
-        cmp_args = ["-ppc", exp.cfg.postprocess.ppc_filter]
+        cmp_args = ["--ppc", exp.cfg.postprocess.ppc_filter]
     if len(exp.cfg.postprocess.compression_filters) > 0:
         cmp_args.append(f"--cmp={exp.cfg.postprocess.compression_filters}")
 
