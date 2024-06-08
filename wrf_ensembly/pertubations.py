@@ -1,7 +1,7 @@
 from typing import Tuple
 
 import numpy as np
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import uniform_filter
 
 
 def generate_pertubation_field(
@@ -26,7 +26,7 @@ def generate_pertubation_field(
     """
     x = np.random.normal(1, 10, shape)
     for _ in range(rounds):
-        x = gaussian_filter(x, sigma=sd)
+        x = uniform_filter(x, size=3)
     x = (x - x.mean()) / x.std()
     x = x * sd + mean
     return x
