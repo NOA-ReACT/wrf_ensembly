@@ -103,7 +103,7 @@ def apply_pertubations(
                     field = pertubations.generate_pertubation_field(
                         var.shape, pertubation.mean, pertubation.sd, pertubation.rounds
                     )
-                    ds[variable][:] += field
+                    ds[variable][:] *= field
                     ds[variable].perts = str(pertubation)
 
                     ## Store pertubation field in netcdf file
