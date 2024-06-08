@@ -14,6 +14,7 @@ def average(input_files: list[Path], output_file: Path) -> ExternalProcess:
     return ExternalProcess(
         [
             "nces",
+            "-4",
             *[str(x.resolve()) for x in input_files],
             str(output_file.resolve()),
         ]
@@ -31,6 +32,7 @@ def standard_deviation(input_files: list[Path], output_file: Path) -> ExternalPr
     return ExternalProcess(
         [
             "nces",
+            "-4",
             "-y",
             "rmssdn",
             *[str(x.resolve()) for x in input_files],
