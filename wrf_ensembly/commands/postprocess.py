@@ -35,7 +35,6 @@ def statistics(
 ):
     """
     Calculates the ensemble mean and standard deviation from the forecast/analysis files of given cycle.
-    It uses the `_small` files created by the `extract_vars` command.
     """
 
     logger.setup("postprocess-statistics", experiment_path)
@@ -51,7 +50,7 @@ def statistics(
 
     # Compute analysis statistics
     scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
-    analysis_files = list(scratch_analysis_dir.rglob("member_*/wrfout*_small"))
+    analysis_files = list(scratch_analysis_dir.rglob("member_*/wrfout*"))
     if len(analysis_files) != 0:
         analysis_mean_file = scratch_analysis_dir / f"{analysis_files[0].name}_mean"
         analysis_mean_file.unlink(missing_ok=True)
@@ -66,7 +65,7 @@ def statistics(
     # Compute forecast statistics
     scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
     forecast_filenames = [
-        x.name for x in scratch_forecast_dir.rglob("member_00/wrfout*_small")
+        x.name for x in scratch_forecast_dir.rglob("member_00/wrfout*")
     ]
     for name in forecast_filenames:
         logger.info(f"Computing statistics for {name}")
