@@ -188,7 +188,7 @@ def generate_postprocess_jobfile(
     jobs = exp.cfg.slurm.directives_postprocess.get("ntasks", -1)
     if jobs == -1:
         logger.warning(
-            "ntasks not set in `slurm.directives_small``. Using default value of 1"
+            "ntasks not set in `slurm.directives_postprocess``. Using default value of 1"
         )
         jobs = 1
 

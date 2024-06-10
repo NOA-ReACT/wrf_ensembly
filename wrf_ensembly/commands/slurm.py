@@ -54,6 +54,61 @@ def make_analysis(experiment_path: Path, cycle: int):
 
 
 @slurm_cli.command()
+@click.argument("cycle", type=int)
+@click.option(
+    "--clean-scratch",
+    is_flag=True,
+    help="Requires --run-postprocess. If set, the individual member's forecasts are deleted from the scratch directories",
+)
+@pass_experiment_path
+def postprocess(experiment_path: Path, cycle: int, clean_scratch: bool):
+    """Create a SLURM jobfile to postprocess the WRF output"""
+
+    logger.setup(f"slurm-postprocessing", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    logger.info(f"Writing jobfile for postprocessing...")
+    jobfiles.generate_postprocess_jobfile(exp, cycle, clean_scratch)
+
+
+@slurm_cli.command()
+@click.option(
+    "--clean-scratch",
+    is_flag=True,
+    help="Requires --run-postprocess. If set, the individual member's forecasts are deleted from the scratch directories",
+)
+@click.option(
+    "--up-to-cycle",
+    type=int,
+    help="Queue postprocessing for all cycles up to this one",
+)
+@pass_experiment_path
+def queue_all_postprocessing(
+    experiment_path: Path, clean_scratch: bool, up_to_cycle: Optional[int]
+):
+    """Queue postprocessing for all cycles of the experiment"""
+
+    logger.setup(f"slurm-queue-all-postprocessing", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    max_cycle = len(exp.cycles)
+    if up_to_cycle is not None and up_to_cycle < max_cycle:
+        max_cycle = up_to_cycle
+
+    for i in range(max_cycle):
+        logger.info(f"Queueing postprocessing for cycle {i}...")
+        jf = jobfiles.generate_postprocess_jobfile(exp, i, clean_scratch)
+
+        res = external.runc(
+            [
+                *exp.cfg.slurm.sbatch_command.split(" "),
+                str(jf.resolve()),
+            ]
+        )
+        logger.info(f"Queued {jf} with ID {res.output.strip()}")
+
+
+@slurm_cli.command()
 @click.option(
     "--all-cycles/--next-cycle-only",
     help="After the current cycle, automatically queue next cycle, until experiment is over",
