@@ -224,7 +224,7 @@ class Experiment:
         ]
         posterior = [
             self.paths.scratch_dart_path(self.current_cycle_i)
-            / f"dart_{prior.parent.name}"
+            / f"dart_{prior.parent.name}.nc"
             for prior in priors
         ]
 

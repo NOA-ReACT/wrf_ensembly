@@ -319,7 +319,7 @@ def analysis(experiment_path: Path):
         analysis_file = analysis_dir / f"member_{member:02d}" / wrfout_name
         utils.copy(forecast_file, analysis_file)
 
-        dart_file = dart_out_dir / f"dart_analysis_member_{member:02d}.nc"
+        dart_file = dart_out_dir / f"dart_member_{member:02d}.nc"
         if not dart_file.exists():
             logger.error(f"Member {member}: {dart_file} does not exist")
             sys.exit(1)
