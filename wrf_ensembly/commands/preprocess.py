@@ -282,6 +282,89 @@ def real(experiment_path: Path, cycle: int, cores):
 
 
 @preprocess_cli.command()
+@click.option("--jobs", type=int, help="Number of processes to use", default=1)
+@pass_experiment_path
+def interpolate_chem(experiment_path: Path, jobs: int):
+    """
+    Uses `interpolator-for-wrfchem` to interpolate the chemical initial conditions onto the WRF domain.
+
+    Args:
+        jobs: How many processes to use when interpolating the chemistry fields.
+    """
+
+    logger.setup("preprocess-interpolate-chem", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    # Check if a path is provided for chemistry fields
+    if exp.cfg.data.chemistry is None:
+        logger.error(
+            "No chemistry data path provided in the configuration [data.chemistry]"
+        )
+        sys.exit(1)
+    chem = exp.cfg.data.chemistry
+
+    # Check if the mapping file exists
+    mapping_path = experiment_path / "species_map.toml"
+    if not mapping_path.is_file():
+        logger.error(f"Species mapping file {mapping_path.resolve()} does not exist")
+        sys.exit(1)
+
+    # Disable HDF5 locking since we are taking care only to write from one process at each file
+    os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"  # Good luck!
+
+    # We need to run interpolator one time for the initial conditions and one time for each cycle's boundary conditions.
+    # The necessary commands are gathered inside the array to run in parallel.
+    commands = []
+
+    met_em_path = exp.paths.work_preprocessing_wps
+    wrfinput_path = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
+    commands.append(
+        external.ExternalProcess(
+            [
+                "interpolator-for-wrfchem",
+                chem.model_name,
+                chem.path,
+                met_em_path,
+                mapping_path,
+                wrfinput_path,
+            ],
+            log_filename="interpolator_wrfinput.log",
+        )
+    )
+    for cycle in exp.cycles:
+        wrfbdy_path = exp.paths.data_icbc / f"wrfbdy_d01_cycle_{cycle.index}"
+        commands.append(
+            external.ExternalProcess(
+                [
+                    "interpolator-for-wrfchem",
+                    chem.model_name,
+                    chem.path,
+                    met_em_path,
+                    mapping_path,
+                    wrfinput_path,
+                    f"--wrfbdy={wrfbdy_path}",
+                    "--no-ic",
+                ],
+                log_filename=f"interpolator_wrfbdy_cycle_{cycle.index}.log",
+            )
+        )
+
+    failure = False
+    logger.info(f"Running interpolator-for-wrfchem with {jobs} jobs")
+    for res in external.run_in_parallel(commands, jobs):
+        if res.returncode != 0:
+            logger.error(
+                f"interpolator-for-wrfchem failed with exit code {res.returncode}"
+            )
+            logger.error(res.output)
+            failure = True
+
+    if failure:
+        logger.error("One or more interpolator-for-wrfchem commands failed, exiting")
+        sys.exit(1)
+
+
+@preprocess_cli.command()
 @pass_experiment_path
 def clean(experiment_path: Path):
     """

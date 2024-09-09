@@ -109,6 +109,24 @@ class TimeControlConfig:
 
 
 @dataclass
+class ChemistryDataConfig:
+    """
+    Configuration related to the chemistry global model fields used in the experiment
+    These are used with [interpolator_for_wrfchem](https://github.com/NOA-ReACT/interpolator_for_wrfchem), so check that page for more info.
+    """
+
+    path: Path
+    """
+    Where the chemistry fields netCDF data is stored. Should be a directory of YYYY-MM-DD subdirectories, which include netCDF files.
+    """
+
+    model_name: str
+    """
+    Name of the chemistry model used to generate the chemistry fields.
+    """
+
+
+@dataclass
 class DataConfig:
     """Configuration related to the data used in the experiment."""
 
@@ -117,6 +135,9 @@ class DataConfig:
 
     meteorology: Path
     """Where the meteorological fields GRIB data is stored, should point to a directory"""
+
+    chemistry: Optional[ChemistryDataConfig] = None
+    """Configuration about the chemistry data used in the experiment"""
 
     meteorology_glob: str = "*.grib"
     """Glob pattern to use to find the meteorological fields GRIB files"""
