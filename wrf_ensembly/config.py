@@ -244,15 +244,24 @@ class PostprocessConfig:
     A small investigation has yielded that these values are a good compromise between file size and precision, at least for dust and wind related fields. Set to empty string to disable quantization.
     """
 
-    # postprocessing_scripts: list[str]
+    scripts: list[str] = field(default_factory=list)
     # """
     # List to postprocessing scripts to run on each output analysis and forecast file.
-    # The string can be any command. The script should mutate/replace the given file.
+    # The string can be any command. The script should write to the given path.
     # The following placeholders will be replaced:
     # - {in}: path to the input file (analysis or forecast, netCDF4)
+    # - {out}: path to the output file (analysis or forecast, netCDF4)
     # - {d} member number
     # - {c} cycle number
     # """
+
+    def __post_init__(self):
+        """Validates the `script` field, making sure that all commands at least take the `{in}` and `{out}` placeholders."""
+        for script in self.scripts:
+            if "{in}" not in script or "{out}" not in script:
+                raise ValueError(
+                    f"Postprocessing script '{script}' does not contain the required placeholders {{in}} and {{out}}"
+                )
 
 
 @dataclass

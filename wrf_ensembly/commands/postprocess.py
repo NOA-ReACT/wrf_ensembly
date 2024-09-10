@@ -1,11 +1,11 @@
 import sys
 from pathlib import Path
 from typing import Optional
+import concurrent.futures
 
 import click
-import netCDF4
 
-from wrf_ensembly import experiment, external, nco, wrf
+from wrf_ensembly import experiment, external, nco, postprocess
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
 
@@ -97,6 +97,77 @@ def statistics(
     if failure:
         logger.error("One or more nco commands failed, exiting")
         sys.exit(1)
+
+
+@postprocess_cli.command()
+@click.option(
+    "--cycle",
+    type=int,
+    help="Cycle to compute statistics for. Will compute for all current cycle if missing.",
+)
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    default=4,
+    help="How many files to process in parallel",
+)
+@pass_experiment_path
+def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: int):
+    """
+    Does some basic postprocessing on the wrfout files:
+    - Make units pint friendly
+    - Rename dimensions to (t, x, y, z)
+    - Destagger variables
+    - Compute derived variables such as air temperature and earth-relative wind speed
+    - Computes X and Y arrays in the model's projection for interpolation purposes
+    Essentially uses the excellent [xwrf](https://github.com/xarray-contrib/xwrf) to make the files a bit more CF-compliant.
+
+    This function is applied to the wrfout files after statistics (mean and standard deviation) have been computed,
+    but in principle could be applies to a single wrfout file as well. We do it this way to cut down on time and I/O.
+    """
+
+    logger.setup("postprocess-wrf_post", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    if cycle is None:
+        cycle = exp.current_cycle_i
+
+    logger.info(f"Cycle: {exp.cycles[cycle]}")
+
+    files_to_process = []
+
+    # Find all forecast files
+    scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
+    forecast_files = list(scratch_forecast_dir.glob("wrfout*_mean"))
+    for f in forecast_files:
+        output_path = scratch_forecast_dir / f"{f.name}_post"
+        if output_path.exists():
+            output_path.unlink()
+        files_to_process.append((f, output_path))
+
+    # Find all analysis files
+    scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
+    analysis_files = list(scratch_analysis_dir.glob("wrfout*_sd"))
+    for f in analysis_files:
+        output_path = scratch_analysis_dir / f"{f.name}_post"
+        if output_path.exists():
+            output_path.unlink()
+        files_to_process.append((f, output_path))
+
+    # Execute commands
+    logger.info(
+        f"Processing {len(files_to_process)} files in parallel, using {jobs} jobs"
+    )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
+        executor.map(lambda args: postprocess.xwrf_post(*args), files_to_process)
+
+    # Move files to the correct location
+    for old, new in files_to_process:
+        logger.debug(f"Moving {new} to {old}")
+
+        old.unlink()
+        new.rename(old)
 
 
 @postprocess_cli.command()
