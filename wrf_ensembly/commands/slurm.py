@@ -124,12 +124,18 @@ def queue_all_postprocessing(
     is_flag=True,
     help="Requires --run-postprocess. If set, the individual member's forecasts are deleted from the scratch directories",
 )
+@click.option(
+    "--only-advance",
+    is_flag=True,
+    help="Only queue the advance steps",
+)
 @pass_experiment_path
 def run_experiment(
     experiment_path: Path,
     all_cycles: bool,
     run_postprocess: bool,
     clean_scratch: bool,
+    only_advance: bool,
 ):
     """
     Creates jobfiles for all experiment steps and queues them in the correct order. This
@@ -170,6 +176,10 @@ def run_experiment(
         ids.append(id)
 
         logger.info(f"Queued {jf} with ID {id}")
+
+    if only_advance:
+        logger.info(f"First JobID: {min(ids)}, last JobID: {max(ids)}")
+        return
 
     # Generate the analysis jobfile, queue it and keep jobid
     jf = jobfiles.generate_make_analysis_jobfile(
