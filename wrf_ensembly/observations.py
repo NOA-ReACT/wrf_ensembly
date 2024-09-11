@@ -66,9 +66,7 @@ class ObservationGroup(DataClassTOMLMixin):
             )
         )
         if res.returncode != 0:
-            raise RuntimeError(
-                f"Converter {self.converter} failed with code {res.returncode}"
-            )
+            raise external.ExternalProcessFailed(res)
         return res
 
 
