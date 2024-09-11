@@ -1,11 +1,12 @@
+import concurrent.futures
 import sys
+from itertools import chain
 from pathlib import Path
 from typing import Optional
-import concurrent.futures
 
 import click
 
-from wrf_ensembly import experiment, external, nco, postprocess
+from wrf_ensembly import experiment, external, nco, postprocess, utils
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
 
@@ -138,7 +139,10 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: int):
 
     # Find all forecast files
     scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
-    forecast_files = list(scratch_forecast_dir.glob("wrfout*_mean"))
+    forecast_files = chain(
+        scratch_forecast_dir.glob("wrfout*_mean"),
+        scratch_forecast_dir.glob("wrfout*_sd"),
+    )
     for f in forecast_files:
         output_path = scratch_forecast_dir / f"{f.name}_post"
         if output_path.exists():
@@ -147,7 +151,10 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: int):
 
     # Find all analysis files
     scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
-    analysis_files = list(scratch_analysis_dir.glob("wrfout*_sd"))
+    analysis_files = chain(
+        scratch_analysis_dir.glob("wrfout*_mean"),
+        scratch_analysis_dir.glob("wrfout*_sd"),
+    )
     for f in analysis_files:
         output_path = scratch_analysis_dir / f"{f.name}_post"
         if output_path.exists():
@@ -168,6 +175,91 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: int):
 
         old.unlink()
         new.rename(old)
+
+
+@postprocess_cli.command()
+@click.option(
+    "--cycle",
+    type=int,
+    help="Cycle to compute statistics for. Will compute for all current cycle if missing.",
+)
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    default=4,
+    help="How many commands to execute in parallel",
+)
+@click.option(
+    "--keep-temp",
+    is_flag=True,
+    help="Keep temporary files after processing (scratch/postprocessing)",
+)
+@pass_experiment_path
+def apply_scripts(
+    experiment_path: Path, cycle: Optional[int], jobs: int, keep_temp: bool
+):
+    """
+    Apply postprocessing scripts to the output files.
+    The scripts are defined in the `PostprocessConfig:scripts` variable of the
+    configuration file.
+    """
+
+    logger.setup("postprocess-wrf_post", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    if cycle is None:
+        cycle = exp.current_cycle_i
+
+    logger.info(f"Cycle: {exp.cycles[cycle]}")
+
+    # Gather all the files for processing
+    scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
+    scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
+    files_to_process = list(scratch_analysis_dir.glob("wrfout*")) + list(
+        scratch_forecast_dir.glob("wrfout*")
+    )
+    logger.info(f"Found {len(files_to_process)} files to process")
+
+    # Create a scratch dir. for temporary files
+    scratch_dir = exp.paths.scratch / "postprocess"
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+
+    # Prepare commands and a directory for each file
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
+        for i, f in enumerate(files_to_process):
+            workdir = scratch_dir / f"{i}"
+            workdir.mkdir(exist_ok=True)
+
+            results.append(
+                executor.submit(
+                    postprocess.apply_scripts_to_file,
+                    exp.cfg.postprocess.scripts,
+                    f,
+                    workdir,
+                )
+            )
+
+        # If finished successfully, move the files back
+        results = [x for x in concurrent.futures.as_completed(results)]
+
+    # Only move files if all were successful
+    # It would throw an error is any of the commands failed, so by this point we know all were successful
+    try:
+        for res in results:
+            orig_path, target_path = res.result()
+            logger.debug(f"Moving {target_path} to {orig_path}")
+            orig_path.unlink()
+            target_path.rename(orig_path)
+    except external.ExternalProcessFailed:
+        logger.error(
+            "At least one of the postprocessing scripts failed, files are NOT modified!"
+        )
+
+    # Clean up the scratch directory
+    if not keep_temp:
+        logger.debug(f"Removing temp. directory {scratch_dir}")
+        utils.rm_tree(scratch_dir)
 
 
 @postprocess_cli.command()

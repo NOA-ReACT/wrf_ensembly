@@ -33,6 +33,20 @@ class ExternalProcessResult:
     log_filename: Optional[str] = None
 
 
+class ExternalProcessFailed(Exception):
+    """Raise this exception when an external command fails and we cannot handle the issue"""
+
+    res: ExternalProcessResult
+
+    def __init__(self, res: ExternalProcessResult):
+        self.res = res
+
+    def __str__(self):
+        return (
+            f"Command {self.res.command} failed with return code {self.res.returncode}"
+        )
+
+
 def run(proc: ExternalProcess):
     """
     Runs a command and returns the output
