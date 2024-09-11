@@ -44,7 +44,7 @@ def create_aeolus_l2b_obsgroup(dir_path: Path, output_path: Path):
     files = sorted(files, key=lambda f: f["start_date"])
 
     obsgroup = {
-        "kind": "AEOLUS_L2B",
+        "kind": "AEOLUS_L2B_HLOS",
         "converter": "/path/to/convert_aeolus_l2b",
         "files": files,
     }
