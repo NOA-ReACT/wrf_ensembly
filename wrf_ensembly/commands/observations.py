@@ -190,7 +190,7 @@ def preprocess_for_wrf(experiment_path: Path, backup: bool):
 
     # Backup the original obs directory by compressing the directory
     if backup:
-        target = exp.paths.data / "obs.tar.gz"
+        target = exp.paths.data / "obs"
         target.unlink(missing_ok=True)
 
         logger.info(f"Backing up original `obs` directory to {target}")
