@@ -4,8 +4,21 @@ import numpy as np
 from scipy.ndimage import uniform_filter
 
 
+def set_boundaries(arr: np.ndarray, boundary_size: int, value: float) -> np.ndarray:
+    """Sets the boundaries of an array to a given value."""
+
+    slices = [slice(None)] * arr.ndim
+    for dim in range(arr.ndim):
+        slices[dim] = slice(None, boundary_size)
+        arr[tuple(slices)] = value
+        slices[dim] = slice(-boundary_size, None)
+        arr[tuple(slices)] = value
+        slices[dim] = slice(None)  # Reset slice for next dimension
+    return arr
+
+
 def generate_pertubation_field(
-    shape: Tuple[int, ...], mean: float, sd: float, rounds=10
+    shape: Tuple[int, ...], mean: float, sd: float, rounds=10, boundary=0
 ):
     """
     Generates a random pseudo-spatially-collerated field. Based on the technique
@@ -25,6 +38,10 @@ def generate_pertubation_field(
         The generated field as a numpy array.
     """
     x = np.random.normal(1, 10, shape)
+
+    if boundary > 0:
+        x = set_boundaries(x, boundary, 1)
+
     for _ in range(rounds):
         x = uniform_filter(x, size=3)
     x = (x - x.mean()) / x.std()

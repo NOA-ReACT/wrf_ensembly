@@ -1,7 +1,6 @@
 import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 import netCDF4
@@ -35,13 +34,13 @@ def setup(experiment_path: Path):
 
         # Copy initial and boundary conditions
         utils.copy(
-            exp.paths.data_icbc / f"wrfinput_d01_cycle_0",
+            exp.paths.data_icbc / "wrfinput_d01_cycle_0",
             member_dir / "wrfinput_d01",
         )
         logger.info(f"Member {i}: Copied wrfinput_d01")
 
         utils.copy(
-            exp.paths.data_icbc / f"wrfbdy_d01_cycle_0",
+            exp.paths.data_icbc / "wrfbdy_d01_cycle_0",
             member_dir / "wrfbdy_d01",
         )
         logger.info(f"Member {i}: Copied wrfbdy_d01_cycle_0")
@@ -92,7 +91,7 @@ def apply_pertubations(
             with netCDF4.Dataset(wrfinput_copy_path, "r+") as ds:  # type: ignore
                 # Check if pertubations have already been applied
                 if "wrf_ensembly_perts" in ds.ncattrs():
-                    logger.warning(f"Pertubations already applied, skipping file")
+                    logger.warning("Pertubations already applied, skipping file")
                     continue
                 ds.wrf_ensembly_perts = "True"
 
@@ -101,7 +100,11 @@ def apply_pertubations(
                     var = ds[variable]
 
                     field = pertubations.generate_pertubation_field(
-                        var.shape, pertubation.mean, pertubation.sd, pertubation.rounds
+                        var.shape,
+                        pertubation.mean,
+                        pertubation.sd,
+                        pertubation.rounds,
+                        pertubation.boundary,
                     )
                     ds[variable][:] *= field
                     ds[variable].perts = str(pertubation)

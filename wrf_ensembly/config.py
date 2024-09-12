@@ -198,6 +198,9 @@ class PertubationVariableConfig:
     rounds: int = 10
     """Number of rounds of smoothing to apply to the pertubation field"""
 
+    boundary: int = 0
+    """Size of the pertubation boundary, in grid points. If > 0, the given amount of rows/columns at the edges will not be pertubated (with a smoothing filter)."""
+
     def __str__(self) -> str:
         return f"mean={self.mean:.2f}, sd={self.sd:.2f}, rounds={self.rounds}"
 
