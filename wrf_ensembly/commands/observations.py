@@ -1,4 +1,5 @@
 import datetime as dt
+import shutil
 import sys
 from pathlib import Path
 from typing import Optional
@@ -139,7 +140,7 @@ def prepare_custom_window(
         logger.warning("No observation files found for this window!")
 
     # Join files for this group
-    logger.info(f"Joining files...")
+    logger.info("Joining files...")
     kinds = [v.kind for v in obs_groups.values()]
     observations.join_obs_seq(exp.cfg, window_files, output_path, kinds)
 
@@ -161,3 +162,70 @@ def obs_seq_to_nc(experiment_path: Path, obs_seq_path: Path, nc_path: Path):
     logger.setup("observations-convert-obs-seq", experiment_path)
 
     observations.obs_seq_to_nc(exp.cfg.directories.dart_root, obs_seq_path, nc_path)
+
+
+@observations_cli.command()
+@click.option(
+    "--backup/--no-backup",
+    is_flag=True,
+    default=True,
+    help="Whether to backup the original `obs` directory to `obs.tar.gz`. Existing backup is removed.",
+)
+@pass_experiment_path
+def preprocess_for_wrf(experiment_path: Path, backup: bool):
+    """
+    Runs all obs_seq files through the WRF preprocessing utility to remove observations
+    outside the domain and optionally increase obs. errors near the boundary.
+    If and how much is this error increase can be configured inside the `observations` config group.
+    """
+
+    logger.setup("observations-preprocess-for-wrf", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    # Find a wrfinput file to get the domain
+    wrfinput = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
+    if not wrfinput.exists():
+        logger.error(f"wrfinput file not found at {wrfinput}")
+        sys.exit(1)
+
+    # Backup the original obs directory by compressing the directory
+    if backup:
+        target = exp.paths.data / "obs.tar.gz"
+        target.unlink(missing_ok=True)
+
+        logger.info(f"Backing up original `obs` directory to {target}")
+        shutil.make_archive(str(target), "gztar", str(exp.paths.obs))
+
+    obs_path = exp.paths.obs
+    for cycle in exp.cycles:
+        obs_seq = obs_path / f"cycle_{cycle.index}.obs_seq"
+        if not obs_seq.exists():
+            logger.warning(
+                f"Skipping cycle {cycle.index} ({obs_seq}) as it does not exist"
+            )
+            continue
+
+        assimilation_dt = cycle.end
+        base_time = dt.datetime(1601, 1, 1, tzinfo=dt.timezone.utc)
+
+        dart_days = (assimilation_dt - base_time).days
+        dart_seconds = int(
+            (
+                assimilation_dt - assimilation_dt.replace(hour=0, minute=0, second=0)
+            ).total_seconds()
+        )
+        logger.debug(f"DART time: {dart_days}, {dart_seconds}")
+
+        # Date must be format in gregorian day, second format
+        assimilation_dt = assimilation_dt.replace(tzinfo=dt.timezone.utc)
+
+        logger.info(f"Preprocessing {obs_seq}")
+        observations.preprocess_for_wrf(
+            exp.cfg.directories.dart_root,
+            wrfinput,
+            obs_seq,
+            (dart_days, dart_seconds),
+            exp.cfg.observations.boundary_width,
+            exp.cfg.observations.boundary_error_factor,
+            exp.cfg.observations.boundary_error_width,
+        )

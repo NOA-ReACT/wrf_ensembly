@@ -167,6 +167,20 @@ class AssimilationConfig:
 
 
 @dataclass
+class ObservationsConfig:
+    """Configuration related to observation preprocessing (mainly for the `observations preprocess-for-wrf` command)"""
+
+    boundary_width: float = 0
+    """By how many grid points to reduce the domain by when removing obs. from outside the domain"""
+
+    boundary_error_factor: float = 2.5
+    """If more than 0, inflate the error of observations near the boundary by this factor."""
+
+    boundary_error_width: float = 1.0
+    """If more than 0, the error this many grid points near the boundary are inflated by `boundary_error_factor`. Set to 0 to disable."""
+
+
+@dataclass
 class GeogridConfig:
     """Configuration related to geogrid (geographical data preprocessing)."""
 
@@ -283,6 +297,9 @@ class Config(DataClassTOMLMixin):
 
     assimilation: AssimilationConfig
     """Configuration related to assimilation."""
+
+    observations: ObservationsConfig
+    """Configuration related to observations."""
 
     geogrid: GeogridConfig
     """Configuration related to geogrid (geographical data preprocessing)."""

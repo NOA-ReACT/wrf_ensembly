@@ -1,4 +1,6 @@
 import datetime as dt
+import re
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -229,3 +231,150 @@ def obs_seq_to_nc(
         logger.info(f"Converted obs_seq file to netcdf: {nc}")
 
     return res
+
+
+def is_obs_seq_empty(file: Path) -> bool:
+    """
+    Returns true if an obs_seq file is empty. To do this, we read the first couple of
+    lines to get the num_obs value. The file is parsed with regex, thus this works only
+    with ASCII obs_seq files.
+
+    TODO: Do this in FORTRAN maybe?
+    """
+
+    # Read the first couple of lines (2KB)
+    with file.open("r") as f:
+        content = f.read(2048)
+
+    # Use regex to find num_obs
+    match = re.search(r"[^_]num_obs:\s+(\d+)", content)
+    if match:
+        num_obs = int(match.group(1))
+        return num_obs == 0
+
+    # If no match is found, assume the file is empty
+    return True
+
+
+def preprocess_for_wrf(
+    dart_root: Path,
+    wrfinput: Path,
+    obs_seq: Path,
+    assimilation_window_dart_time: tuple[int, int],
+    boundary_width=0.0,
+    boundary_error_factor=0.0,
+    boundary_error_width=0.0,
+    binary_obs_sequence=False,
+):
+    """
+    Runs a obs_seq file through the `wrf_dart_obs_preprocess` utility that (supported features):
+    - Removes all observations outside the domain
+    - Inflate errors near the boundaries
+
+    Args:
+        dart_root: Path to DART root directory
+        wrfinput: Path to the WRF input file
+        obs_seq: Path to the obs_seq file. Will be overwritten with the preprocessed version, if successful.
+        assimilation_window_dart_time: Tuple with the start and end of the assimilation window in DART time units (days since 1601-01-01, seconds since midnight)
+        boundary_width: If > 0, the domain will be reduced by this amount of gridpoints.
+        boundary_error_factor: If >0, the errors near the boundary will be increased by this factor.
+        boundary_error_width: How near the boundary to increase the errors, in gridpoints. A ramping is applied, so the innermost points are changed by 0 and the outermost by `boundary_error_factor`.
+        binary_obs_sequence: Whether the obs_seq file is binary or not, defaults to False
+    """
+
+    # Locate the executable
+    binary = dart_root / "models" / "wrf" / "work" / "wrf_dart_obs_preprocess"
+    binary = binary.resolve()
+    if not binary.exists():
+        raise RuntimeError(f"wrf_dart_obs_preprocess binary not found at {binary}")
+
+    # Link wrf_dart_obs_preprocess inside a temp directory, alongside all input files
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_dir = Path(tmp_dir)
+
+        binary_ln = tmp_dir / "wrf_dart_obs_preprocess"
+        binary_ln.symlink_to(binary)
+
+        # Link input files
+        wrfinput_ln = tmp_dir / "wrfinput_d01"
+        wrfinput_ln.symlink_to(wrfinput)
+
+        obs_seq_ln = tmp_dir / "obs_seq.in"
+        obs_seq_ln.symlink_to(obs_seq)
+
+        # Create namelist file
+        nml = {
+            "wrf_obs_preproc_nml": {
+                # I/O
+                "file_name_input": "obs_seq.in",
+                "file_name_output": "obs_seq.out",
+                # Time management, not supported
+                "overwrite_obs_time": False,
+                # Boundary
+                "obs_boundary": boundary_width,
+                "increase_bdy_error": boundary_error_factor > 0,
+                "maxobsfac": boundary_error_factor,
+                "obsdistbdy": boundary_error_width,
+                # Surface elevation, not used
+                "sfc_elevation_check": False,
+                "sfc_elevation_tol": 3000.0,
+                "obs_pressure_top": 0.0,
+                "obs_height_top": 2.0e10,
+                # Radiosonde stuff, not used
+                "include_sig_data": True,
+                "tc_sonde_radii": -1.0,
+                # Superorbing, not used
+                "superob_aircraft": False,
+                "aircraft_horiz_int": 800.0,
+                "aircraft_pres_int": 25000.0,
+                "superob_sat_winds": False,
+                "sat_wind_horiz_int": 800.0,
+                "sat_wind_pres_int": 25000.0,
+                # Overwrite QC flags, not used
+                "overwrite_ncep_satwnd_qc": False,
+                "overwrite_ncep_sfc_qc": False,
+            },
+            "obs_sequence_nml": {"write_binary_obs_sequence": binary_obs_sequence},
+            "location_nml": {},
+            "obs_kind_nml": {},
+            "schedule_nml": {},
+            "model_nml": {},
+            "ensemble_manager_nml": {},
+            "utilities_nml": {
+                "TERMLEVEL": 1,
+                "module_details": False,
+                "logfilename": "obs_sequence_tool.out",
+                "nmlfilename": "obs_sequence_tool.nml",
+                "write_nml": "file",
+            },
+        }
+        fortran_namelists.write_namelist(nml, tmp_dir / "input.nml")
+
+        # Call utility, move result back to the original location
+        stdin = (
+            f"{assimilation_window_dart_time[0]} {assimilation_window_dart_time[1]}\n"
+        )
+        res = external.run(
+            external.ExternalProcess([binary_ln], cwd=tmp_dir, stdin=stdin)
+        )
+
+        if res.returncode != 0:
+            logger.error(
+                f"wrf_dart_obs_preprocess exited with error code {res.returncode}!"
+            )
+            logger.error(res.output)
+            raise external.ExternalProcessFailed(res)
+
+        # If the file is empty, just remove the original
+        obs_seq_out = tmp_dir / "obs_seq.out"
+        if is_obs_seq_empty(obs_seq_out):
+            logger.warning("Preprocessed obs_seq file is empty (all obs removed)!")
+            obs_seq.unlink()
+            return
+
+        # Move output file to the desired location
+        logger.info(f"Removing {obs_seq}")
+        obs_seq.unlink()
+
+        logger.info(f"Renaming {obs_seq_out} to {obs_seq}")
+        shutil.move(obs_seq_out, obs_seq)
