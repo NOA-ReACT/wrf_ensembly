@@ -20,6 +20,7 @@ class ExternalProcess:
     command: Sequence[str | Path]
     cwd: Path = Path(os.getcwd())
     log_filename: Optional[str] = None
+    stdin: Optional[str] = None
 
 
 @dataclass
@@ -67,6 +68,7 @@ def run(proc: ExternalProcess):
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        input=proc.stdin,
     )
     if p.returncode != 0:
         logger.error(f"Command {proc.command} failed with return code {p.returncode}")
