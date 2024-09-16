@@ -9,6 +9,9 @@ def set_boundaries(arr: np.ndarray, boundary_size: int, value: float) -> np.ndar
 
     slices = [slice(None)] * arr.ndim
     for dim in range(arr.ndim):
+        if arr.shape[dim] < 2 * boundary_size:
+            continue
+
         slices[dim] = slice(None, boundary_size)
         arr[tuple(slices)] = value
         slices[dim] = slice(-boundary_size, None)
