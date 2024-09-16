@@ -92,11 +92,15 @@ cycled_variables = [
   'SEAS_2',
   'SEAS_3',
   'SEAS_4',
-  'SEAS_5',
 ]
 # Which variables to use in the state vector
 # Should probably match the DART namelist!
 state_variables = ['U', 'V', 'W', 'PH', 'T', 'MU', 'QVAPOR', 'PSFC']
+
+[observations]
+boundary_width = 2.0
+boundary_error_factor = 2.5
+boundary_error_width = 1.0
 
 [slurm]
 # command_prefix = "micromamba run -n wrf "
