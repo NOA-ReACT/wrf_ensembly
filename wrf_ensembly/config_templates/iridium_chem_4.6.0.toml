@@ -49,12 +49,12 @@ manage_chem_ic = true
 
 [pertubations.variables.V]
 mean = 1
-sd = 8
+sd = 0.4
 rounds = 5
 
 [pertubations.variables.U]
 mean = 1
-sd = 8
+sd = 0.4
 rounds = 5
 
 [assimilation]
