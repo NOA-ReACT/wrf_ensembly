@@ -9,6 +9,11 @@ from wrf_ensembly import external
 from wrf_ensembly.console import logger
 
 
+def _xwrf_post(args: tuple[Path, Path]):
+    """Single argument version of `xwrf_post`"""
+    xwrf_post(*args)
+
+
 def xwrf_post(input_file: Path, output_path: Path):
     """
     Apply the postprocessing routines from [xWRF](https://github.com/xarray-contrib/xwrf)

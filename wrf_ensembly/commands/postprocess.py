@@ -166,11 +166,15 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: int):
         f"Processing {len(files_to_process)} files in parallel, using {jobs} jobs"
     )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
-        executor.map(lambda args: postprocess.xwrf_post(*args), files_to_process)
+    with concurrent.futures.ProcessPoolExecutor(max_workers=jobs) as executor:
+        executor.map(postprocess._xwrf_post, files_to_process)
 
     # Move files to the correct location
     for old, new in files_to_process:
+        if not new.exists():
+            logger.error(f"File {new} was not created!")
+            sys.exit(1)
+
         logger.debug(f"Moving {new} to {old}")
 
         old.unlink()
