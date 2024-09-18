@@ -25,8 +25,10 @@ def xwrf_post(input_file: Path, output_path: Path):
     - Computes X and Y arrays in the model's projection for interpolation purposes
     """
 
+    # TODO Fix /SerializationWarning: saving variable ISEEDARRAY_SPP_LSM with floating point data as an integer dtype without any _FillValue to use for NaNs
+
     with xr.open_dataset(input_file) as ds:
-        ds = ds.xwrf.postprocess()
+        ds = ds.xwrf.postprocess().xwrf.destagger()
 
         # Since the projection object is not serialisable, we need to drop it before saving
         ds = ds.drop_vars("wrf_projection")
