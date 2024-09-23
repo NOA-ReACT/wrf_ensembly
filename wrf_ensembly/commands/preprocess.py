@@ -235,6 +235,11 @@ def real(experiment_path: Path, cycle: int, cores):
             cores = 1
     logger.info(f"Using {cores} cores for real.exe")
 
+    # Clean up old log files
+    for log_file in wrf_dir.glob("rsl.*"):
+        logger.debug(f"Removing old log file {log_file}")
+        log_file.unlink()
+
     # Run real
     real_path = wrf_dir / "real.exe"
     if not real_path.is_file():
@@ -259,6 +264,14 @@ def real(experiment_path: Path, cycle: int, cores):
         rsl = rsl_path.read_text()
         if "SUCCESS COMPLETE REAL_EM INIT" not in rsl:
             logger.error("real.exe could not complete, check logs.")
+            logger.error(
+                "Last 50 lines of rsl.out.0000:\n" + "\n".join(rsl.split("\n")[-50:])
+            )
+
+            rsl = (wrf_dir / "rsl.error.0000").read_text()
+            logger.error(
+                "Last 50 lines of rsl.error.0000:\n" + "\n".join(rsl.split("\n")[-50:])
+            )
             sys.exit(1)
 
     logger.info("real finished successfully")
