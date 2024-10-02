@@ -46,6 +46,19 @@ def statistics(
 
     logger.info(f"Cycle: {exp.cycles[cycle]}")
 
+    if exp.cfg.assimilation.n_members == 1:
+        logger.warning(
+            "Only one member, copying file over unchanged, no standard deviation."
+        )
+
+        analysis_path = exp.paths.scratch_analysis_path(cycle) / "member_00"
+        forecast_path = exp.paths.scratch_forecasts_path(cycle) / "member_00"
+        for f in chain(analysis_path.rglob("wrfout*"), forecast_path.rglob("wrfout*")):
+            target = f.parent / (f.name + "_mean")
+            utils.copy(f, target)
+
+        return
+
     # An array to collect all commands to run
     commands = []
 
