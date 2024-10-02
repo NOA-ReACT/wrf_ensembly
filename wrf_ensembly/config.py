@@ -2,7 +2,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 import rich
 from mashumaro.mixins.toml import DataClassTOMLMixin
@@ -189,6 +189,9 @@ class GeogridConfig:
 
 @dataclass
 class PertubationVariableConfig:
+    operation: Literal["add", "multiply"]
+    """Whether to add or multiply the pertubation field"""
+
     mean: float = 1.0
     """Mean of the pertubation field"""
 
@@ -202,7 +205,7 @@ class PertubationVariableConfig:
     """Size of the pertubation boundary, in grid points. If > 0, the given amount of rows/columns at the edges will not be pertubated (with a smoothing filter)."""
 
     def __str__(self) -> str:
-        return f"mean={self.mean:.2f}, sd={self.sd:.2f}, rounds={self.rounds}"
+        return f"operation={self.operation}, mean={self.mean:.2f}, sd={self.sd:.2f}, rounds={self.rounds}, boundary={self.boundary}"
 
 
 @dataclass

@@ -106,7 +106,15 @@ def apply_pertubations(
                         pertubation.rounds,
                         pertubation.boundary,
                     )
-                    ds[variable][:] *= field
+                    if pertubation.operation == "add":
+                        ds[variable][:] += field
+                    elif pertubation.operation == "multiply":
+                        ds[variable][:] *= field
+                    else:
+                        logger.error(
+                            f"Unknown pertubation operation {pertubation.operation}"
+                        )
+                        sys.exit(1)
                     ds[variable].perts = str(pertubation)
 
                     ## Store pertubation field in netcdf file
@@ -211,7 +219,15 @@ def apply_pertubations_from_file(
                     # Apply pertubation field
                     field_var = perts_nc.variables[f"{variable}_pert"]
                     field = field_var[i, :]
-                    ds[variable][:] *= field
+                    if pertubation.operation == "add":
+                        ds[variable][:] += field
+                    elif pertubation.operation == "multiply":
+                        ds[variable][:] *= field
+                    else:
+                        logger.error(
+                            f"Unknown pertubation operation {pertubation.operation}"
+                        )
+                        sys.exit(1)
                     ds[variable].perts = str(pertubation)
 
             # Update BC to match

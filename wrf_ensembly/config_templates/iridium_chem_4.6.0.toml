@@ -48,11 +48,13 @@ meteorology_vtable = "Vtable.ERA-interim.pl"
 manage_chem_ic = true
 
 [pertubations.variables.V]
+operation = "multiply"
 mean = 1
 sd = 0.4
 rounds = 5
 
 [pertubations.variables.U]
+operation = "multiply"
 mean = 1
 sd = 0.4
 rounds = 5
