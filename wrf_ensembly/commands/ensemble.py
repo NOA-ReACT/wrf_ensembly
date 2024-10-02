@@ -6,7 +6,7 @@ import click
 import netCDF4
 import numpy as np
 
-from wrf_ensembly import experiment, pertubations, update_bc, utils
+from wrf_ensembly import experiment, perturbations, update_bc, utils
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
 
@@ -48,26 +48,26 @@ def setup(experiment_path: Path):
 
 @ensemble_cli.command()
 @pass_experiment_path
-def apply_pertubations(
+def apply_perturbations(
     experiment_path: Path,
 ):
     """
-    Applies the configured pertubations to the initial conditions of each ensemble member
+    Applies the configured perturbations to the initial conditions of each ensemble member
     """
 
-    logger.setup("ensemble-apply-pertubations", experiment_path)
+    logger.setup("ensemble-apply-perturbations", experiment_path)
     exp = experiment.Experiment(experiment_path)
     cfg = exp.cfg
 
-    if len(cfg.pertubations.variables) == 0:
-        logger.info("No pertubations configured.")
+    if len(cfg.perturbations.variables) == 0:
+        logger.info("No perturbations configured.")
         return 0
 
-    if cfg.pertubations.seed is not None:
-        logger.warning(f"Setting numpy random seed to {cfg.pertubations.seed}")
-        np.random.seed(cfg.pertubations.seed)
+    if cfg.perturbations.seed is not None:
+        logger.warning(f"Setting numpy random seed to {cfg.perturbations.seed}")
+        np.random.seed(cfg.perturbations.seed)
 
-    perts_nc_path = exp.paths.data_diag / "pertubations.nc"
+    perts_nc_path = exp.paths.data_diag / "perturbations.nc"
     perts_nc_path.unlink(missing_ok=True)
     with netCDF4.Dataset(perts_nc_path, "w") as perts_nc:  # type: ignore
         perts_nc.createDimension("member", cfg.assimilation.n_members)
@@ -86,44 +86,44 @@ def apply_pertubations(
             utils.copy(wrfinput_path, wrfinput_copy_path)
             utils.copy(wrfbdy_path, wrfbdy_copy_path)
 
-            # Modify wrfinput accoarding to pertubation configuration
-            logger.info(f"Member {i}: Applying pertubations to {wrfinput_path}")
+            # Modify wrfinput accoarding to perturbation configuration
+            logger.info(f"Member {i}: Applying perturbations to {wrfinput_path}")
             with netCDF4.Dataset(wrfinput_copy_path, "r+") as ds:  # type: ignore
-                # Check if pertubations have already been applied
+                # Check if perturbations have already been applied
                 if "wrf_ensembly_perts" in ds.ncattrs():
-                    logger.warning("Pertubations already applied, skipping file")
+                    logger.warning("Perturbations already applied, skipping file")
                     continue
                 ds.wrf_ensembly_perts = "True"
 
-                for variable, pertubation in cfg.pertubations.variables.items():
-                    logger.info(f"Member {i}: Perturbing {variable} by {pertubation}")
+                for variable, perturbation in cfg.perturbations.variables.items():
+                    logger.info(f"Member {i}: Perturbing {variable} by {perturbation}")
                     var = ds[variable]
 
-                    field = pertubations.generate_pertubation_field(
+                    field = perturbations.generate_perturbation_field(
                         var.shape,
-                        pertubation.mean,
-                        pertubation.sd,
-                        pertubation.rounds,
-                        pertubation.boundary,
+                        perturbation.mean,
+                        perturbation.sd,
+                        perturbation.rounds,
+                        perturbation.boundary,
                     )
-                    if pertubation.operation == "add":
+                    if perturbation.operation == "add":
                         ds[variable][:] += field
-                    elif pertubation.operation == "multiply":
+                    elif perturbation.operation == "multiply":
                         ds[variable][:] *= field
                     else:
                         logger.error(
-                            f"Unknown pertubation operation {pertubation.operation}"
+                            f"Unknown perturbation operation {perturbation.operation}"
                         )
                         sys.exit(1)
-                    ds[variable].perts = str(pertubation)
+                    ds[variable].perts = str(perturbation)
 
-                    ## Store pertubation field in netcdf file
+                    ## Store perturbation field in netcdf file
                     # Copy dimensions if they don't exist
                     for dim in var.dimensions:
                         if dim not in perts_nc.dimensions:
                             perts_nc.createDimension(dim, ds.dimensions[dim].size)
 
-                    # Create variable to store pertubation field
+                    # Create variable to store perturbation field
                     if f"{variable}_pert" in perts_nc.variables:
                         field_var = perts_nc.variables[f"{variable}_pert"]
                     else:
@@ -132,11 +132,11 @@ def apply_pertubations(
                         )
                         field_var.units = var.units
                         field_var.description = (
-                            f"wrf-ensembly: Pertubation field for {variable}"
+                            f"wrf-ensembly: Perturbation field for {variable}"
                         )
-                        field_var.mean = pertubation.mean
-                        field_var.sd = pertubation.sd
-                        field_var.rounds = pertubation.rounds
+                        field_var.mean = perturbation.mean
+                        field_var.sd = perturbation.sd
+                        field_var.rounds = perturbation.rounds
                     field_var[i, :] = field
 
             # Update BC to match
@@ -163,7 +163,7 @@ def apply_pertubations(
             wrfbdy_path.unlink()
             utils.copy(wrfbdy_copy_path, wrfbdy_path)
 
-    logger.info("Finished applying pertubations")
+    logger.info("Finished applying perturbations")
     return 0
 
 
@@ -172,16 +172,16 @@ def apply_pertubations(
     "perturbations_file", type=click.Path(exists=True, readable=True, path_type=Path)
 )
 @pass_experiment_path
-def apply_pertubations_from_file(
+def apply_perturbations_from_file(
     experiment_path: Path,
     perturbations_file: Path,
 ):
     """
-    Apply pertubations from a `pertubations.nc` file, generated by a previous run of the
-    `apply_pertubations` command.
+    Apply perturbations from a `perturbations.nc` file, generated by a previous run of the
+    `apply_perturbations` command.
     """
 
-    logger.setup("ensemble-apply-pertubations-from-file", experiment_path)
+    logger.setup("ensemble-apply-perturbations-from-file", experiment_path)
     exp = experiment.Experiment(experiment_path)
     cfg = exp.cfg
 
@@ -201,13 +201,13 @@ def apply_pertubations_from_file(
             utils.copy(wrfinput_path, wrfinput_copy_path)
             utils.copy(wrfbdy_path, wrfbdy_copy_path)
 
-            # Modify wrfinput accoarding to pertubation configuration
-            logger.info(f"Member {i}: Applying pertubations to {wrfinput_path}")
+            # Modify wrfinput accoarding to perturbation configuration
+            logger.info(f"Member {i}: Applying perturbations to {wrfinput_path}")
             with netCDF4.Dataset(wrfinput_copy_path, "r+") as ds:  # type: ignore
                 ds.wrf_ensembly_perts = "True"
 
-                for variable, pertubation in cfg.pertubations.variables.items():
-                    logger.info(f"Member {i}: Perturbing {variable} by {pertubation}")
+                for variable, perturbation in cfg.perturbations.variables.items():
+                    logger.info(f"Member {i}: Perturbing {variable} by {perturbation}")
 
                     # Check of pert file exists in perts_nc
                     if f"{variable}_pert" not in perts_nc.variables:
@@ -216,19 +216,19 @@ def apply_pertubations_from_file(
                         )
                         sys.exit(1)
 
-                    # Apply pertubation field
+                    # Apply perturbation field
                     field_var = perts_nc.variables[f"{variable}_pert"]
                     field = field_var[i, :]
-                    if pertubation.operation == "add":
+                    if perturbation.operation == "add":
                         ds[variable][:] += field
-                    elif pertubation.operation == "multiply":
+                    elif perturbation.operation == "multiply":
                         ds[variable][:] *= field
                     else:
                         logger.error(
-                            f"Unknown pertubation operation {pertubation.operation}"
+                            f"Unknown perturbation operation {perturbation.operation}"
                         )
                         sys.exit(1)
-                    ds[variable].perts = str(pertubation)
+                    ds[variable].perts = str(perturbation)
 
             # Update BC to match
             logger.info("Updating boundary conditions...")

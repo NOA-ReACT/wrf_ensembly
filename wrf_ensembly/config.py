@@ -188,35 +188,35 @@ class GeogridConfig:
 
 
 @dataclass
-class PertubationVariableConfig:
+class PerturbationVariableConfig:
     operation: Literal["add", "multiply"]
-    """Whether to add or multiply the pertubation field"""
+    """Whether to add or multiply the perturbation field"""
 
     mean: float = 1.0
-    """Mean of the pertubation field"""
+    """Mean of the perturbation field"""
 
     sd: float = 1.0
-    """Standard deviation of the pertubation field"""
+    """Standard deviation of the perturbation field"""
 
     rounds: int = 10
-    """Number of rounds of smoothing to apply to the pertubation field"""
+    """Number of rounds of smoothing to apply to the perturbation field"""
 
     boundary: int = 0
-    """Size of the pertubation boundary, in grid points. If > 0, the given amount of rows/columns at the edges will not be pertubated (with a smoothing filter)."""
+    """Size of the perturbation boundary, in grid points. If > 0, the given amount of rows/columns at the edges will not be pertubated (with a smoothing filter)."""
 
     def __str__(self) -> str:
         return f"operation={self.operation}, mean={self.mean:.2f}, sd={self.sd:.2f}, rounds={self.rounds}, boundary={self.boundary}"
 
 
 @dataclass
-class PertubationsConfig:
-    """Configuration about pertubation fields"""
+class PerturbationsConfig:
+    """Configuration about perturbation fields"""
 
-    variables: dict[str, PertubationVariableConfig] = field(default_factory=dict)
+    variables: dict[str, PerturbationVariableConfig] = field(default_factory=dict)
     """Configuration for each variable"""
 
     seed: Optional[int] = None
-    """RNG seed to use when generating pertubation fields. If none, it will be randomly generated."""
+    """RNG seed to use when generating perturbation fields. If none, it will be randomly generated."""
 
 
 @dataclass
@@ -310,8 +310,8 @@ class Config(DataClassTOMLMixin):
     geogrid: GeogridConfig
     """Configuration related to geogrid (geographical data preprocessing)."""
 
-    pertubations: PertubationsConfig
-    """Configuration related to pertubation of the initial conditions."""
+    perturbations: PerturbationsConfig
+    """Configuration related to perturbation of the initial conditions."""
 
     slurm: SlurmConfig
     """Configuration related to SLURM jobfiles."""

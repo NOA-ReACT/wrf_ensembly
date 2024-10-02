@@ -49,12 +49,12 @@ meteorology = "/mnt/scratch-1/wrf-dart-intro/data/GFS_ANL_September_2021/2021090
 meteorology_vtable = "Vtable.GFS"
 
 
-[pertubations.V]
+[perturbations.V]
 mean = 0
 sd = 10
 rounds = 5
 
-[pertubations.U]
+[perturbations.U]
 mean = 0
 sd = 10
 rounds = 5

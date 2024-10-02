@@ -20,7 +20,7 @@ def set_boundaries(arr: np.ndarray, boundary_size: int, value: float) -> np.ndar
     return arr
 
 
-def generate_pertubation_field(
+def generate_perturbation_field(
     shape: Tuple[int, ...], mean: float, sd: float, rounds=10, boundary=0
 ):
     """
