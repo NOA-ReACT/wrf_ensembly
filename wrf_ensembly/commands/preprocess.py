@@ -3,6 +3,7 @@ import shutil
 import sys
 from itertools import chain
 from pathlib import Path
+from typing import Optional
 
 import click
 
@@ -295,9 +296,11 @@ def real(experiment_path: Path, cycle: int, cores):
 
 
 @preprocess_cli.command()
-@click.option("--jobs", type=int, help="Number of processes to use", default=1)
+@click.option(
+    "--jobs", type=int, help="Number of processes to use (also respects SLURM_NTASKS)"
+)
 @pass_experiment_path
-def interpolate_chem(experiment_path: Path, jobs: int):
+def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
     """
     Uses `interpolator-for-wrfchem` to interpolate the chemical initial conditions onto the WRF domain.
 
@@ -364,6 +367,15 @@ def interpolate_chem(experiment_path: Path, jobs: int):
 
     failure = False
     logger.info(f"Running interpolator-for-wrfchem with {jobs} jobs")
+    if jobs is None:
+        if "SLURM_NTASKS" in os.environ:
+            jobs = int(os.environ["SLURM_NTASKS"])
+            logger.info(f"Using {jobs} jobs from SLURM_NTASKS")
+        else:
+            jobs = 1
+            logger.warning(
+                "No job count specified (--jobs or SLURM_NTASKS), running with 1 job"
+            )
     for res in external.run_in_parallel(commands, jobs):
         if res.returncode != 0:
             logger.error(
