@@ -33,7 +33,10 @@ def xwrf_post(input_file: Path, output_path: Path):
         # Since the projection object is not serialisable, we need to drop it before saving
         ds = ds.drop_vars("wrf_projection")
 
-        ds.to_netcdf(output_path, unlimited_dims=["Time"])
+        comp = dict(zlib=True, complevel=5)
+        encoding = {var: comp for var in ds.data_vars}
+
+        ds.to_netcdf(output_path, unlimited_dims=["Time"], encoding=encoding)
 
 
 def apply_scripts_to_file(
