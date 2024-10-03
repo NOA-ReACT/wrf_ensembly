@@ -16,15 +16,21 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
     exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
 
     base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} preprocess %SUBCOMMAND%"
-    commands = [
-        base_cmd.replace("%SUBCOMMAND%", "setup"),
-        base_cmd.replace("%SUBCOMMAND%", "geogrid"),
-        base_cmd.replace("%SUBCOMMAND%", "ungrib"),
-        base_cmd.replace("%SUBCOMMAND%", "metgrid"),
-    ] + [
-        base_cmd.replace("%SUBCOMMAND%", "real") + f" {cycle}"
-        for cycle in range(len(exp.cycles))
-    ]
+    commands = (
+        [
+            base_cmd.replace("%SUBCOMMAND%", "setup"),
+            base_cmd.replace("%SUBCOMMAND%", "geogrid"),
+            base_cmd.replace("%SUBCOMMAND%", "ungrib"),
+            base_cmd.replace("%SUBCOMMAND%", "metgrid"),
+        ]
+        + [
+            base_cmd.replace("%SUBCOMMAND%", "real") + f" {cycle}"
+            for cycle in range(len(exp.cycles))
+        ]
+        + [
+            base_cmd.replace("%SUBCOMMAND%", "interpolate-chem"),
+        ]
+    )
 
     jobfile = exp.paths.jobfiles / "preprocess.sh"
     jobfile.parent.mkdir(parents=True, exist_ok=True)
