@@ -28,6 +28,23 @@ def xwrf_post(input_file: Path, output_path: Path):
     # TODO Fix /SerializationWarning: saving variable ISEEDARRAY_SPP_LSM with floating point data as an integer dtype without any _FillValue to use for NaNs
 
     with xr.open_dataset(input_file) as ds:
+        # Compute air density
+        ph_e = ds["PH"] + ds["PHB"]
+        ph_e = (
+            ph_e.isel(bottom_top_stag=slice(1, None))
+            - ph_e.isel(bottom_top_stag=slice(None, -1))
+        ).rename(
+            {"bottom_top_stag": "bottom_top"}
+        )  # Destagger vertically
+        ph_e = ph_e / ds.DNW
+
+        ds["air_density"] = -(ds.MUB + ds.MU) / ph_e
+        ds["air_density"].attrs = {
+            "units": "kg m-3",
+            "standard_name": "air_density",
+        }
+
+        # Compute more diagnostics and destagger
         ds = ds.xwrf.postprocess().xwrf.destagger()
 
         # Since the projection object is not serialisable, we need to drop it before saving
