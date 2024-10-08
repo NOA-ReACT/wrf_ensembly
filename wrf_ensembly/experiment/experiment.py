@@ -1,7 +1,9 @@
 import datetime as dt
 from pathlib import Path
 
-from wrf_ensembly import config, cycling, external, observations, utils, wrf
+import netCDF4
+
+from wrf_ensembly import config, cycling, external, observations, update_bc, utils, wrf
 from wrf_ensembly.console import logger
 
 from .dataclasses import ExperimentStatus, MemberStatus, RuntimeStatistics
@@ -278,6 +280,86 @@ class Experiment:
 
         self.filter_run = True
         return True
+
+    def cycle_member(self, member_i: int, use_forecast: bool):
+        """
+        Merge the IC/BC of a member with the analysis from the previous cycle.
+        Must be done for all members after finishing a set of forward runs and running
+        the filter. If you have no observations and filter is skipped, run this step with
+        use_forecast=True to use the forecast from the previous cycle as the analysis.
+
+        Args:
+            member_i: Index of the member to cycle
+            use_forecast: Use the forecast from the previous cycle as the analysis
+        """
+
+        member_path = self.paths.member_path(member_i)
+        next_cycle_i = self.current_cycle_i + 1
+
+        # Find analysis/forecast file to use
+        if use_forecast:
+            analysis_dir = self.paths.scratch_forecasts_path(self.current_cycle_i)
+        else:
+            analysis_dir = self.paths.scratch_dart_path(self.current_cycle_i)
+        wrfout_name = "wrfout_d01_" + self.current_cycle.end.strftime(
+            "%Y-%m-%d_%H:%M:%S"
+        )
+        analysis_file = analysis_dir / f"member_{member_i:02d}" / wrfout_name
+        if not analysis_file.exists():
+            raise FileNotFoundError(analysis_file)
+        logger.info(f"Using {analysis_file} as analysis for member {member_i}")
+
+        # Copy the initial & boundary condition files for the next cycle, as is
+        icbc_file = self.paths.data_icbc / f"wrfinput_d01_cycle_{next_cycle_i}"
+        bdy_file = self.paths.data_icbc / f"wrfbdy_d01_cycle_{next_cycle_i}"
+
+        icbc_target_file = member_path / "wrfinput_d01"
+        bdy_target_file = member_path / "wrfbdy_d01"
+
+        utils.copy(icbc_file, icbc_target_file)
+        utils.copy(bdy_file, bdy_target_file)
+
+        # Copy cycled variables from the analysis file to the IC file
+        with (
+            netCDF4.Dataset(analysis_file, "r") as nc_analysis,  # type: ignore
+            netCDF4.Dataset(icbc_target_file, "r+") as nc_icbc,  # type: ignore
+        ):
+            for name in self.cfg.assimilation.cycled_variables:
+                if name not in nc_analysis.variables:
+                    logger.warning(f"Member {member_i}: {name} not in analysis file")
+                    continue
+                logger.info(f"Member {member_i}: Copying {name}")
+                nc_icbc[name][:] = nc_analysis[name][:]
+
+            # Add experiment name to attributes
+            nc_icbc.experiment_name = self.cfg.metadata.name
+
+        # Update the boundary conditions to match the new initial conditions
+        logger.info(f"Member {member_i}: Updating boundary conditions")
+        res = update_bc.update_wrf_bc(
+            self.cfg,
+            icbc_target_file,
+            bdy_target_file,
+            log_filename=f"da_update_bc_analysis_member_{member_i}.log",
+        )
+        if (
+            res.returncode != 0
+            or "update_wrf_bc Finished successfully" not in res.output
+        ):
+            logger.error(
+                f"Member {member_i}: bc_update.exe failed with exit code {res.returncode}"
+            )
+            logger.error(res.output)
+            raise external.ExternalProcessFailed(res)
+
+        # Remove forecast files, log files
+        logger.info(f"Cleaning up member directory {member_path}")
+        for f in member_path.glob("wrfout*"):
+            logger.debug(f"Removing forecast file {f}")
+            f.unlink()
+        for f in member_path.glob("rsl*"):
+            logger.debug(f"Removing log file {f}")
+            f.unlink()
 
     @property
     def current_cycle(self) -> cycling.CycleInformation:

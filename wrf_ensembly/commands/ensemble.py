@@ -1,6 +1,8 @@
+from concurrent.futures import ProcessPoolExecutor
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 import click
 import netCDF4
@@ -374,8 +376,13 @@ def analysis(experiment_path: Path):
     is_flag=True,
     help="Cycle with the latest forecast instead of the analysis",
 )
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    help="How many files to process in parallel",
+)
 @pass_experiment_path
-def cycle(experiment_path: Path, use_forecast: bool):
+def cycle(experiment_path: Path, use_forecast: bool, jobs: Optional[int]):
     """
     Prepares the experiment for the next cycle by copying the cycled variables from the analysis
     to the initial conditions and preparing the namelist.
@@ -397,84 +404,29 @@ def cycle(experiment_path: Path, use_forecast: bool):
         logger.warning("Cycling using the latest forecast")
 
     cycle_i = exp.current_cycle_i
-    cycle = exp.current_cycle
     next_cycle_i = cycle_i + 1
 
     if next_cycle_i >= len(exp.cycles):
         logger.error(f"Experiment is finished! No cycle {next_cycle_i}")
         sys.exit(1)
 
-    if use_forecast:
-        analysis_dir = exp.paths.scratch_forecasts_path(cycle_i)
+    # Determine job count
+    if jobs is None:
+        if os.environ["SLURM_NTASKS"]:
+            jobs = int(os.environ["SLURM_NTASKS"])
+            logger.info(f"Using {jobs} cores from SLURM_NTASKS")
+        else:
+            jobs = 1
+            logger.warning("No --jobs or SLURM_NTASKS found, using 1 core")
     else:
-        analysis_dir = exp.paths.scratch_analysis_path(cycle_i)
+        logger.info(f"Using {jobs} cores from --jobs")
 
-    # Prepare namelist contents, same for all members
-    logger.info(
-        f"Configuring members for cycle {next_cycle_i}: {str(exp.cycles[next_cycle_i])}"
-    )
-
-    # Combine initial condition file w/ analysis by copying the cycled variables, for each member
-    for member in exp.members:
-        member_path = exp.paths.member_path(member.i)
-
-        # Copy the initial & boundary condition files for the next cycle, as is
-        icbc_file = exp.paths.data_icbc / f"wrfinput_d01_cycle_{next_cycle_i}"
-        bdy_file = exp.paths.data_icbc / f"wrfbdy_d01_cycle_{next_cycle_i}"
-
-        icbc_target_file = member_path / "wrfinput_d01"
-        bdy_target_file = member_path / "wrfbdy_d01"
-
-        utils.copy(icbc_file, icbc_target_file)
-        utils.copy(bdy_file, bdy_target_file)
-
-        # Copy the cycled variables from the analysis file to the initial condition file
-        wrfout_name = "wrfout_d01_" + cycle.end.strftime("%Y-%m-%d_%H:%M:%S")
-        analysis_file = analysis_dir / f"member_{member.i:02d}" / wrfout_name
-
-        logger.info(
-            f"Copying cycled variables from {analysis_file} to {icbc_target_file}"
+    with ProcessPoolExecutor(max_workers=jobs) as executor:
+        executor.map(
+            exp.cycle_member,
+            range(exp.cfg.assimilation.n_members),
+            [use_forecast] * exp.cfg.assimilation.n_members,
         )
-        with (
-            netCDF4.Dataset(analysis_file, "r") as nc_analysis,  # type: ignore
-            netCDF4.Dataset(icbc_target_file, "r+") as nc_icbc,  # type: ignore
-        ):
-            for name in exp.cfg.assimilation.cycled_variables:
-                if name not in nc_analysis.variables:
-                    logger.warning(f"Member {member.i}: {name} not in analysis file")
-                    continue
-                logger.info(f"Member {member.i}: Copying {name}")
-                nc_icbc[name][:] = nc_analysis[name][:]
-
-            # Add experiment name to attributes
-            nc_icbc.experiment_name = exp.cfg.metadata.name
-
-        # Update the boundary conditions to match the new initial conditions
-        logger.info(f"Member {member.i}: Updating boundary conditions")
-        res = update_bc.update_wrf_bc(
-            exp.cfg,
-            icbc_target_file,
-            bdy_target_file,
-            log_filename=f"da_update_bc_analysis_member_{member.i}.log",
-        )
-        if (
-            res.returncode != 0
-            or "update_wrf_bc Finished successfully" not in res.output
-        ):
-            logger.error(
-                f"Member {member.i}: bc_update.exe failed with exit code {res.returncode}"
-            )
-            logger.error(res.output)
-            sys.exit(1)
-
-        # Remove forecast files, log files
-        logger.info(f"Cleaning up member directory {member_path}")
-        for f in member_path.glob("wrfout*"):
-            logger.debug(f"Removing forecast file {f}")
-            f.unlink()
-        for f in member_path.glob("rsl*"):
-            logger.debug(f"Removing log file {f}")
-            f.unlink()
 
     # Update experiment status
     exp.set_next_cycle()
