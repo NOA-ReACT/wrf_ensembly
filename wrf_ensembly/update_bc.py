@@ -1,11 +1,13 @@
 """
 Handles interactions with the "update_wrf_bc" executable that updates the boundary conditions
-to match the initial conditions, that might be modified.
+to match the initial conditions, after they are modified by cycling or applying perturbations.
 """
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Optional
 
+from wrf_ensembly import utils
 from wrf_ensembly.config import Config
 from wrf_ensembly.external import ExternalProcess, run
 
@@ -21,7 +23,7 @@ def update_wrf_bc(
     Required if you have modified the `wrfinput` file.
 
     The `update_wrf_bc` executable is expected to be found inside the DART work directory.
-    ! Any existing `wrfinput`/`wrfbdy` files in the work dir will be overwritten !
+    It will be linked in a temp. directory so that you can run this function in parallel.
 
     Args:
         cfg: The configuration object.
@@ -34,27 +36,42 @@ def update_wrf_bc(
         The result of the external process call (see `ExternalProcessResult`).
     """
 
-    work_dir = cfg.directories.dart_root / "models" / "wrf" / "work"
-    sym_wrfinput = work_dir / "wrfinput_d01"
-    sym_wrfbdy = work_dir / "wrfbdy_d01"
+    with TemporaryDirectory() as work_dir:
+        work_dir = Path(work_dir)
 
-    sym_wrfinput.unlink(missing_ok=True)
-    sym_wrfbdy.unlink(missing_ok=True)
+        # Link input files
+        if not wrfinput.exists():
+            raise FileNotFoundError(f"wrfinput file not found: {wrfinput}")
+        if not wrfbdy.exists():
+            raise FileNotFoundError(f"wrfbdy file not found: {wrfbdy}")
 
-    sym_wrfinput.symlink_to(wrfinput.resolve())
-    sym_wrfbdy.symlink_to(wrfbdy.resolve())
+        sym_wrfinput = work_dir / "wrfinput_d01"
+        sym_wrfbdy = work_dir / "wrfbdy_d01"
+        sym_wrfinput.symlink_to(wrfinput.resolve())
+        sym_wrfbdy.symlink_to(wrfbdy.resolve())
 
-    command = work_dir / "update_wrf_bc"
-    if not command.is_file():
-        raise RuntimeError(
-            "update_wrf_bc executable not found in DART/wrf/work directory"
+        # Link executable
+        bin_path = (
+            cfg.directories.dart_root / "models" / "wrf" / "work" / "update_wrf_bc"
+        )
+        if not bin_path.is_file():
+            raise FileNotFoundError(f"update_wrf_bc executable not found in {bin_path}")
+
+        command = work_dir / "update_wrf_bc"
+        command.symlink_to(bin_path.resolve())
+
+        # Copy namelist
+        utils.copy(
+            cfg.directories.dart_root / "models" / "wrf" / "work" / "input.nml",
+            work_dir / "input.nml",
         )
 
-    res = run(
-        ExternalProcess(
-            [str(command.resolve())],
-            cwd=work_dir,
-            log_filename=log_filename,
+        res = run(
+            ExternalProcess(
+                [str(command.resolve())],
+                cwd=work_dir,
+                log_filename=log_filename,
+            )
         )
-    )
+
     return res
