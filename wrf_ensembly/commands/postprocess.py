@@ -180,7 +180,9 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: int):
     )
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=jobs) as executor:
-        executor.map(postprocess._xwrf_post, files_to_process)
+        results = executor.map(postprocess._xwrf_post, files_to_process)
+        for res in results:
+            pass
 
     # Move files to the correct location
     for old, new in files_to_process:
