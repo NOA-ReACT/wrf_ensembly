@@ -229,6 +229,11 @@ def apply_scripts(
 
     logger.info(f"Cycle: {exp.cycles[cycle]}")
 
+    # Sanity check that the scripts are defined
+    if len(exp.cfg.postprocess.scripts) == 0:
+        logger.error("No postprocessing scripts defined, exiting")
+        sys.exit(0)
+
     # Gather all the files for processing
     scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
     scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
