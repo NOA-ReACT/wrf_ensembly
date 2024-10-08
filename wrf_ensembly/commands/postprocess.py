@@ -245,7 +245,7 @@ def apply_scripts(
     logger.info(f"Found {len(files_to_process)} files to process")
 
     # Create a scratch dir. for temporary files
-    scratch_dir = exp.paths.scratch / "postprocess"
+    scratch_dir = exp.paths.scratch / "postprocess" / f"cycle_{cycle:03d}"
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
     # Prepare commands and a directory for each file
