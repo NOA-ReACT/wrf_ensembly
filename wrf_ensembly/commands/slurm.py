@@ -78,24 +78,35 @@ def postprocess(experiment_path: Path, cycle: int, clean_scratch: bool):
     help="Requires --run-postprocess. If set, the individual member's forecasts are deleted from the scratch directories",
 )
 @click.option(
-    "--up-to-cycle",
+    "--first-cycle",
+    type=int,
+    help="Queue postprocessing for all cycles starting from this one",
+)
+@click.option(
+    "--last-cycle",
     type=int,
     help="Queue postprocessing for all cycles up to this one",
 )
 @pass_experiment_path
 def queue_all_postprocessing(
-    experiment_path: Path, clean_scratch: bool, up_to_cycle: Optional[int]
+    experiment_path: Path,
+    clean_scratch: bool,
+    first_cycle: Optional[int],
+    last_cycle: Optional[int],
 ):
     """Queue postprocessing for all cycles of the experiment"""
 
-    logger.setup(f"slurm-queue-all-postprocessing", experiment_path)
+    logger.setup("slurm-queue-all-postprocessing", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
+    min_cycle = 0
     max_cycle = len(exp.cycles)
-    if up_to_cycle is not None and up_to_cycle < max_cycle:
-        max_cycle = up_to_cycle
+    if last_cycle is not None and last_cycle <= max_cycle:
+        max_cycle = last_cycle
+    if first_cycle is not None and first_cycle > 0:
+        min_cycle = first_cycle
 
-    for i in range(max_cycle):
+    for i in range(min_cycle, max_cycle):
         logger.info(f"Queueing postprocessing for cycle {i}...")
         jf = jobfiles.generate_postprocess_jobfile(exp, i, clean_scratch)
 
