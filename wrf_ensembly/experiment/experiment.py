@@ -297,14 +297,22 @@ class Experiment:
         next_cycle_i = self.current_cycle_i + 1
 
         # Find analysis/forecast file to use
-        if use_forecast:
-            analysis_dir = self.paths.scratch_forecasts_path(self.current_cycle_i)
-        else:
-            analysis_dir = self.paths.scratch_dart_path(self.current_cycle_i)
         wrfout_name = "wrfout_d01_" + self.current_cycle.end.strftime(
             "%Y-%m-%d_%H:%M:%S"
         )
-        analysis_file = analysis_dir / f"member_{member_i:02d}" / wrfout_name
+        if use_forecast:
+            analysis_file = (
+                self.paths.scratch_forecasts_path(self.current_cycle_i)
+                / f"member_{member_i:02d}"
+                / wrfout_name
+            )
+        else:
+            analysis_file = (
+                self.paths.scratch_analysis_path(self.current_cycle_i)
+                / f"member_{member_i:02d}"
+                / wrfout_name
+            )
+
         if not analysis_file.exists():
             raise FileNotFoundError(analysis_file)
         logger.info(f"Using {analysis_file} as analysis for member {member_i}")
