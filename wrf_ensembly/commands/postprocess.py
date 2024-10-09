@@ -226,7 +226,8 @@ def statistics(
         analysis_path = exp.paths.scratch_analysis_path(cycle) / "member_00"
         forecast_path = exp.paths.scratch_forecasts_path(cycle) / "member_00"
         for f in chain(
-            analysis_path.rglob("wrfout*_post"), forecast_path.rglob("wrfout*_post")
+            analysis_path.rglob("member_*/wrfout*_post"),
+            forecast_path.rglob("member_*/wrfout*_post"),
         ):
             target = f.parent.parent / f.name.replace("_post", "_mean")
             utils.copy(f, target)
