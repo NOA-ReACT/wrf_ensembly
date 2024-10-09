@@ -422,11 +422,14 @@ def cycle(experiment_path: Path, use_forecast: bool, jobs: Optional[int]):
         logger.info(f"Using {jobs} cores from --jobs")
 
     with ProcessPoolExecutor(max_workers=jobs) as executor:
-        executor.map(
+        results = executor.map(
             exp.cycle_member,
             range(exp.cfg.assimilation.n_members),
             [use_forecast] * exp.cfg.assimilation.n_members,
         )
+
+        for _ in results:
+            pass
 
     # Update experiment status
     exp.set_next_cycle()
