@@ -11,7 +11,11 @@ from wrf_ensembly.console import logger
 
 def _xwrf_post(args: tuple[Path, Path]):
     """Single argument version of `xwrf_post`"""
-    xwrf_post(*args)
+    try:
+        xwrf_post(*args)
+    except Exception as e:
+        logger.error(f"Error in xwrf_post when processing {args[0]}: {e}")
+        raise e
 
 
 def xwrf_post(input_file: Path, output_path: Path):

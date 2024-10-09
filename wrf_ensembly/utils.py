@@ -1,9 +1,11 @@
 import itertools
+import os
 import shutil
 import string
 from contextlib import contextmanager
 from pathlib import Path
 import time
+from typing import Optional
 
 from wrf_ensembly.console import logger
 
@@ -175,3 +177,32 @@ class LockFile:
         if self.lockfile.is_file():
             logger.debug(f"Removing lockfile: {self.lockfile}")
             self.lockfile.unlink(missing_ok=True)
+
+
+def determine_jobs(job_param: Optional[int]) -> int:
+    """
+    Returns how many jobs you should run in parallel. It is determined by:
+    - If `job_param` is not None and a positive number, it is returned.
+    - If `job_param` is None, then SLURM_NTASKS is used from the environment if it exists.
+    - If `job_param` is None and SLURM_NTASKS is not set, then 1 is returned and a warning is logged.
+
+    Args:
+        job_param: Number of jobs to run in parallel
+
+    Returns:
+        Number of jobs to run in parallel
+    """
+    if job_param is not None and job_param > 0:
+        return job_param
+
+    slurm_ntasks = os.getenv("SLURM_NTASKS")
+    if slurm_ntasks is not None:
+        try:
+            return int(slurm_ntasks)
+        except ValueError:
+            logger.warning(f"Invalid SLURM_NTASKS value: {slurm_ntasks}")
+
+    logger.warning(
+        "job_param is None and SLURM_NTASKS is not set. Defaulting to 1 job."
+    )
+    return 1

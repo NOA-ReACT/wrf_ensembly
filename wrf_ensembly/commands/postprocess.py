@@ -20,113 +20,15 @@ def postprocess_cli():
 @click.option(
     "--cycle",
     type=int,
-    help="Cycle to compute statistics for. Will compute for all current cycle if missing.",
+    help="Cycle to compute statistics for. Will compute for current cycle if missing.",
 )
 @click.option(
     "--jobs",
     type=click.IntRange(min=0, max=None),
-    default=4,
-    help="How many NCO commands to execute in parallel",
-)
-@pass_experiment_path
-def statistics(
-    experiment_path: Path,
-    cycle: Optional[int],
-    jobs: int,
-):
-    """
-    Calculates the ensemble mean and standard deviation from the forecast/analysis files of given cycle.
-    """
-
-    logger.setup("postprocess-statistics", experiment_path)
-    exp = experiment.Experiment(experiment_path)
-
-    if cycle is None:
-        cycle = exp.current_cycle_i
-
-    logger.info(f"Cycle: {exp.cycles[cycle]}")
-
-    if exp.cfg.assimilation.n_members == 1:
-        logger.warning(
-            "Only one member, copying file over unchanged, no standard deviation."
-        )
-
-        analysis_path = exp.paths.scratch_analysis_path(cycle) / "member_00"
-        forecast_path = exp.paths.scratch_forecasts_path(cycle) / "member_00"
-        for f in chain(analysis_path.rglob("wrfout*"), forecast_path.rglob("wrfout*")):
-            target = f.parent.parent / (f.name + "_mean")
-            utils.copy(f, target)
-
-        return
-
-    # An array to collect all commands to run
-    commands = []
-
-    # Compute analysis statistics
-    scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
-    analysis_files = list(scratch_analysis_dir.rglob("member_*/wrfout*"))
-    if len(analysis_files) != 0:
-        analysis_mean_file = scratch_analysis_dir / f"{analysis_files[0].name}_mean"
-        analysis_mean_file.unlink(missing_ok=True)
-        commands.append(nco.average(analysis_files, analysis_mean_file))
-
-        analysis_sd_file = scratch_analysis_dir / f"{analysis_files[0].name}_sd"
-        analysis_sd_file.unlink(missing_ok=True)
-        commands.append(nco.standard_deviation(analysis_files, analysis_sd_file))
-    else:
-        logger.warning("No analysis files found!")
-
-    # Compute forecast statistics
-    scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
-    forecast_filenames = [
-        x.name for x in scratch_forecast_dir.rglob("member_00/wrfout*")
-    ]
-    for name in forecast_filenames:
-        logger.info(f"Computing statistics for {name}")
-
-        forecast_files = list(scratch_forecast_dir.rglob(f"member_*/{name}"))
-        if len(forecast_files) == 0:
-            logger.warning(f"No forecast files found for {name}!")
-            continue
-
-        forecast_mean_file = scratch_forecast_dir / f"{name}_mean"
-        forecast_mean_file.unlink(missing_ok=True)
-        commands.append(nco.average(forecast_files, forecast_mean_file))
-
-        forecast_sd_file = scratch_forecast_dir / f"{name}_sd"
-        forecast_sd_file.unlink(missing_ok=True)
-        commands.append(nco.standard_deviation(forecast_files, forecast_sd_file))
-
-    # Execute commands
-    failure = False
-    logger.info(
-        f"Executing {len(commands)} nco commands in parallel, using {jobs} jobs"
-    )
-    for res in external.run_in_parallel(commands, jobs):
-        if res.returncode != 0:
-            logger.error(f"nco command failed with exit code {res.returncode}")
-            logger.error(res.output)
-            failure = True
-
-    if failure:
-        logger.error("One or more nco commands failed, exiting")
-        sys.exit(1)
-
-
-@postprocess_cli.command()
-@click.option(
-    "--cycle",
-    type=int,
-    help="Cycle to compute statistics for. Will compute for all current cycle if missing.",
-)
-@click.option(
-    "--jobs",
-    type=click.IntRange(min=0, max=None),
-    default=4,
     help="How many files to process in parallel",
 )
 @pass_experiment_path
-def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: int):
+def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
     """
     Does some basic postprocessing on the wrfout files:
     - Make units pint friendly
@@ -136,8 +38,7 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: int):
     - Computes X and Y arrays in the model's projection for interpolation purposes
     Essentially uses the excellent [xwrf](https://github.com/xarray-contrib/xwrf) to make the files a bit more CF-compliant.
 
-    This function is applied to the wrfout files after statistics (mean and standard deviation) have been computed,
-    but in principle could be applies to a single wrfout file as well. We do it this way to cut down on time and I/O.
+    This function is applied to each wrfout file before computing statistics (mean/SD).
     """
 
     logger.setup("postprocess-wrf_post", experiment_path)
@@ -148,28 +49,32 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: int):
 
     logger.info(f"Cycle: {exp.cycles[cycle]}")
 
+    jobs = utils.determine_jobs(jobs)
+    logger.info(f"Using {jobs} jobs")
+
     files_to_process = []
 
-    # Find all forecast files
+    # Find all forecast files, clean any old `_post` first
     scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
-    forecast_files = chain(
-        scratch_forecast_dir.glob("wrfout*_mean"),
-        scratch_forecast_dir.glob("wrfout*_sd"),
-    )
+    for f in scratch_forecast_dir.rglob("wrfout*_post"):
+        logger.debug(f"Removing old file {f}")
+        f.unlink()
+
+    forecast_files = list(scratch_forecast_dir.rglob("member_*/wrfout*"))
     for f in forecast_files:
-        output_path = scratch_forecast_dir / f"{f.name}_post"
+        output_path = f.parent / f"{f.name}_post"
         if output_path.exists():
             output_path.unlink()
         files_to_process.append((f, output_path))
 
-    # Find all analysis files
+    # Find all analysis files, clean any old `_post` first
     scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
-    analysis_files = chain(
-        scratch_analysis_dir.glob("wrfout*_mean"),
-        scratch_analysis_dir.glob("wrfout*_sd"),
-    )
+    for f in scratch_analysis_dir.rglob("wrfout*_post"):
+        logger.debug(f"Removing old file {f}")
+
+    analysis_files = scratch_analysis_dir.rglob("member_*/wrfout*")
     for f in analysis_files:
-        output_path = scratch_analysis_dir / f"{f.name}_post"
+        output_path = f.parent / f"{f.name}_post"
         if output_path.exists():
             output_path.unlink()
         files_to_process.append((f, output_path))
@@ -178,22 +83,15 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: int):
     logger.info(
         f"Processing {len(files_to_process)} files in parallel, using {jobs} jobs"
     )
+    for old, new in files_to_process:
+        logger.info(
+            f"{old.relative_to(old.parent.parent)} -> {new.relative_to(new.parent.parent)}"
+        )
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=jobs) as executor:
         results = executor.map(postprocess._xwrf_post, files_to_process)
-        for res in results:
+        for _ in results:
             pass
-
-    # Move files to the correct location
-    for old, new in files_to_process:
-        if not new.exists():
-            logger.error(f"File {new} was not created!")
-            sys.exit(1)
-
-        logger.debug(f"Moving {new} to {old}")
-
-        old.unlink()
-        new.rename(old)
 
 
 @postprocess_cli.command()
@@ -205,8 +103,7 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: int):
 @click.option(
     "--jobs",
     type=click.IntRange(min=0, max=None),
-    default=4,
-    help="How many commands to execute in parallel",
+    help="How many files to process in parallel",
 )
 @click.option(
     "--keep-temp",
@@ -215,7 +112,7 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: int):
 )
 @pass_experiment_path
 def apply_scripts(
-    experiment_path: Path, cycle: Optional[int], jobs: int, keep_temp: bool
+    experiment_path: Path, cycle: Optional[int], jobs: Optional[int], keep_temp: bool
 ):
     """
     Apply postprocessing scripts to the output files.
@@ -231,6 +128,9 @@ def apply_scripts(
 
     logger.info(f"Cycle: {exp.cycles[cycle]}")
 
+    jobs = utils.determine_jobs(jobs)
+    logger.info(f"Using {jobs} jobs")
+
     # Sanity check that the scripts are defined
     if len(exp.cfg.postprocess.scripts) == 0:
         logger.error("No postprocessing scripts defined, exiting")
@@ -239,8 +139,8 @@ def apply_scripts(
     # Gather all the files for processing
     scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
     scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
-    files_to_process = list(scratch_analysis_dir.glob("wrfout*")) + list(
-        scratch_forecast_dir.glob("wrfout*")
+    files_to_process = list(scratch_analysis_dir.rglob("wrfout*_post")) + list(
+        scratch_forecast_dir.rglob("wrfout*_post")
     )
     logger.info(f"Found {len(files_to_process)} files to process")
 
@@ -284,6 +184,119 @@ def apply_scripts(
     if not keep_temp:
         logger.debug(f"Removing temp. directory {scratch_dir}")
         utils.rm_tree(scratch_dir)
+
+
+@postprocess_cli.command()
+@click.option(
+    "--cycle",
+    type=int,
+    help="Cycle to compute statistics for. Will compute for all current cycle if missing.",
+)
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    help="How many files to process in parallel",
+)
+@pass_experiment_path
+def statistics(
+    experiment_path: Path,
+    cycle: Optional[int],
+    jobs: int,
+):
+    """
+    Calculates the ensemble mean and standard deviation from the forecast/analysis files of given cycle.
+    This function reads the `*_post` files created by the `wrf_post` and, optionally, `apply_scripts` commands.
+    """
+
+    logger.setup("postprocess-statistics", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    if cycle is None:
+        cycle = exp.current_cycle_i
+    logger.info(f"Cycle: {exp.cycles[cycle]}")
+
+    jobs = utils.determine_jobs(jobs)
+    logger.info(f"Using {jobs} jobs")
+
+    if exp.cfg.assimilation.n_members == 1:
+        logger.warning(
+            "Only one member, copying file over unchanged, no standard deviation."
+        )
+
+        analysis_path = exp.paths.scratch_analysis_path(cycle) / "member_00"
+        forecast_path = exp.paths.scratch_forecasts_path(cycle) / "member_00"
+        for f in chain(
+            analysis_path.rglob("wrfout*_post"), forecast_path.rglob("wrfout*_post")
+        ):
+            target = f.parent.parent / f.name.replace("_post", "_mean")
+            utils.copy(f, target)
+
+        return
+
+    # An array to collect all commands to run
+    commands = []
+
+    # Compute analysis statistics, clean up any `.nces.tmp` files first
+    scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
+    for f in scratch_analysis_dir.rglob("*.nces.tmp"):
+        logger.debug(f"Removing old file {f}")
+        f.unlink()
+
+    analysis_files = list(scratch_analysis_dir.rglob("member_*/wrfout*_post"))
+    if len(analysis_files) != 0:
+        analysis_mean_file = scratch_analysis_dir / analysis_files[0].name.replace(
+            "_post", "_mean"
+        )
+        analysis_mean_file.unlink(missing_ok=True)
+        commands.append(nco.average(analysis_files, analysis_mean_file))
+
+        analysis_sd_file = scratch_analysis_dir / analysis_files[0].name.replace(
+            "_post", "_sd"
+        )
+        analysis_sd_file.unlink(missing_ok=True)
+        commands.append(nco.standard_deviation(analysis_files, analysis_sd_file))
+    else:
+        logger.warning("No analysis files found!")
+
+    # Compute forecast statistics, clean up any `.nces.tmp` files first
+    scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
+    for f in scratch_forecast_dir.rglob("*.nces.tmp"):
+        logger.debug(f"Removing old file {f}")
+        f.unlink()
+
+    forecast_filenames = [
+        x.name for x in scratch_forecast_dir.rglob("member_00/wrfout*_post")
+    ]
+    for name in forecast_filenames:
+        logger.info(f"Computing statistics for {name}")
+
+        forecast_files = list(scratch_forecast_dir.rglob(f"member_*/{name}"))
+        if len(forecast_files) == 0:
+            logger.warning(f"No forecast files found for {name}!")
+            continue
+
+        forecast_mean_file = scratch_forecast_dir / name.replace("_post", "_mean")
+        forecast_mean_file.unlink(missing_ok=True)
+        commands.append(nco.average(forecast_files, forecast_mean_file))
+
+        forecast_sd_file = scratch_forecast_dir / name.replace("_post", "_sd")
+        forecast_sd_file.unlink(missing_ok=True)
+        commands.append(nco.standard_deviation(forecast_files, forecast_sd_file))
+
+    # Execute commands
+    failure = False
+    logger.info(
+        f"Executing {len(commands)} nco commands in parallel, using {jobs} jobs"
+    )
+    for res in external.run_in_parallel(commands, jobs):
+        if res.returncode != 0:
+            logger.error(f"nco command failed with exit code {res.returncode}")
+            logger.error(res.output)
+            failure = True
+
+    if failure:
+        logger.error("One or more nco commands failed, exiting")
+        sys.exit(1)
 
 
 @postprocess_cli.command()
