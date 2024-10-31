@@ -36,6 +36,8 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
     - Destagger variables
     - Compute derived variables such as air temperature and earth-relative wind speed
     - Computes X and Y arrays in the model's projection for interpolation purposes
+    - If `postprocess.variables_to_keep` is set in the config, apply the list of regex
+      filters to the netCDF variables. Anything not matching at least one regex is removed.
     Essentially uses the excellent [xwrf](https://github.com/xarray-contrib/xwrf) to make the files a bit more CF-compliant.
 
     This function is applied to each wrfout file before computing statistics (mean/SD).
@@ -77,7 +79,7 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
         output_path = f.parent / f"{f.name}_post"
         if output_path.exists():
             output_path.unlink()
-        files_to_process.append((f, output_path))
+        files_to_process.append((f, output_path, exp.cfg.postprocess.variables_to_keep))
 
     # Execute commands
     logger.info(

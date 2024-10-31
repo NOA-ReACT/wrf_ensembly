@@ -248,6 +248,12 @@ class SlurmConfig:
 
 @dataclass
 class PostprocessConfig:
+    variables_to_keep: Optional[list[str]] = None
+    """
+    Optionally, filter the variables in a file by a list of regular expressions. If None, all variables are kept.
+    This filtering is applied during the `postprocess wrf-post` step.
+    """
+
     compression_filters: str = "shf|zst,3"
     """
     Which compression filter to apply when producing the final cycle files

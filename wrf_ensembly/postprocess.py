@@ -1,6 +1,8 @@
 """Routines about postprocessing of `wrfout` files"""
 
+import re
 from pathlib import Path
+from typing import Optional
 
 import xarray as xr
 import xwrf  # noqa: F401
@@ -18,7 +20,9 @@ def _xwrf_post(args: tuple[Path, Path]):
         raise e
 
 
-def xwrf_post(input_file: Path, output_path: Path):
+def xwrf_post(
+    input_file: Path, output_path: Path, variables_to_keep: Optional[list[str]] = None
+):
     """
     Apply the postprocessing routines from [xWRF](https://github.com/xarray-contrib/xwrf)
     to a single WRF output file, and write the result to a new file. Specifically:
@@ -27,6 +31,9 @@ def xwrf_post(input_file: Path, output_path: Path):
     - Destagger variables
     - Compute derived variables such as air temperature and earth-relative wind speed
     - Computes X and Y arrays in the model's projection for interpolation purposes
+
+    If `variables_to_keep` is provided, only the variables in the list will be kept in the output file.
+    The list can be regex patterns.
     """
 
     # TODO Fix /SerializationWarning: saving variable ISEEDARRAY_SPP_LSM with floating point data as an integer dtype without any _FillValue to use for NaNs
@@ -53,6 +60,11 @@ def xwrf_post(input_file: Path, output_path: Path):
 
         # Since the projection object is not serialisable, we need to drop it before saving
         ds = ds.drop_vars("wrf_projection")
+
+        # Filter variables if needed
+        if variables_to_keep:
+            patterns = [re.compile(v) for v in variables_to_keep]
+            ds = ds[[v for v in ds.data_vars if any(v.match(var) for var in patterns)]]
 
         comp = dict(zlib=True, complevel=5)
         encoding = {var: comp for var in ds.data_vars}
