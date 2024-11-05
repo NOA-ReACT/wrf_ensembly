@@ -6,7 +6,7 @@ from typing import Optional
 
 import click
 
-from wrf_ensembly import experiment, external, nco, postprocess, utils
+from wrf_ensembly import experiment, external, nco, cdo, postprocess, utils
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
 
@@ -254,13 +254,13 @@ def statistics(
             "_post", "_mean"
         )
         analysis_mean_file.unlink(missing_ok=True)
-        commands.append(nco.average(analysis_files, analysis_mean_file))
+        commands.append(cdo.average(analysis_files, analysis_mean_file))
 
         analysis_sd_file = scratch_analysis_dir / analysis_files[0].name.replace(
             "_post", "_sd"
         )
         analysis_sd_file.unlink(missing_ok=True)
-        commands.append(nco.standard_deviation(analysis_files, analysis_sd_file))
+        commands.append(cdo.standard_deviation(analysis_files, analysis_sd_file))
     else:
         logger.warning("No analysis files found!")
 
@@ -283,11 +283,11 @@ def statistics(
 
         forecast_mean_file = scratch_forecast_dir / name.replace("_post", "_mean")
         forecast_mean_file.unlink(missing_ok=True)
-        commands.append(nco.average(forecast_files, forecast_mean_file))
+        commands.append(cdo.average(forecast_files, forecast_mean_file))
 
         forecast_sd_file = scratch_forecast_dir / name.replace("_post", "_sd")
         forecast_sd_file.unlink(missing_ok=True)
-        commands.append(nco.standard_deviation(forecast_files, forecast_sd_file))
+        commands.append(cdo.standard_deviation(forecast_files, forecast_sd_file))
 
     # Execute commands
     failure = False
