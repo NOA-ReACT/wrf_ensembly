@@ -67,12 +67,13 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
         output_path = f.parent / f"{f.name}_post"
         if output_path.exists():
             output_path.unlink()
-        files_to_process.append((f, output_path))
+        files_to_process.append((f, output_path, exp.cfg.postprocess.variables_to_keep))
 
     # Find all analysis files, clean any old `_post` first
     scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
     for f in scratch_analysis_dir.rglob("wrfout*_post"):
         logger.debug(f"Removing old file {f}")
+        f.unlink()
 
     analysis_files = scratch_analysis_dir.rglob("member_*/wrfout*")
     for f in analysis_files:
@@ -85,7 +86,7 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
     logger.info(
         f"Processing {len(files_to_process)} files in parallel, using {jobs} jobs"
     )
-    for old, new in files_to_process:
+    for old, new, _ in files_to_process:
         logger.info(
             f"{old.relative_to(old.parent.parent)} -> {new.relative_to(new.parent.parent)}"
         )
