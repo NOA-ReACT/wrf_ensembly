@@ -1,4 +1,5 @@
 import datetime as dt
+import os
 from pathlib import Path
 
 import netCDF4
@@ -368,6 +369,22 @@ class Experiment:
         for f in member_path.glob("rsl*"):
             logger.debug(f"Removing log file {f}")
             f.unlink()
+
+    def set_wrf_environment(self):
+        """
+        Adds the environment variables from config's `environment.wrf` to the current environment
+        """
+
+        for key, value in self.cfg.environment.wrf.items():
+            os.environ[key] = value
+
+    def set_dart_environment(self):
+        """
+        Adds the environment variables from config's `environment.dart` to the current environment
+        """
+
+        for key, value in self.cfg.environment.dart.items():
+            os.environ[key] = value
 
     @property
     def current_cycle(self) -> cycling.CycleInformation:

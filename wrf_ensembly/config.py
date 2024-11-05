@@ -22,6 +22,20 @@ class MetadataConfig:
 
 
 @dataclass
+class EnvironmentConfig:
+    """Configuration related to the environment variables"""
+
+    universal: dict[str, str] = field(default_factory=dict)
+    """Applied to all commands"""
+
+    wrf: dict[str, str] = field(default_factory=dict)
+    """Applied to WRF/WPS commands"""
+
+    dart: dict[str, str] = field(default_factory=dict)
+    """Applied to DART commands"""
+
+
+@dataclass
 class DirectoriesConfig:
     """Info about where the experiment will run (in, out, models,...)"""
 
@@ -333,7 +347,7 @@ class Config(DataClassTOMLMixin):
     )
     """Overrides for the WRF namelist per ensemble member"""
 
-    environment: dict[str, str] = field(default_factory=dict)
+    environment: EnvironmentConfig = field(default_factory=EnvironmentConfig)
     """Environment variables to set when running the experiment"""
 
 
@@ -349,7 +363,7 @@ def read_config(path: Path, inject_environment=True) -> Config:
     cfg = Config.from_toml(path.read_text())
 
     if inject_environment:
-        for k, v in cfg.environment.items():
+        for k, v in cfg.environment.universal.items():
             os.environ[k] = str(v)
 
     return cfg

@@ -56,6 +56,7 @@ def geogrid(experiment_path: Path):
 
     logger.setup("preprocess-geogrid", experiment_path)
     exp = experiment.Experiment(experiment_path)
+    exp.set_wrf_environment()
     wps_dir = exp.paths.work_preprocessing_wps
 
     if (wps_dir / "geo_em.d01.nc").exists():
@@ -98,6 +99,7 @@ def ungrib(experiment_path: Path):
 
     logger.setup("preprocess-ungrib", experiment_path)
     exp = experiment.Experiment(experiment_path)
+    exp.set_wrf_environment()
     wps_dir = exp.paths.work_preprocessing_wps
     data_dir = exp.cfg.data.meteorology.resolve()
 
@@ -160,6 +162,7 @@ def metgrid(experiment_path: Path, force: bool):
 
     logger.setup("preprocess-metgrid", experiment_path)
     exp = experiment.Experiment(experiment_path)
+    exp.set_wrf_environment()
     wps_dir = exp.paths.work_preprocessing_wps
 
     if len(list(wps_dir.glob("met_em*.nc"))) > 0:
@@ -201,6 +204,7 @@ def real(experiment_path: Path, cycle: int, cores):
     logger.setup(f"preprocess-real-cycle_{cycle}", experiment_path)
 
     exp = experiment.Experiment(experiment_path)
+    exp.set_wrf_environment()
     wps_dir = exp.paths.work_preprocessing_wps
     wrf_dir = exp.paths.work_preprocessing_wrf
 

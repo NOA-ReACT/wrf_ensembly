@@ -59,6 +59,7 @@ def apply_perturbations(
 
     logger.setup("ensemble-apply-perturbations", experiment_path)
     exp = experiment.Experiment(experiment_path)
+    exp.set_dart_environment()
     cfg = exp.cfg
 
     if len(cfg.perturbations.variables) == 0:
@@ -185,6 +186,7 @@ def apply_perturbations_from_file(
 
     logger.setup("ensemble-apply-perturbations-from-file", experiment_path)
     exp = experiment.Experiment(experiment_path)
+    exp.set_dart_environment()
     cfg = exp.cfg
 
     perts_nc_path = perturbations_file
@@ -279,6 +281,7 @@ def advance_member(
 
     logger.setup(f"ensemble-advance-member_{member}", experiment_path)
     exp = experiment.Experiment(experiment_path)
+    exp.set_wrf_environment()
     if member < 0 or member >= exp.cfg.assimilation.n_members:
         logger.error(f"Member {member} does not exist")
         sys.exit(1)
@@ -307,6 +310,7 @@ def filter(experiment_path: Path):
 
     logger.setup("ensemble-filter", experiment_path)
     exp = experiment.Experiment(experiment_path)
+    exp.set_dart_environment()
     if exp.filter():
         exp.write_status()
 
@@ -390,6 +394,7 @@ def cycle(experiment_path: Path, use_forecast: bool, jobs: Optional[int]):
 
     logger.setup("cycle", experiment_path)
     exp = experiment.Experiment(experiment_path)
+    exp.set_dart_environment()
 
     if not exp.all_members_advanced:
         logger.error("Not all members have advanced to the next cycle, cannot cycle!")

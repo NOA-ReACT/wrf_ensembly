@@ -24,6 +24,7 @@ def prepare(experiment_path: Path, cycle: Optional[int] = None):
 
     logger.setup("observations-prepare", experiment_path)
     exp = experiment.Experiment(experiment_path)
+    exp.set_dart_environment()
 
     # If a cycle is not given, we will convert for all cycles
     cycles = exp.cycles
@@ -102,6 +103,7 @@ def prepare_custom_window(
 
     logger.setup("observations-prepare-custom", experiment_path)
     exp = experiment.Experiment(experiment_path)
+    exp.set_dart_environment()
 
     # Prepare observation groups for all toml file
     obs_path = exp.paths.obs
@@ -159,6 +161,7 @@ def obs_seq_to_nc(experiment_path: Path, obs_seq_path: Path, nc_path: Path):
     """Convert the given obs_seq file to netCDF format"""
 
     exp = experiment.Experiment(experiment_path)
+    exp.set_dart_environment()
     logger.setup("observations-convert-obs-seq", experiment_path)
 
     observations.obs_seq_to_nc(exp.cfg.directories.dart_root, obs_seq_path, nc_path)
@@ -181,6 +184,7 @@ def preprocess_for_wrf(experiment_path: Path, backup: bool):
 
     logger.setup("observations-preprocess-for-wrf", experiment_path)
     exp = experiment.Experiment(experiment_path)
+    exp.set_dart_environment()
 
     # Find a wrfinput file to get the domain
     wrfinput = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
