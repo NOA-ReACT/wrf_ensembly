@@ -252,7 +252,7 @@ def real(experiment_path: Path, cycle: int, cores):
         sys.exit(1)
 
     cmd = [
-        exp.cfg.slurm.mpirun_command,
+        *exp.cfg.slurm.mpirun_command.split(" "),
         "-n",
         str(cores),
         str(real_path.resolve()),

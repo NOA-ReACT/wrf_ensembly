@@ -144,7 +144,12 @@ class Experiment:
 
         # Run WRF
         logger.info(f"Running WRF for member {member_idx}...")
-        cmd = [self.cfg.slurm.mpirun_command, "-n", str(cores), str(wrf_exe_path)]
+        cmd = [
+            *self.cfg.slurm.mpirun_command.split(" "),
+            "-n",
+            str(cores),
+            str(wrf_exe_path),
+        ]
 
         start_time = dt.datetime.now()
         res = external.runc(cmd, cwd=member_path)
@@ -258,7 +263,7 @@ class Experiment:
                 f"Using MPI to run filter, n={self.cfg.assimilation.filter_mpi_tasks}"
             )
             cmd = [
-                self.cfg.slurm.mpirun_command,
+                *self.cfg.slurm.mpirun_command.split(" "),
                 "-n",
                 str(self.cfg.assimilation.filter_mpi_tasks),
                 "./filter",
