@@ -145,6 +145,8 @@ def generate_make_analysis_jobfile(
         "else",
         base_cmd.replace("%SUBCOMMAND%", "cycle") + " --use-forecast",
         "fi",
+        base_cmd.replace("%SUBCOMMAND%", "apply-perturbations"),
+        base_cmd.replace("%SUBCOMMAND%", "update-bc"),
     ]
 
     if queue_next_cycle:
