@@ -3,8 +3,19 @@ import os
 from pathlib import Path
 
 import netCDF4
+import xarray as xr
+import numpy as np
 
-from wrf_ensembly import config, cycling, external, observations, update_bc, utils, wrf
+from wrf_ensembly import (
+    config,
+    cycling,
+    external,
+    observations,
+    perturbations,
+    update_bc,
+    utils,
+    wrf,
+)
 from wrf_ensembly.console import logger
 
 from .dataclasses import ExperimentStatus, MemberStatus, RuntimeStatistics
@@ -92,6 +103,124 @@ class Experiment:
         self.analysis_run = False
         for member in self.members:
             member.advanced = False
+
+    def generate_perturbations(self, cycle_i: int):
+        """
+        Generates perturbations for a given cycle and stores them in `data/diag/perturbations`.
+        """
+
+        if len(self.cfg.perturbations.variables) == 0:
+            logger.warning("No perturbations defined in config, skipping")
+            return
+
+        if self.cfg.perturbations.seed is not None:
+            logger.warning(f"Setting random seed to {self.cfg.perturbations.seed}")
+            np.random.seed(self.cfg.perturbations.seed)
+
+        # Open the first wrfinput file to get the shape of each variable
+        wrfinput = xr.open_dataset(self.paths.data_icbc / "wrfinput_d01_cycle_0")
+
+        pert_file = self.paths.data_diag / "perturbations" / f"perts_cycle_{cycle_i}.nc"
+        pert_file.parent.mkdir(parents=True, exist_ok=True)
+        pert_file.unlink(missing_ok=True)
+
+        # First, generate the perturbation field for each variable and member, and put them in a dataset
+        perts = xr.Dataset()
+        for var, pert_config in self.cfg.perturbations.variables.items():
+            arr = np.stack(
+                [
+                    perturbations.generate_perturbation_field(
+                        shape=wrfinput[var].shape,
+                        mean=pert_config.mean,
+                        sd=pert_config.sd,
+                        rounds=pert_config.rounds,
+                        boundary=pert_config.boundary,
+                    )
+                    for _ in range(self.cfg.assimilation.n_members)
+                ],
+                axis=0,
+            )
+            perts[var] = xr.DataArray(
+                arr,
+                dims=("member", *wrfinput[var].dims),
+                coords={"member": range(self.cfg.assimilation.n_members)},
+            )
+
+        # Write the dataset to a netCDF file
+        perts.encoding = {var: {"zlib": True} for var in perts.data_vars}
+        perts.attrs["experiment_name"] = self.cfg.metadata.name
+        perts.attrs["cycle"] = cycle_i
+
+        logger.info(f"Writing perturbations for {cycle_i} to {pert_file}")
+        perts.to_netcdf(pert_file)
+
+    def apply_perturbations(self, member_i: int):
+        """
+        Apply perturbations to the initial conditions of a member.
+        Must be generated with `generate_perturbations` first.
+        You should call this function once for every member, after the initial conditions
+        are copied in the member directory (either during `ensemble setup` or `ensemble cycle`).
+        """
+
+        if member_i >= self.cfg.assimilation.n_members:
+            raise ValueError(
+                f"Member index {member_i} is out of bounds for {self.cfg.assimilation.n_members} members"
+            )
+
+        pert_file = (
+            self.paths.data_diag
+            / "perturbations"
+            / f"perts_cycle_{self.current_cycle_i}.nc"
+        )
+        if not pert_file.exists():
+            raise FileNotFoundError(
+                f"Perturbation file for cycle {self.current_cycle_i} not found at {pert_file}"
+            )
+
+        perts = xr.open_dataset(pert_file).sel(member=member_i)
+
+        with netCDF4.Dataset(self.paths.member_path(member_i) / "wrfinput_d01", "r+") as member_icbc:  # type: ignore
+            for var, pert_config in self.cfg.perturbations.variables.items():
+                logger.debug(f"Applying perturbation to {var} for member {member_i}")
+                if var not in member_icbc.variables:
+                    raise ValueError(f"Variable {var} not found in member IC/BC file.")
+
+                field = perts[var].values
+                if pert_config.operation == "add":
+                    member_icbc[var][:] += field
+                elif pert_config.operation == "multiply":
+                    member_icbc[var][:] *= field
+                else:
+                    raise ValueError(
+                        f"Unknown perturbation operation: {pert_config.operation}"
+                    )
+
+        logger.info(f"Applied perturbations to member {member_i}")
+
+    def update_bc(self, member_i: int):
+        """
+        Run `update_wrf_bc` to update the boundary conditions of a member to match the initial conditions.
+        """
+
+        member_path = self.paths.member_path(member_i)
+        icbc_target_file = member_path / "wrfinput_d01"
+        bdy_target_file = member_path / "wrfbdy_d01"
+
+        res = update_bc.update_wrf_bc(
+            self.cfg,
+            icbc_target_file,
+            bdy_target_file,
+            log_filename=f"update_bc_member_{member_i}.log",
+        )
+        if (
+            res.returncode != 0
+            or "update_wrf_bc Finished successfully" not in res.output
+        ):
+            logger.error(
+                f"Member {member_i}: update_wrf_bc failed with exit code {res.returncode}"
+            )
+            logger.error(res.output)
+            raise external.ExternalProcessFailed(res)
 
     def advance_member(self, member_idx: int, cores: int) -> bool:
         """
@@ -347,24 +476,6 @@ class Experiment:
 
             # Add experiment name to attributes
             nc_icbc.experiment_name = self.cfg.metadata.name
-
-        # Update the boundary conditions to match the new initial conditions
-        logger.info(f"Member {member_i}: Updating boundary conditions")
-        res = update_bc.update_wrf_bc(
-            self.cfg,
-            icbc_target_file,
-            bdy_target_file,
-            log_filename=f"da_update_bc_analysis_member_{member_i}.log",
-        )
-        if (
-            res.returncode != 0
-            or "update_wrf_bc Finished successfully" not in res.output
-        ):
-            logger.error(
-                f"Member {member_i}: bc_update.exe failed with exit code {res.returncode}"
-            )
-            logger.error(res.output)
-            raise external.ExternalProcessFailed(res)
 
         # Remove forecast files, log files
         logger.info(f"Cleaning up member directory {member_path}")

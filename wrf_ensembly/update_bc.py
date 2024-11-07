@@ -36,7 +36,7 @@ def update_wrf_bc(
         The result of the external process call (see `ExternalProcessResult`).
     """
 
-    with TemporaryDirectory() as work_dir:
+    with TemporaryDirectory(prefix="wrf_ensembly_update_bc") as work_dir:
         work_dir = Path(work_dir)
 
         # Link input files

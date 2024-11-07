@@ -1,14 +1,13 @@
-from concurrent.futures import ProcessPoolExecutor
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Optional
 
 import click
 import netCDF4
-import numpy as np
 
-from wrf_ensembly import experiment, perturbations, update_bc, utils
+from wrf_ensembly import experiment, utils
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
 
@@ -49,214 +48,82 @@ def setup(experiment_path: Path):
 
 
 @ensemble_cli.command()
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    help="How many files to process in parallel",
+)
 @pass_experiment_path
-def apply_perturbations(
-    experiment_path: Path,
-):
+def generate_perturbations(experiment_path: Path, jobs: Optional[int]):
+    """Generates perturbations for all experiment cycles"""
+
+    logger.setup("ensemble-generate-perturbations", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    jobs = utils.determine_jobs(jobs)
+    logger.info(f"Using {jobs} jobs")
+
+    with ProcessPoolExecutor(max_workers=jobs) as executor:
+        res = executor.map(exp.generate_perturbations, range(len(exp.cycles)))
+        for _ in res:
+            pass
+
+
+@ensemble_cli.command()
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    help="How many files to process in parallel",
+)
+@pass_experiment_path
+def apply_perturbations(experiment_path: Path, jobs: Optional[int]):
     """
-    Applies the configured perturbations to the initial conditions of each ensemble member
+    Applies perturbations to the initial conditions of the current cycle.
+    Make sure to update the boundary conditions afterwards!
     """
 
     logger.setup("ensemble-apply-perturbations", experiment_path)
     exp = experiment.Experiment(experiment_path)
-    exp.set_dart_environment()
-    cfg = exp.cfg
 
-    if len(cfg.perturbations.variables) == 0:
-        logger.info("No perturbations configured.")
-        return 0
+    jobs = utils.determine_jobs(jobs)
+    logger.info(f"Using {jobs} jobs")
 
-    if cfg.perturbations.seed is not None:
-        logger.warning(f"Setting numpy random seed to {cfg.perturbations.seed}")
-        np.random.seed(cfg.perturbations.seed)
-
-    perts_nc_path = exp.paths.data_diag / "perturbations.nc"
-    perts_nc_path.unlink(missing_ok=True)
-    with netCDF4.Dataset(perts_nc_path, "w") as perts_nc:  # type: ignore
-        perts_nc.createDimension("member", cfg.assimilation.n_members)
-
-        for i in range(cfg.assimilation.n_members):
-            member_dir = exp.paths.member_path(i)
-            wrfinput_path = member_dir / "wrfinput_d01"
-            wrfbdy_path = member_dir / "wrfbdy_d01"
-
-            wrfinput_copy_path = member_dir / "wrfinput_d01_copy"
-            wrfinput_copy_path.unlink(missing_ok=True)
-            wrfbdy_copy_path = member_dir / "wrfbdy_d01_copy"
-            wrfbdy_copy_path.unlink(missing_ok=True)
-
-            # Copy wrfinput and wrfbdy to a temporary file
-            utils.copy(wrfinput_path, wrfinput_copy_path)
-            utils.copy(wrfbdy_path, wrfbdy_copy_path)
-
-            # Modify wrfinput accoarding to perturbation configuration
-            logger.info(f"Member {i}: Applying perturbations to {wrfinput_path}")
-            with netCDF4.Dataset(wrfinput_copy_path, "r+") as ds:  # type: ignore
-                # Check if perturbations have already been applied
-                if "wrf_ensembly_perts" in ds.ncattrs():
-                    logger.warning("Perturbations already applied, skipping file")
-                    continue
-                ds.wrf_ensembly_perts = "True"
-
-                for variable, perturbation in cfg.perturbations.variables.items():
-                    logger.info(f"Member {i}: Perturbing {variable} by {perturbation}")
-                    var = ds[variable]
-
-                    field = perturbations.generate_perturbation_field(
-                        var.shape,
-                        perturbation.mean,
-                        perturbation.sd,
-                        perturbation.rounds,
-                        perturbation.boundary,
-                    )
-                    if perturbation.operation == "add":
-                        ds[variable][:] += field
-                    elif perturbation.operation == "multiply":
-                        ds[variable][:] *= field
-                    else:
-                        logger.error(
-                            f"Unknown perturbation operation {perturbation.operation}"
-                        )
-                        sys.exit(1)
-                    ds[variable].perts = str(perturbation)
-
-                    ## Store perturbation field in netcdf file
-                    # Copy dimensions if they don't exist
-                    for dim in var.dimensions:
-                        if dim not in perts_nc.dimensions:
-                            perts_nc.createDimension(dim, ds.dimensions[dim].size)
-
-                    # Create variable to store perturbation field
-                    if f"{variable}_pert" in perts_nc.variables:
-                        field_var = perts_nc.variables[f"{variable}_pert"]
-                    else:
-                        field_var = perts_nc.createVariable(
-                            f"{variable}_pert", var.dtype, ["member", *var.dimensions]
-                        )
-                        field_var.units = var.units
-                        field_var.description = (
-                            f"wrf-ensembly: Perturbation field for {variable}"
-                        )
-                        field_var.mean = perturbation.mean
-                        field_var.sd = perturbation.sd
-                        field_var.rounds = perturbation.rounds
-                    field_var[i, :] = field
-
-            # Update BC to match
-            logger.info("Updating boundary conditions...")
-            res = update_bc.update_wrf_bc(
-                cfg,
-                wrfinput_path,
-                wrfbdy_path,
-                log_filename=f"da_update_bc_member_{i}.log",
-            )
-            if (
-                res.returncode != 0
-                or "update_wrf_bc Finished successfully" not in res.output
-            ):
-                logger.error(
-                    f"Member {i}: bc_update.exe failed with exit code {res.returncode}"
-                )
-                sys.exit(1)
-            logger.info(f"Member {i}: bc_update.exe finished successfully")
-
-            # Move temporary file to original file
-            wrfinput_path.unlink()
-            utils.copy(wrfinput_copy_path, wrfinput_path)
-            wrfbdy_path.unlink()
-            utils.copy(wrfbdy_copy_path, wrfbdy_path)
-
-    logger.info("Finished applying perturbations")
-    return 0
+    with ProcessPoolExecutor(max_workers=jobs) as executor:
+        res = executor.map(
+            exp.apply_perturbations, range(exp.cfg.assimilation.n_members)
+        )
+        for _ in res:
+            pass
 
 
 @ensemble_cli.command()
-@click.argument(
-    "perturbations_file", type=click.Path(exists=True, readable=True, path_type=Path)
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    help="How many files to process in parallel",
 )
 @pass_experiment_path
-def apply_perturbations_from_file(
-    experiment_path: Path,
-    perturbations_file: Path,
-):
+def update_bc(experiment_path: Path, jobs: Optional[int]):
     """
-    Apply perturbations from a `perturbations.nc` file, generated by a previous run of the
-    `apply_perturbations` command.
+    Runs `update_wrf_bc` for all members to update boundary conditions.
+    Use this after you have modified the initial conditions (perts or cycling).
     """
 
-    logger.setup("ensemble-apply-perturbations-from-file", experiment_path)
+    logger.setup("ensemble-update-bc", experiment_path)
     exp = experiment.Experiment(experiment_path)
     exp.set_dart_environment()
-    cfg = exp.cfg
 
-    perts_nc_path = perturbations_file
-    with netCDF4.Dataset(perts_nc_path, "r") as perts_nc:  # type: ignore
-        for i in range(cfg.assimilation.n_members):
-            member_dir = exp.paths.member_path(i)
-            wrfinput_path = member_dir / "wrfinput_d01"
-            wrfbdy_path = member_dir / "wrfbdy_d01"
+    jobs = utils.determine_jobs(jobs)
+    logger.info(f"Using {jobs} jobs")
 
-            wrfinput_copy_path = member_dir / "wrfinput_d01_copy"
-            wrfinput_copy_path.unlink(missing_ok=True)
-            wrfbdy_copy_path = member_dir / "wrfbdy_d01_copy"
-            wrfbdy_copy_path.unlink(missing_ok=True)
+    with ProcessPoolExecutor(max_workers=jobs) as executor:
+        results = executor.map(
+            exp.update_bc,
+            range(exp.cfg.assimilation.n_members),
+        )
 
-            # Copy wrfinput and wrfbdy to a temporary file
-            utils.copy(wrfinput_path, wrfinput_copy_path)
-            utils.copy(wrfbdy_path, wrfbdy_copy_path)
-
-            # Modify wrfinput accoarding to perturbation configuration
-            logger.info(f"Member {i}: Applying perturbations to {wrfinput_path}")
-            with netCDF4.Dataset(wrfinput_copy_path, "r+") as ds:  # type: ignore
-                ds.wrf_ensembly_perts = "True"
-
-                for variable, perturbation in cfg.perturbations.variables.items():
-                    logger.info(f"Member {i}: Perturbing {variable} by {perturbation}")
-
-                    # Check of pert file exists in perts_nc
-                    if f"{variable}_pert" not in perts_nc.variables:
-                        logger.error(
-                            f"Variable {variable}_perf not found in {perts_nc_path}"
-                        )
-                        sys.exit(1)
-
-                    # Apply perturbation field
-                    field_var = perts_nc.variables[f"{variable}_pert"]
-                    field = field_var[i, :]
-                    if perturbation.operation == "add":
-                        ds[variable][:] += field
-                    elif perturbation.operation == "multiply":
-                        ds[variable][:] *= field
-                    else:
-                        logger.error(
-                            f"Unknown perturbation operation {perturbation.operation}"
-                        )
-                        sys.exit(1)
-                    ds[variable].perts = str(perturbation)
-
-            # Update BC to match
-            logger.info("Updating boundary conditions...")
-            res = update_bc.update_wrf_bc(
-                cfg,
-                wrfinput_path,
-                wrfbdy_path,
-                log_filename=f"da_update_bc_member_{i}.log",
-            )
-            if (
-                res.returncode != 0
-                or "update_wrf_bc Finished successfully" not in res.output
-            ):
-                logger.error(
-                    f"Member {i}: bc_update.exe failed with exit code {res.returncode}"
-                )
-                sys.exit(1)
-            logger.info(f"Member {i}: bc_update.exe finished successfully")
-
-            # Move temporary file to original file
-            wrfinput_path.unlink()
-            utils.copy(wrfinput_copy_path, wrfinput_path)
-            wrfbdy_path.unlink()
-            utils.copy(wrfbdy_copy_path, wrfbdy_path)
+        for _ in results:
+            pass
 
 
 @ensemble_cli.command()
@@ -394,7 +261,6 @@ def cycle(experiment_path: Path, use_forecast: bool, jobs: Optional[int]):
 
     logger.setup("cycle", experiment_path)
     exp = experiment.Experiment(experiment_path)
-    exp.set_dart_environment()
 
     if not exp.all_members_advanced:
         logger.error("Not all members have advanced to the next cycle, cannot cycle!")
