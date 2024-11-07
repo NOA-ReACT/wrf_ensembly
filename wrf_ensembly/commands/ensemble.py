@@ -416,15 +416,8 @@ def cycle(experiment_path: Path, use_forecast: bool, jobs: Optional[int]):
         sys.exit(1)
 
     # Determine job count
-    if jobs is None:
-        if os.environ["SLURM_NTASKS"]:
-            jobs = int(os.environ["SLURM_NTASKS"])
-            logger.info(f"Using {jobs} cores from SLURM_NTASKS")
-        else:
-            jobs = 1
-            logger.warning("No --jobs or SLURM_NTASKS found, using 1 core")
-    else:
-        logger.info(f"Using {jobs} cores from --jobs")
+    jobs = utils.determine_jobs(jobs)
+    logger.info(f"Using {jobs} jobs")
 
     with ProcessPoolExecutor(max_workers=jobs) as executor:
         results = executor.map(
