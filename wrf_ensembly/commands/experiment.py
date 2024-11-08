@@ -1,7 +1,6 @@
 import csv
 import shutil
 import sys
-from os import write
 from pathlib import Path
 from typing import Optional
 

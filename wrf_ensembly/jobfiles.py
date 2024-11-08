@@ -129,6 +129,13 @@ def generate_make_analysis_jobfile(
             f"Observation file {obs_file} does not exist! Filter won't run if it is not created for cycle {cycle}"
         )
 
+    pert_file = exp.paths.data_diag / "perturbations" / f"perts_cycle_{cycle}.nc"
+    pert_file = pert_file.resolve()
+    if not pert_file.exists():
+        logger.warning(
+            f"Perturbation file {pert_file} does not exist! Apply perturbations won't run if it is not created for cycle {cycle}"
+        )
+
     jobfile = exp.paths.jobfiles / f"cycle_{cycle}_make_analysis.job.sh"
 
     dynamic_directives = {
@@ -145,7 +152,9 @@ def generate_make_analysis_jobfile(
         "else",
         base_cmd.replace("%SUBCOMMAND%", "cycle") + " --use-forecast",
         "fi",
+        f"if [ -f {pert_file} ]; then",
         base_cmd.replace("%SUBCOMMAND%", "apply-perturbations"),
+        "fi",
         base_cmd.replace("%SUBCOMMAND%", "update-bc"),
     ]
 
