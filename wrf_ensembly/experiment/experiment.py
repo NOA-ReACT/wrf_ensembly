@@ -285,13 +285,12 @@ class Experiment:
         end_time = dt.datetime.now()
 
         # Check output logs
-        for f in member_path.glob("rsl.*"):
-            logger.add_log_file(f)
         rsl_file = member_path / "rsl.out.0000"
         if not rsl_file.exists():
             logger.error(f"Member {member_idx}: RSL file not found at {rsl_file}")
             return False
 
+        logger.add_log_file(rsl_file)
         rsl_content = rsl_file.read_text()
 
         if "SUCCESS COMPLETE WRF" not in rsl_content:
@@ -299,6 +298,11 @@ class Experiment:
                 f"Member {member_idx}: wrf.exe failed with exit code {res.returncode}"
             )
             return False
+
+        # Store logs in a zip file
+        if logger.log_dir is not None:
+            rsl_files = sorted(member_path.glob("rsl.*"))
+            utils.zip_files(rsl_files, logger.log_dir / "rsl.zip")
 
         # Update member status, take some basic precautions against other processes
         # doing the same.

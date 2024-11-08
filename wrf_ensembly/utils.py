@@ -2,9 +2,10 @@ import itertools
 import os
 import shutil
 import string
+import time
+import zipfile
 from contextlib import contextmanager
 from pathlib import Path
-import time
 from typing import Optional
 
 from wrf_ensembly.console import logger
@@ -206,3 +207,13 @@ def determine_jobs(job_param: Optional[int]) -> int:
         "job_param is None and SLURM_NTASKS is not set. Defaulting to 1 job."
     )
     return 1
+
+
+def zip_files(filelist: list[Path], output: Path):
+    """
+    Puts all files from `filelist` into a zip archive at `output`.
+    """
+
+    with zipfile.ZipFile(output, "w") as zipf:
+        for file in filelist:
+            zipf.write(file, file.name)
