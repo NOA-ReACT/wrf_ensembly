@@ -215,12 +215,20 @@ def generate_postprocess_jobfile(
         "output": f"{exp.paths.logs_slurm.resolve()}/%j-postprocess.out",
     }
 
-    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} postprocess %SUBCOMMAND% --cycle {cycle} --jobs {jobs}"
+    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} postprocess %SUBCOMMAND% --cycle {cycle} --jobs %JOBS%"
     commands = [
-        base_cmd.replace("%SUBCOMMAND%", "wrf-post"),
-        base_cmd.replace("%SUBCOMMAND%", "apply-scripts"),
-        base_cmd.replace("%SUBCOMMAND%", "statistics"),
-        base_cmd.replace("%SUBCOMMAND%", "concatenate"),
+        base_cmd.replace("%SUBCOMMAND%", "wrf-post").replace(
+            "%JOBS%", str(exp.cfg.postprocess.wrf_post_cores)
+        ),
+        base_cmd.replace("%SUBCOMMAND%", "apply-scripts").replace(
+            "%JOBS%", str(exp.cfg.postprocess.apply_scripts_cores)
+        ),
+        base_cmd.replace("%SUBCOMMAND%", "statistics").replace(
+            "%JOBS%", str(exp.cfg.postprocess.statistics_cores)
+        ),
+        base_cmd.replace("%SUBCOMMAND%", "concatenate").replace(
+            "%JOBS%", str(exp.cfg.postprocess.concatenate_cores)
+        ),
     ]
     if clean:
         commands.append(base_cmd.replace("%SUBCOMMAND%", "clean"))

@@ -295,6 +295,18 @@ class PostprocessConfig:
     # - {c} cycle number
     # """
 
+    wrf_post_cores: int = 1
+    """How many cores to use for the `wrf-post` step"""
+
+    apply_scripts_cores: int = 1
+    """How many cores to use for the `apply-scripts` step"""
+
+    statistics_cores: int = 1
+    """How many cores to use for the `statistics` step"""
+
+    concatenate_cores: int = 1
+    """How many cores to use for the `concatenate` step"""
+
     def __post_init__(self):
         """Validates the `script` field, making sure that all commands at least take the `{in}` and `{out}` placeholders."""
         for script in self.scripts:
