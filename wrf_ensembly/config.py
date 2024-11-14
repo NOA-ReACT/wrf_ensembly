@@ -121,6 +121,14 @@ class TimeControlConfig:
     cycles: Dict[int, CycleConfig] = field(default_factory=dict)
     """Configuration overrides for specific cycles"""
 
+    runtime_io: Optional[list[str]] = field(default_factory=list)
+    """
+    Optionally, add runtime I/O options to WRF. If set, it will create a text file in
+    each member directory and set it's name in the `iofields_filename` namelist variable.
+    One line per list item.
+    More info: https://github.com/wrf-model/WRF/blob/master/doc/README.io_config
+    """
+
 
 @dataclass
 class ChemistryDataConfig:

@@ -21,7 +21,7 @@ def ensemble_cli():
 @pass_experiment_path
 def setup(experiment_path: Path):
     """
-    Generates namelists and copies initial/boundary conditions for each member.
+    Copies initial/boundary conditions for each member.
     """
 
     logger.setup("ensemble-setup", experiment_path)

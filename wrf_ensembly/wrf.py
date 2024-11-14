@@ -193,6 +193,21 @@ def generate_wrf_namelist(
             "history_outname"
         ] = f"{wrfout_dest}/wrfout_d<domain>_<date>"
 
+    # Add iofields
+    if cfg.time_control.runtime_io is not None and len(cfg.time_control.runtime_io) > 0:
+        wrf_namelist["time_control"]["iofields_filename"] = "iofields.txt"
+        wrf_namelist["time_control"]["ignore_iofields_warning"] = False
+
+        if path.is_dir():
+            iofields_path = path / "iofields.txt"
+        else:
+            iofields_path = path.parent / "iofields.txt"
+
+        with open(iofields_path, "w") as f:
+            for var in cfg.time_control.runtime_io:
+                f.write(f"{var}\n")
+        logger.info(f"Wrote iofields to {iofields_path}")
+
     # Add overrides
     for name, group in cfg.wrf_namelist.items():
         if name in wrf_namelist:
