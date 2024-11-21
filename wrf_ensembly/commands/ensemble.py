@@ -62,11 +62,19 @@ def generate_perturbations(experiment_path: Path, jobs: Optional[int]):
 
     jobs = utils.determine_jobs(jobs)
     logger.info(f"Using {jobs} jobs")
+    logger.info(
+        f"Applying perturbations every cycle: {exp.cfg.perturbations.apply_perturbations_every_cycle}"
+    )
 
-    with ProcessPoolExecutor(max_workers=jobs) as executor:
-        res = executor.map(exp.generate_perturbations, range(len(exp.cycles)))
-        for _ in res:
-            pass
+    if exp.cfg.perturbations.apply_perturbations_every_cycle:
+        logger.info("Generating perturbations for all cycles...")
+        with ProcessPoolExecutor(max_workers=jobs) as executor:
+            res = executor.map(exp.generate_perturbations, range(len(exp.cycles)))
+            for _ in res:
+                pass
+    else:
+        logger.info("Generating perturbations for first cycle only...")
+        exp.generate_perturbations(0)
 
 
 @ensemble_cli.command()
