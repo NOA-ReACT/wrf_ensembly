@@ -311,6 +311,15 @@ class Experiment:
             rsl_files = sorted(member_path.glob("rsl.*"))
             utils.zip_files(rsl_files, logger.log_dir / "rsl.zip")
 
+        # Delete first output file
+        first_output = (
+            self.paths.scratch_forecasts_path(self.current_cycle_i, member_idx)
+            / f"wrfout_d01_{cycle.start.strftime('%Y-%m-%d_%H:%M:%S')}"
+        )
+        if first_output.exists():
+            logger.info(f"Removing first output file {first_output}")
+            first_output.unlink()
+
         # Update member status, take some basic precautions against other processes
         # doing the same.
         with utils.LockFile(self.status_file_path):
