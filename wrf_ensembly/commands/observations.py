@@ -9,6 +9,7 @@ import click
 from wrf_ensembly import experiment, observations
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
+from wrf_ensembly.external import ExternalProcessFailed
 
 
 @click.group(name="observations")
@@ -67,7 +68,12 @@ def prepare(experiment_path: Path, cycle: Optional[int] = None):
             ):
                 logger.info(f"Converting file {file.path} to obs_seq format")
                 out = obs_path / f"cycle_{c.index}.{key}.{i}.obs_seq"
-                obs_group.convert_file(file, out)
+                try:
+                    obs_group.convert_file(file, out)
+                except ExternalProcessFailed as e:
+                    logger.error(f"Failed to convert file {file.path}: {e}")
+                    logger.error(e.res.output)
+                    sys.exit(1)
                 cycle_files.append(out)
 
         if len(cycle_files) == 0:

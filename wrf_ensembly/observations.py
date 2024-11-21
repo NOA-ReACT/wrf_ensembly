@@ -69,6 +69,9 @@ class ObservationGroup(DataClassTOMLMixin):
         )
         if res.returncode != 0:
             raise external.ExternalProcessFailed(res)
+        if not output_file.exists():
+            logger.error("Converter did not produce an output file!")
+            raise external.ExternalProcessFailed(res)
         return res
 
 
