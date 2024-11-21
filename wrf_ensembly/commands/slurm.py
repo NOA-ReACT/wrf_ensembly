@@ -158,7 +158,7 @@ def run_experiment(
     generated job will skip the analysis step and go straight to cycling.
     """
 
-    logger.setup(f"slurm-run-experiment", experiment_path)
+    logger.setup("slurm-run-experiment", experiment_path)
     exp = experiment.Experiment(experiment_path)
     slurm_command = exp.cfg.slurm.sbatch_command
 

@@ -240,6 +240,9 @@ class PerturbationsConfig:
     seed: Optional[int] = None
     """RNG seed to use when generating perturbation fields. If none, it will be randomly generated."""
 
+    apply_perturbations_every_cycle: bool = False
+    """Whether to apply the perturbations at the start of every cycle when using `slurm run-experiment`"""
+
 
 @dataclass
 class SlurmConfig:

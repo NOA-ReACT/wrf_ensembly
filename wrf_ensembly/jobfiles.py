@@ -152,9 +152,14 @@ def generate_make_analysis_jobfile(
         "else",
         base_cmd.replace("%SUBCOMMAND%", "cycle") + " --use-forecast",
         "fi",
-        f"if [ -f {pert_file} ]; then",
-        base_cmd.replace("%SUBCOMMAND%", "apply-perturbations"),
-        "fi",
+    ]
+    if exp.cfg.perturbations.apply_perturbations_every_cycle:
+        commands += [
+            f"if [ -f {pert_file} ]; then",
+            base_cmd.replace("%SUBCOMMAND%", "apply-perturbations"),
+            "fi",
+        ]
+    commands += [
         base_cmd.replace("%SUBCOMMAND%", "update-bc"),
     ]
 
