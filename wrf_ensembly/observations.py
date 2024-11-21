@@ -113,7 +113,7 @@ def join_obs_seq(
     nml = {
         "obs_sequence_tool_nml": {
             "filename_seq_list": "./input_list",
-            "filename_out": "./obs_seq.out",
+            "filename_out": output_file.resolve(),
             "gregorian_cal": True,
         },
         "obs_sequence_nml": {"write_binary_obs_sequence": binary_obs_sequence},
@@ -154,10 +154,6 @@ def join_obs_seq(
             logger.error(f"obs_sequence_tool exited with error code {res.returncode}!")
             logger.error(res.output)
             raise RuntimeError(f"obs_sequence_tool failed with code {res.returncode}")
-
-        # Move output file to the desired location
-        obs_seq_out = tmp_dir / "obs_seq.out"
-        utils.copy(obs_seq_out, output_file)
 
     return res
 

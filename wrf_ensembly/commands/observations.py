@@ -1,15 +1,17 @@
 import datetime as dt
 import shutil
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
 import click
+from rich.console import Console
+from rich.table import Column, Table
 
-from wrf_ensembly import experiment, observations
+from wrf_ensembly import experiment, external, observations, utils
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
-from wrf_ensembly.external import ExternalProcessFailed
 
 
 @click.group(name="observations")
@@ -19,13 +21,21 @@ def observations_cli():
 
 @observations_cli.command()
 @click.argument("cycle", required=False, type=int)
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    help="How many files to process in parallel",
+)
 @pass_experiment_path
-def prepare(experiment_path: Path, cycle: Optional[int] = None):
+def prepare(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
     """Converts observation files to DART obs_seq format"""
 
     logger.setup("observations-prepare", experiment_path)
     exp = experiment.Experiment(experiment_path)
     exp.set_dart_environment()
+
+    jobs = utils.determine_jobs(jobs)
+    logger.info(f"Using {jobs} jobs")
 
     # If a cycle is not given, we will convert for all cycles
     cycles = exp.cycles
@@ -43,53 +53,89 @@ def prepare(experiment_path: Path, cycle: Optional[int] = None):
 
     logger.info(f"Found observation groups: {', '.join(names)}")
 
-    # Convert observation files for each cycle
+    # Gather all files for conversion
+    cycle_files = {}
     for c in cycles:
-        logger.info(f"Converting observations for cycle {c.index}")
-        logger.info(f"Cycle start: {c.start.isoformat()}")
-        logger.info(f"Cycle end: {c.end.isoformat()}")
+        cycle_files[c.index] = {}
 
         # TODO Calculate window length!
         assimilation_window_start = c.end - dt.timedelta(minutes=30)
         assimilation_window_end = c.end + dt.timedelta(minutes=30)
-        logger.info(
-            f"Assimilation window start: {assimilation_window_start.isoformat()}"
-        )
-        logger.info(f"Assimilation window end: {assimilation_window_end.isoformat()}")
 
-        cycle_files = []
         for key, obs_group in obs_groups.items():
-            logger.info(f"Converting group {key}({obs_group.kind})")
+            cycle_files[c.index][key] = []
 
             for i, file in enumerate(
                 obs_group.get_files_in_window(
                     assimilation_window_start, assimilation_window_end
                 )
             ):
-                logger.info(f"Converting file {file.path} to obs_seq format")
                 out = obs_path / f"cycle_{c.index}.{key}.{i}.obs_seq"
-                try:
-                    obs_group.convert_file(file, out)
-                except ExternalProcessFailed as e:
-                    logger.error(f"Failed to convert file {file.path}: {e}")
-                    logger.error(e.res.output)
-                    sys.exit(1)
-                cycle_files.append(out)
+                cycle_files[c.index][key].append((file.path, out))
 
-        if len(cycle_files) == 0:
-            logger.warning("No observation files found for this cycle!")
-            continue
-
-        # Join files for this group
-        logger.info(f"Joining files for cycle {c.index}")
-        kinds = [v.kind for v in obs_groups.values()]
-        observations.join_obs_seq(
-            exp.cfg, cycle_files, obs_path / f"cycle_{c.index}.obs_seq", kinds
+    # Print information about the files to convert
+    table = Table(
+        "Cycle",
+        "Window start",
+        "Window end",
+        *(Column(header=k, justify="right") for k in names),
+        title="Observation files to convert per cycle",
+    )
+    for c in cycles:
+        table.add_row(
+            str(c.index),
+            c.start.strftime("%Y-%m-%d %H:%M"),
+            c.end.strftime("%Y-%m-%d %H:%M"),
+            *(str(len(cycle_files[c.index][k])) for k in names),
         )
+    Console().print(table)
 
-        # Remove temporary files
-        for f in cycle_files:
-            f.unlink()
+    # Convert observation files for each cycle in parallel
+    commands = []
+    for c in cycles:
+        for key, obs_group in obs_groups.items():
+            for file, out in cycle_files[c.index][key]:
+                commands.append(
+                    external.ExternalProcess(
+                        [obs_group.converter, file, out], cwd=obs_group.converter.parent
+                    )
+                )
+    for res in external.run_in_parallel(commands, jobs):
+        if res.returncode != 0:
+            logger.error(f"Failed to convert file: {res.command}")
+            logger.error(res.output)
+            sys.exit(1)
+
+    # Join files per cycle
+    with ThreadPoolExecutor(max_workers=jobs) as executor:
+        futures = []
+        for c in cycles:
+            cycle_files_list = [
+                out for key in names for _, out in cycle_files[c.index][key]
+            ]
+            if not cycle_files_list:
+                continue
+
+            print(cycle_files_list)
+
+            futures.append(
+                executor.submit(
+                    observations.join_obs_seq,
+                    exp.cfg,
+                    cycle_files_list,
+                    obs_path / f"cycle_{c.index}.obs_seq",
+                    [v.kind for v in obs_groups.values()],
+                )
+            )
+
+        for future in futures:
+            future.result()
+
+    # Remove temporary files
+    for c in cycles:
+        for key in names:
+            for _, out in cycle_files[c.index][key]:
+                out.unlink()
 
 
 @observations_cli.command()
