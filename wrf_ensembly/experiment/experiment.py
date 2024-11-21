@@ -147,12 +147,19 @@ class Experiment:
             )
 
         # Write the dataset to a netCDF file
-        perts.encoding = {var: {"zlib": True} for var in perts.data_vars}
+        encoding = {
+            var: {"zlib": True, "complevel": 5, "dtype": "float32"}
+            for var in perts.data_vars
+        }
+        # Set chunksize for all variables: 1 on member and time, full size on rest
+        for var in perts.data_vars:
+            chunks = [1, 1] + [s for s in perts[var].shape[2:]]
+            encoding[var]["chunksizes"] = chunks
         perts.attrs["experiment_name"] = self.cfg.metadata.name
         perts.attrs["cycle"] = cycle_i
 
         logger.info(f"Writing perturbations for {cycle_i} to {pert_file}")
-        perts.to_netcdf(pert_file)
+        perts.to_netcdf(pert_file, encoding=encoding)
 
     def apply_perturbations(self, member_i: int):
         """
