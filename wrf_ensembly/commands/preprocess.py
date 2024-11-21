@@ -228,7 +228,11 @@ def real(experiment_path: Path, cycle: int, cores):
 
     # Generate namelist
     wrf.generate_wrf_namelist(
-        exp.cfg, exp.cycles[cycle], False, wrf_dir / "namelist.input"
+        exp.cfg,
+        exp.cycles[cycle],
+        False,
+        wrf_dir / "namelist.input",
+        add_iofields=False,
     )
     logger.info(f"Generated namelist at {wrf_dir / 'namelist.input'}")
 

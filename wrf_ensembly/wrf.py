@@ -135,6 +135,7 @@ def generate_wrf_namelist(
     path: Path,
     member: Optional[int] = None,
     paths: Optional[ExperimentPaths] = None,
+    add_iofields: bool = True,
 ):
     """
     Generates the WRF namelist for the experiment and a specific cycle, at the given path.
@@ -151,6 +152,7 @@ def generate_wrf_namelist(
                 variable will be set to the member's scratch directory and any overrides in the configuration
                 will be applied. Omit this parameter when generating a namelist for preprocessing/real.exe.
         paths: Paths of the experiment, required if member is set.
+        add_iofields: If True, the iofields.txt file will be generated if the config has runtime_io set. Use only for wrf.exe, not real.exe.
     """
 
     if member is not None and paths is None:
@@ -194,7 +196,11 @@ def generate_wrf_namelist(
         ] = f"{wrfout_dest}/wrfout_d<domain>_<date>"
 
     # Add iofields
-    if cfg.time_control.runtime_io is not None and len(cfg.time_control.runtime_io) > 0:
+    if (
+        add_iofields
+        and cfg.time_control.runtime_io is not None
+        and len(cfg.time_control.runtime_io) > 0
+    ):
         wrf_namelist["time_control"]["iofields_filename"] = "iofields.txt"
         wrf_namelist["time_control"]["ignore_iofields_warning"] = False
 
