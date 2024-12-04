@@ -392,6 +392,19 @@ def concatenate(
             )
         )
 
+    # Concatenate per-member if enabled
+    if exp.cfg.postprocess.keep_per_member:
+        for i in range(exp.cfg.assimilation.n_members):
+            forecast_files = list(
+                scratch_forecast_dir.glob(f"member_{i:02d}/wrfout*_post")
+            )
+            commands.append(
+                nco.concatenate(
+                    forecast_files,
+                    forecast_dir / f"forecast_member_{i:02d}_cycle_{cycle:03d}.nc",
+                )
+            )
+
     failure = False
     logger.info(
         f"Executing {len(commands)} nco commands in parallel, using {jobs} jobs"

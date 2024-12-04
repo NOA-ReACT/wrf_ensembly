@@ -315,6 +315,12 @@ class PostprocessConfig:
     per member.
     """
 
+    keep_per_member: bool = False
+    """
+    Set to true to also concatenate per_member files when running the `concatenate` command.
+    If enabled, you will get a `forecast_mean`, `forecast_sd` and `forecast_member_{d}` file for each cycle.
+    """
+
     wrf_post_cores: int = 1
     """How many cores to use for the `wrf-post` step"""
 
