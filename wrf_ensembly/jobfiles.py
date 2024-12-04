@@ -228,13 +228,19 @@ def generate_postprocess_jobfile(
         base_cmd.replace("%SUBCOMMAND%", "apply-scripts").replace(
             "%JOBS%", str(exp.cfg.postprocess.apply_scripts_cores)
         ),
-        base_cmd.replace("%SUBCOMMAND%", "statistics").replace(
-            "%JOBS%", str(exp.cfg.postprocess.statistics_cores)
-        ),
+    ]
+    if exp.cfg.postprocess.compute_ensemble_statistics_in_job:
+        commands.append(
+            base_cmd.replace("%SUBCOMMAND%", "statistics").replace(
+                "%JOBS%", str(exp.cfg.postprocess.statistics_cores)
+            )
+        )
+    commands.append(
         base_cmd.replace("%SUBCOMMAND%", "concatenate").replace(
             "%JOBS%", str(exp.cfg.postprocess.concatenate_cores)
-        ),
-    ]
+        )
+    )
+
     if clean:
         commands.append(base_cmd.replace("%SUBCOMMAND%", "clean"))
 

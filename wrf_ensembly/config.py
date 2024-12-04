@@ -306,6 +306,15 @@ class PostprocessConfig:
     # - {c} cycle number
     # """
 
+    compute_ensemble_statistics_in_job: bool = True
+    """
+    Set this to false to disable the computation of mean/spread for each cycle when
+    using slurm jobs.
+
+    Useful when running 1-member experiments or sensitivity studies with different parameters
+    per member.
+    """
+
     wrf_post_cores: int = 1
     """How many cores to use for the `wrf-post` step"""
 
