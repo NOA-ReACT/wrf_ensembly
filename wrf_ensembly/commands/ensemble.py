@@ -33,17 +33,25 @@ def setup(experiment_path: Path):
     for i in range(exp.cfg.assimilation.n_members):
         member_dir = exp.paths.member_path(i)
 
+        # First check if there are member-specific IC/BC files, otherwise use the same
+        # for all members
+        ic_file = exp.paths.data_icbc / f"wrfinput_d01_member_{i:02d}_cycle_0"
+        if ic_file.exists():
+            logger.info(f"Member {i}: Using member-specific IC file {ic_file}")
+        else:
+            ic_file = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
+
+        bc_file = exp.paths.data_icbc / f"wrfbdy_d01_member_{i:02d}_cycle_0"
+        if bc_file.exists():
+            logger.info(f"Member {i}: Using member-specific BC file {bc_file}")
+        else:
+            bc_file = exp.paths.data_icbc / "wrfbdy_d01_cycle_0"
+
         # Copy initial and boundary conditions
-        utils.copy(
-            exp.paths.data_icbc / "wrfinput_d01_cycle_0",
-            member_dir / "wrfinput_d01",
-        )
+        utils.copy(ic_file, member_dir / "wrfinput_d01")
         logger.info(f"Member {i}: Copied wrfinput_d01")
 
-        utils.copy(
-            exp.paths.data_icbc / "wrfbdy_d01_cycle_0",
-            member_dir / "wrfbdy_d01",
-        )
+        utils.copy(bc_file, member_dir / "wrfbdy_d01")
         logger.info(f"Member {i}: Copied wrfbdy_d01_cycle_0")
 
 

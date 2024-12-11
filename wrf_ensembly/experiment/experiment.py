@@ -473,8 +473,27 @@ class Experiment:
         logger.info(f"Using {analysis_file} as analysis for member {member_i}")
 
         # Copy the initial & boundary condition files for the next cycle, as is
-        icbc_file = self.paths.data_icbc / f"wrfinput_d01_cycle_{next_cycle_i}"
-        bdy_file = self.paths.data_icbc / f"wrfbdy_d01_cycle_{next_cycle_i}"
+        # First check if there is a member-specific IC/BC file for the next cycle,
+        # otherwise use the ensemble default
+        icbc_file = (
+            self.paths.data_icbc
+            / f"wrfinput_d01_member_{member_i:02d}_cycle_{next_cycle_i}"
+        )
+        if icbc_file.exists():
+            logger.info(f"Using member-specific IC/BC file {icbc_file}")
+        else:
+            icbc_file = self.paths.data_icbc / f"wrfinput_d01_cycle_{next_cycle_i}"
+
+        # First check if there is a member-specific BC file for the next cycle,
+        # otherwise use the ensemble default
+        bdy_file = (
+            self.paths.data_icbc
+            / f"wrfbdy_d01_member_{member_i:02d}_cycle_{next_cycle_i}"
+        )
+        if bdy_file.exists():
+            logger.info(f"Using member-specific BC file {bdy_file}")
+        else:
+            bdy_file = self.paths.data_icbc / f"wrfbdy_d01_cycle_{next_cycle_i}"
 
         icbc_target_file = member_path / "wrfinput_d01"
         bdy_target_file = member_path / "wrfbdy_d01"
