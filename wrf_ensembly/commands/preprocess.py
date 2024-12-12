@@ -7,10 +7,29 @@ from typing import Optional
 
 import click
 
-from wrf_ensembly import external, utils, wrf
+from wrf_ensembly import config, external, utils, wrf
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly import experiment
+
+
+def check_is_member_option_is_required(
+    ctx: click.Context, param: click.Parameter, value: Optional[int]
+) -> Optional[int]:
+    """
+    Click option callback to check if --member is required
+
+    If you use `per_member_meteorology` in the configuration, you need to run the pre-processing
+    steps once for each member, thus you also need to specify the member number.
+    """
+
+    cfg_path = ctx.obj["experiment_path"] / "config.toml"
+    cfg = config.read_config(cfg_path)
+    if cfg.data.per_member_meteorology and value is None:
+        raise click.BadParameter(
+            "You need to specify the --member option when using per_member_meteorology"
+        )
+    return value
 
 
 @click.group(name="preprocess")
@@ -91,8 +110,14 @@ def geogrid(experiment_path: Path):
 
 
 @preprocess_cli.command()
+@click.option(
+    "--member",
+    type=int,
+    callback=check_is_member_option_is_required,
+    help="When using different IC/BC for each member, which member to ungrib",
+)
 @pass_experiment_path
-def ungrib(experiment_path: Path):
+def ungrib(experiment_path: Path, member: Optional[int]):
     """
     Runs ungrib.exe for the experiment, after linking the grib files into the WPS directory
     """
@@ -101,7 +126,15 @@ def ungrib(experiment_path: Path):
     exp = experiment.Experiment(experiment_path)
     exp.set_wrf_environment()
     wps_dir = exp.paths.work_preprocessing_wps
-    data_dir = exp.cfg.data.meteorology.resolve()
+
+    if exp.cfg.data.per_member_meteorology:
+        data_dir = exp.cfg.data.meteorology.resolve()
+        data_dir = exp.cfg.data.meteorology.parent / data_dir.name.replace(
+            "%MEMBER%", f"{member:02d}"
+        )
+        logger.info(f"Using meteorology data for member {member} at {data_dir}")
+    else:
+        data_dir = exp.cfg.data.meteorology.resolve()
 
     for f in chain(
         wps_dir.glob("FILE:*"), wps_dir.glob("PFILE:*"), wps_dir.glob("GRIBFILE.*")
@@ -193,8 +226,14 @@ def metgrid(experiment_path: Path, force: bool):
 @click.option(
     "--cores", type=int, help="Number of cores to use for real.exe", default=None
 )
+@click.option(
+    "--member",
+    type=int,
+    callback=check_is_member_option_is_required,
+    help="When using different IC/BC for each member, which member to process",
+)
 @pass_experiment_path
-def real(experiment_path: Path, cycle: int, cores):
+def real(experiment_path: Path, cycle: int, cores, member: Optional[int]):
     """
     Run real.exe to produce the initial (wrfinput) and boundary (wrfbdy) conditions the
     given CYCLE. You should run this for all cycles to have initial/boundary conditions for
@@ -287,16 +326,16 @@ def real(experiment_path: Path, cycle: int, cores):
 
     data_dir = exp.paths.data_icbc
     data_dir.mkdir(parents=True, exist_ok=True)
-    shutil.move(
-        wrf_dir / "wrfinput_d01",
-        data_dir / f"wrfinput_d01_cycle_{cycle}",
-    )
-    logger.info(f"Moved wrfinput_d01 to {data_dir}")
-    shutil.move(
-        wrf_dir / "wrfbdy_d01",
-        data_dir / f"wrfbdy_d01_cycle_{cycle}",
-    )
-    logger.info(f"Moved wrfbdy_d01 to {data_dir}")
+    if exp.cfg.data.per_member_meteorology:
+        wrfinput_path = data_dir / f"wrfinput_d01_member_{member:02d}_cycle_{cycle}"
+        wrfbdy_path = data_dir / f"wrfbdy_d01_member_{member:02d}_cycle_{cycle}"
+    else:
+        wrfinput_path = data_dir / f"wrfinput_d01_cycle_{cycle}"
+        wrfbdy_path = data_dir / f"wrfbdy_d01_cycle_{cycle}"
+    shutil.move(wrf_dir / "wrfinput_d01", wrfinput_path)
+    logger.info(f"Moved wrfinput_d01 to {wrfinput_path}")
+    shutil.move(wrf_dir / "wrfbdy_d01", wrfbdy_path)
+    logger.info(f"Moved wrfbdy_d01 to {wrfbdy_path}")
 
     shutil.copyfile(
         wrf_dir / "namelist.input", data_dir / f"namelist.input_cycle_{cycle}"
@@ -307,8 +346,14 @@ def real(experiment_path: Path, cycle: int, cores):
 @click.option(
     "--jobs", type=int, help="Number of processes to use (also respects SLURM_NTASKS)"
 )
+@click.option(
+    "--member",
+    type=int,
+    callback=check_is_member_option_is_required,
+    help="When using different IC/BC for each member, which member to process",
+)
 @pass_experiment_path
-def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
+def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optional[int]):
     """
     Uses `interpolator-for-wrfchem` to interpolate the chemical initial conditions onto the WRF domain.
 
@@ -341,7 +386,12 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
     commands = []
 
     met_em_path = exp.paths.work_preprocessing_wps
-    wrfinput_path = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
+    if exp.cfg.data.per_member_meteorology:
+        wrfinput_path = (
+            exp.paths.data_icbc / f"wrfinput_d01_member_{member:02d}_cycle_0"
+        )
+    else:
+        wrfinput_path = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
     commands.append(
         external.ExternalProcess(
             [
@@ -356,7 +406,13 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
         )
     )
     for cycle in exp.cycles:
-        wrfbdy_path = exp.paths.data_icbc / f"wrfbdy_d01_cycle_{cycle.index}"
+        if exp.cfg.data.per_member_meteorology:
+            wrfbdy_path = (
+                exp.paths.data_icbc
+                / f"wrfbdy_d01_member_{member:02d}_cycle_{cycle.index}"
+            )
+        else:
+            wrfbdy_path = exp.paths.data_icbc / f"wrfbdy_d01_cycle_{cycle.index}"
         commands.append(
             external.ExternalProcess(
                 [

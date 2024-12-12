@@ -156,7 +156,17 @@ class DataConfig:
     """Where the WPS_GEOG data is stored, should point to a directory"""
 
     meteorology: Path
-    """Where the meteorological fields GRIB data is stored, should point to a directory"""
+    """
+    Where the meteorological fields GRIB data is stored, should point to a directory
+    See also `per_member_meteorology`.
+    """
+
+    per_member_meteorology: bool = False
+    """
+    Whether to have a separate meteorology directory for each ensemble member. If true, then
+    the `meteorology` field should contain the %MEMBER% placeholder for the member number.
+    For example, `/path/to/data/meteorology/member_%MEMBER%`.
+    """
 
     chemistry: Optional[ChemistryDataConfig] = None
     """Configuration about the chemistry data used in the experiment"""
