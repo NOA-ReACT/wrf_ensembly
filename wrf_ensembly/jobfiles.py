@@ -17,7 +17,7 @@ def _build_command(base_cmd: str, subcommand: str, **kwargs) -> str:
 
     cmd = base_cmd.format(subcommand=subcommand)
     if kwargs:
-        cmd += " " + " ".join(f"--{k.replace("_", '-')} {v}" for k, v in kwargs.items())
+        cmd += " " + " ".join(f"--{k.replace('_', '-')} {v}" for k, v in kwargs.items())
     return cmd
 
 
