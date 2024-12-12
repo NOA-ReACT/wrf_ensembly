@@ -58,6 +58,12 @@ def xwrf_post(
         # Compute more diagnostics and destagger
         ds = ds.xwrf.postprocess().xwrf.destagger()
 
+        # Fix time dimension
+        ds = ds.drop_vars("Time")
+        ds = ds.rename({"XTIME": "t"})
+        ds = ds.set_xindex("t")
+        ds = ds.swap_dims({"Time": "t"})
+
         # Since the projection object is not serialisable, we need to drop it before saving
         ds = ds.drop_vars("wrf_projection")
 
