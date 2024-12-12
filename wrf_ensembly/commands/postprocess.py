@@ -400,7 +400,7 @@ def concatenate(
             )
             commands.append(
                 nco.concatenate(
-                    forecast_files,
+                    sorted(forecast_files),
                     forecast_dir / f"forecast_member_{i:02d}_cycle_{cycle:03d}.nc",
                 )
             )
