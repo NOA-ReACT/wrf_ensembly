@@ -327,8 +327,16 @@ def real(experiment_path: Path, cycle: int, cores, member: Optional[int]):
     data_dir = exp.paths.data_icbc
     data_dir.mkdir(parents=True, exist_ok=True)
     if exp.cfg.data.per_member_meteorology:
-        wrfinput_path = data_dir / f"wrfinput_d01_member_{member:02d}_cycle_{cycle}"
-        wrfbdy_path = data_dir / f"wrfbdy_d01_member_{member:02d}_cycle_{cycle}"
+        wrfinput_path = (
+            data_dir
+            / f"member_{member:02d}"
+            / f"wrfinput_d01_member_{member:02d}_cycle_{cycle}"
+        )
+        wrfbdy_path = (
+            data_dir
+            / f"member_{member:02d}"
+            / f"wrfbdy_d01_member_{member:02d}_cycle_{cycle}"
+        )
     else:
         wrfinput_path = data_dir / f"wrfinput_d01_cycle_{cycle}"
         wrfbdy_path = data_dir / f"wrfbdy_d01_cycle_{cycle}"

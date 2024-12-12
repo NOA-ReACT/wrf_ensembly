@@ -35,13 +35,21 @@ def setup(experiment_path: Path):
 
         # First check if there are member-specific IC/BC files, otherwise use the same
         # for all members
-        ic_file = exp.paths.data_icbc / f"wrfinput_d01_member_{i:02d}_cycle_0"
+        ic_file = (
+            exp.paths.data_icbc
+            / f"member_{i:02d}"
+            / f"wrfinput_d01_member_{i:02d}_cycle_0"
+        )
         if ic_file.exists():
             logger.info(f"Member {i}: Using member-specific IC file {ic_file}")
         else:
             ic_file = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
 
-        bc_file = exp.paths.data_icbc / f"wrfbdy_d01_member_{i:02d}_cycle_0"
+        bc_file = (
+            exp.paths.data_icbc
+            / f"member_{i:02d}"
+            / f"wrfbdy_d01_member_{i:02d}_cycle_0"
+        )
         if bc_file.exists():
             logger.info(f"Member {i}: Using member-specific BC file {bc_file}")
         else:

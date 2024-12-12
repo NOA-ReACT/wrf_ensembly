@@ -477,6 +477,7 @@ class Experiment:
         # otherwise use the ensemble default
         icbc_file = (
             self.paths.data_icbc
+            / f"member_{member_i:02d}"
             / f"wrfinput_d01_member_{member_i:02d}_cycle_{next_cycle_i}"
         )
         if icbc_file.exists():
@@ -488,6 +489,7 @@ class Experiment:
         # otherwise use the ensemble default
         bdy_file = (
             self.paths.data_icbc
+            / f"member_{member_i:02d}"
             / f"wrfbdy_d01_member_{member_i:02d}_cycle_{next_cycle_i}"
         )
         if bdy_file.exists():
