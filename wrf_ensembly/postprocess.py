@@ -63,9 +63,35 @@ def xwrf_post(
         ds = ds.rename({"XTIME": "t"})
         ds = ds.set_xindex("t")
         ds = ds.swap_dims({"Time": "t"})
+        ds.t.attrs["standard_name"] = "time"
+        ds.t.attrs["axis"] = "T"
 
         # Since the projection object is not serialisable, we need to drop it before saving
         ds = ds.drop_vars("wrf_projection")
+
+        # Fix some attributes:
+        # 1) remove grid_mapping because we drop `wrf_projection`
+        # 2) for de-staggered variables, rename coordinates
+        # 3) Remove CLAT from coordinates
+        coordinate_mappings = {
+            "XLONG_U": "XLONG",
+            "XLAT_U": "XLAT",
+            "XLONG_V": "XLONG",
+            "XLAT_V": "XLAT",
+            "XTIME": "",
+        }
+        for var in ds.data_vars:
+            if "grid_mapping" in ds[var].attrs:
+                del ds[var].attrs["grid_mapping"]
+            if "coordinates" in ds[var].encoding:
+                coordinates: str = ds[var].encoding["coordinates"]
+                for k, v in coordinate_mappings.items():
+                    coordinates = coordinates.replace(k, v)
+                coordinates = coordinates.replace("CLAT", "").strip()
+                ds[var].encoding["coordinates"] = coordinates
+
+        # Remove unused coordinate variables
+        ds = ds.drop("CLAT")
 
         # Filter variables if needed
         if variables_to_keep:
