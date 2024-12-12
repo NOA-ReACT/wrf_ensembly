@@ -222,7 +222,7 @@ def metgrid(experiment_path: Path, force: bool):
 
 
 @preprocess_cli.command()
-@click.argument("cycle", required=True, type=int)
+@click.option("--cycle", required=True, type=int, help="Which cycle to run real for")
 @click.option(
     "--cores", type=int, help="Number of cores to use for real.exe", default=None
 )

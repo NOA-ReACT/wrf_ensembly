@@ -151,7 +151,7 @@ def update_bc(experiment_path: Path, jobs: Optional[int]):
 
 
 @ensemble_cli.command()
-@click.argument("member", type=int)
+@click.option("--member", required=True, type=int, help="Which member to advance")
 @click.option(
     "--cores",
     type=int,
