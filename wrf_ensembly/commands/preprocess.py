@@ -393,7 +393,9 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optiona
     met_em_path = exp.paths.work_preprocessing_wps
     if exp.cfg.data.per_member_meteorology:
         wrfinput_path = (
-            exp.paths.data_icbc / f"wrfinput_d01_member_{member:02d}_cycle_0"
+            exp.paths.data_icbc
+            / f"member_{member:02d}"
+            / f"wrfinput_d01_member_{member:02d}_cycle_0"
         )
     else:
         wrfinput_path = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
@@ -414,6 +416,7 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optiona
         if exp.cfg.data.per_member_meteorology:
             wrfbdy_path = (
                 exp.paths.data_icbc
+                / f"member_{member:02d}"
                 / f"wrfbdy_d01_member_{member:02d}_cycle_{cycle.index}"
             )
         else:
