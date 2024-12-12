@@ -7,10 +7,9 @@ from typing import Optional
 
 import click
 
-from wrf_ensembly import config, external, utils, wrf
+from wrf_ensembly import config, experiment, external, utils, wrf
 from wrf_ensembly.click_utils import pass_experiment_path
 from wrf_ensembly.console import logger
-from wrf_ensembly import experiment
 
 
 def check_is_member_option_is_required(
@@ -340,14 +339,12 @@ def real(experiment_path: Path, cycle: int, cores, member: Optional[int]):
     else:
         wrfinput_path = data_dir / f"wrfinput_d01_cycle_{cycle}"
         wrfbdy_path = data_dir / f"wrfbdy_d01_cycle_{cycle}"
-    shutil.move(wrf_dir / "wrfinput_d01", wrfinput_path)
+    utils.move(wrf_dir / "wrfinput_d01", wrfinput_path)
     logger.info(f"Moved wrfinput_d01 to {wrfinput_path}")
-    shutil.move(wrf_dir / "wrfbdy_d01", wrfbdy_path)
+    utils.move(wrf_dir / "wrfbdy_d01", wrfbdy_path)
     logger.info(f"Moved wrfbdy_d01 to {wrfbdy_path}")
 
-    shutil.copyfile(
-        wrf_dir / "namelist.input", data_dir / f"namelist.input_cycle_{cycle}"
-    )
+    utils.copy(wrf_dir / "namelist.input", data_dir / f"namelist.input_cycle_{cycle}")
 
 
 @preprocess_cli.command()

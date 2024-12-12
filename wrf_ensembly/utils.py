@@ -59,6 +59,22 @@ def copy(src: Path, dest: Path, ensure_dest_parent_exists=True):
     shutil.copy(src, dest)
 
 
+def move(src: Path, dest: Path, ensure_dest_parent_exists=True):
+    """
+    Moves the file from `src` to `dest` using `shutil.move` and logs the operation.
+
+    Args:
+        src: Source file
+        dest: Destination file.
+        ensure_dest_parent_exists: Whether to create the parent directory of `dest` if it doesn't exist.
+    """
+
+    logger.debug(f"Moving {src} to {dest}")
+    if ensure_dest_parent_exists:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(src, dest)
+
+
 @contextmanager
 def atomic_binary_open(path: Path, mode="wb"):
     """
