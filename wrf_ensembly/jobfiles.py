@@ -5,6 +5,22 @@ from wrf_ensembly import experiment, templates
 from wrf_ensembly.console import logger
 
 
+def _build_command(base_cmd: str, subcommand: str, **kwargs) -> str:
+    """
+    Helper to construct command strings with consistent formatting.
+
+    Args:
+        base_cmd: The base command string the {{subcommand}} placeholder.
+        subcommand: The subcommand to be inserted into the base command.
+        **kwargs: Additional keyword arguments to be appended as command options (`--key value`). Any underscores in the key will be replaced with hyphens.
+    """
+
+    cmd = base_cmd.format(subcommand=subcommand)
+    if kwargs:
+        cmd += " " + " ".join(f"--{k.replace("_", '-')} {v}" for k, v in kwargs.items())
+    return cmd
+
+
 def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
     """
     Generate a SLURM jobfile to run the preprocessing steps (WPS and real).
@@ -15,40 +31,36 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
 
     exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
 
-    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} preprocess %SUBCOMMAND%"
+    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} preprocess {{subcommand}}"
     commands = [
-        base_cmd.replace("%SUBCOMMAND%", "setup"),
-        base_cmd.replace("%SUBCOMMAND%", "geogrid"),
+        _build_command(base_cmd, "setup"),
+        _build_command(base_cmd, "geogrid"),
     ]
 
     if exp.cfg.data.per_member_meteorology:
         commands.append(f"for MEMBER in {{0..{len(exp.members) - 1}}}; do")
-        commands.append(
-            base_cmd.replace("%SUBCOMMAND%", "ungrib") + " --member $MEMBER"
-        )
-        commands.append(base_cmd.replace("%SUBCOMMAND%", "metgrid"))
+        commands.append(_build_command(base_cmd, "ungrib", member="$MEMBER"))
+        commands.append(_build_command(base_cmd, "metgrid"))
         commands.extend(
             [
-                base_cmd.replace("%SUBCOMMAND%", "real") + f" {cycle} --member $MEMBER"
+                _build_command(base_cmd, "real", cycle=cycle, member="$MEMBER")
                 for cycle in range(len(exp.cycles))
             ]
         )
-        commands.append(
-            base_cmd.replace("%SUBCOMMAND%", "interpolate-chem") + " --member $MEMBER"
-        )
+        commands.append(_build_command(base_cmd, "interpolate-chem", member="$MEMBER"))
         commands.append("done")
     else:
         commands.extend(
             [
-                base_cmd.replace("%SUBCOMMAND%", "ungrib"),
-                base_cmd.replace("%SUBCOMMAND%", "metgrid"),
+                _build_command(base_cmd, "ungrib"),
+                _build_command(base_cmd, "metgrid"),
             ]
             + [
-                base_cmd.replace("%SUBCOMMAND%", "real") + f" {cycle}"
+                _build_command(base_cmd, "real", cycle=cycle)
                 for cycle in range(len(exp.cycles))
             ]
             + [
-                base_cmd.replace("%SUBCOMMAND%", "interpolate-chem"),
+                _build_command(base_cmd, "interpolate-chem"),
             ]
         )
 
@@ -106,7 +118,7 @@ def generate_advance_jobfiles(exp: experiment.Experiment) -> list[Path]:
                 "slurm_job.sh.j2",
                 slurm_directives=exp.cfg.slurm.directives_large | dynamic_directives,
                 env_modules=exp.cfg.slurm.env_modules,
-                commands=[f"{base_cmd} {i}"],
+                commands=[_build_command(base_cmd, "", i=i)],
                 pre_commands=exp.cfg.slurm.pre_commands,
             )
         )
@@ -163,24 +175,24 @@ def generate_make_analysis_jobfile(
         "output": f"{exp.paths.logs_slurm.resolve()}/%j-analysis_cycle_{cycle}.out",
     }
 
-    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path} ensemble %SUBCOMMAND%"
+    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path} ensemble {{subcommand}}"
     commands = [
         f"if [ -f {obs_file} ]; then",
-        base_cmd.replace("%SUBCOMMAND%", "filter"),
-        base_cmd.replace("%SUBCOMMAND%", "analysis"),
-        base_cmd.replace("%SUBCOMMAND%", "cycle"),
+        _build_command(base_cmd, "filter"),
+        _build_command(base_cmd, "analysis"),
+        _build_command(base_cmd, "cycle"),
         "else",
-        base_cmd.replace("%SUBCOMMAND%", "cycle") + " --use-forecast",
+        _build_command(base_cmd, "cycle", use_forecast=True),
         "fi",
     ]
     if exp.cfg.perturbations.apply_perturbations_every_cycle:
         commands += [
             f"if [ -f {pert_file} ]; then",
-            base_cmd.replace("%SUBCOMMAND%", "apply-perturbations"),
+            _build_command(base_cmd, "apply-perturbations"),
             "fi",
         ]
     commands += [
-        base_cmd.replace("%SUBCOMMAND%", "update-bc"),
+        _build_command(base_cmd, "update-bc"),
     ]
 
     if queue_next_cycle:
@@ -240,29 +252,27 @@ def generate_postprocess_jobfile(
         "output": f"{exp.paths.logs_slurm.resolve()}/%j-postprocess.out",
     }
 
-    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} postprocess %SUBCOMMAND% --cycle {cycle} --jobs %JOBS%"
+    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} postprocess {{subcommand}} --cycle {cycle} --jobs {{jobs}}"
     commands = [
-        base_cmd.replace("%SUBCOMMAND%", "wrf-post").replace(
-            "%JOBS%", str(exp.cfg.postprocess.wrf_post_cores)
-        ),
-        base_cmd.replace("%SUBCOMMAND%", "apply-scripts").replace(
-            "%JOBS%", str(exp.cfg.postprocess.apply_scripts_cores)
+        _build_command(base_cmd, "wrf-post", jobs=exp.cfg.postprocess.wrf_post_cores),
+        _build_command(
+            base_cmd, "apply-scripts", jobs=exp.cfg.postprocess.apply_scripts_cores
         ),
     ]
     if exp.cfg.postprocess.compute_ensemble_statistics_in_job:
         commands.append(
-            base_cmd.replace("%SUBCOMMAND%", "statistics").replace(
-                "%JOBS%", str(exp.cfg.postprocess.statistics_cores)
+            _build_command(
+                base_cmd, "statistics", jobs=exp.cfg.postprocess.statistics_cores
             )
         )
     commands.append(
-        base_cmd.replace("%SUBCOMMAND%", "concatenate").replace(
-            "%JOBS%", str(exp.cfg.postprocess.concatenate_cores)
+        _build_command(
+            base_cmd, "concatenate", jobs=exp.cfg.postprocess.concatenate_cores
         )
     )
 
     if clean:
-        commands.append(base_cmd.replace("%SUBCOMMAND%", "clean"))
+        commands.append(_build_command(base_cmd, "clean"))
 
     jobfile.write_text(
         templates.generate(
