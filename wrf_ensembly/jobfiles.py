@@ -252,22 +252,33 @@ def generate_postprocess_jobfile(
         "output": f"{exp.paths.logs_slurm.resolve()}/%j-postprocess.out",
     }
 
-    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} postprocess {{subcommand}} --cycle {cycle} --jobs {{jobs}}"
+    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} postprocess {{subcommand}}"
     commands = [
-        _build_command(base_cmd, "wrf-post", jobs=exp.cfg.postprocess.wrf_post_cores),
         _build_command(
-            base_cmd, "apply-scripts", jobs=exp.cfg.postprocess.apply_scripts_cores
+            base_cmd, "wrf-post", cycle=cycle, jobs=exp.cfg.postprocess.wrf_post_cores
+        ),
+        _build_command(
+            base_cmd,
+            "apply-scripts",
+            cycle=cycle,
+            jobs=exp.cfg.postprocess.apply_scripts_cores,
         ),
     ]
     if exp.cfg.postprocess.compute_ensemble_statistics_in_job:
         commands.append(
             _build_command(
-                base_cmd, "statistics", jobs=exp.cfg.postprocess.statistics_cores
+                base_cmd,
+                "statistics",
+                cycle=cycle,
+                jobs=exp.cfg.postprocess.statistics_cores,
             )
         )
     commands.append(
         _build_command(
-            base_cmd, "concatenate", jobs=exp.cfg.postprocess.concatenate_cores
+            base_cmd,
+            "concatenate",
+            cycle=cycle,
+            jobs=exp.cfg.postprocess.concatenate_cores,
         )
     )
 
