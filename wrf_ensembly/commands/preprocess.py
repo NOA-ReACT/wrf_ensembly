@@ -77,9 +77,9 @@ def geogrid(experiment_path: Path):
     exp.set_wrf_environment()
     wps_dir = exp.paths.work_preprocessing_wps
 
-    if (wps_dir / "geo_em.d01.nc").exists():
-        logger.warning("geo_em.d01.nc already exists, skipping geogrid.exe")
-        sys.exit(1)
+    # Remove old geo_em file if it exists
+    geo_em = wps_dir / "geo_em.d01.nc"
+    geo_em.unlink(missing_ok=True)
 
     # Link the correct table
     if exp.cfg.geogrid.table is None:
