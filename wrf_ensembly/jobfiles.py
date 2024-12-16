@@ -118,7 +118,7 @@ def generate_advance_jobfiles(exp: experiment.Experiment) -> list[Path]:
                 "slurm_job.sh.j2",
                 slurm_directives=exp.cfg.slurm.directives_large | dynamic_directives,
                 env_modules=exp.cfg.slurm.env_modules,
-                commands=[_build_command(base_cmd, "", i=i)],
+                commands=[_build_command(base_cmd, "", member=i)],
                 pre_commands=exp.cfg.slurm.pre_commands,
             )
         )
