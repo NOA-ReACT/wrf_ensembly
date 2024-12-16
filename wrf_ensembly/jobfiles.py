@@ -1,8 +1,15 @@
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from wrf_ensembly import experiment, templates
 from wrf_ensembly.console import logger
+
+
+def _key_value_to_argument(key: str, value: Any) -> str:
+    key = key.replace("_", "-")
+    if isinstance(value, bool) and value:
+        return f"--{key}" if value else ""
+    return f"--{key} {value}"
 
 
 def _build_command(base_cmd: str, subcommand: str, **kwargs) -> str:
@@ -17,7 +24,7 @@ def _build_command(base_cmd: str, subcommand: str, **kwargs) -> str:
 
     cmd = base_cmd.format(subcommand=subcommand)
     if kwargs:
-        cmd += " " + " ".join(f"--{k.replace('_', '-')} {v}" for k, v in kwargs.items())
+        cmd += " " + " ".join(_key_value_to_argument(k, v) for k, v in kwargs.items())
     return cmd
 
 
