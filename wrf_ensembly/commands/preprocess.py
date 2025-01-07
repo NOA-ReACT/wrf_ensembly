@@ -183,11 +183,8 @@ def ungrib(experiment_path: Path, member: Optional[int]):
 
 
 @preprocess_cli.command()
-@click.option(
-    "--force", is_flag=True, help="Force metgrid to run even if met_em files exist"
-)
 @pass_experiment_path
-def metgrid(experiment_path: Path, force: bool):
+def metgrid(experiment_path: Path):
     """
     Run metgrid.exe to produce the `met_em*.nc` files.
     """
@@ -197,14 +194,9 @@ def metgrid(experiment_path: Path, force: bool):
     exp.set_wrf_environment()
     wps_dir = exp.paths.work_preprocessing_wps
 
-    if len(list(wps_dir.glob("met_em*.nc"))) > 0:
-        if not force:
-            logger.warning("met_em files seem to exist, skipping metgrid.exe")
-            sys.exit(0)
-        else:
-            for f in wps_dir.glob("met_em*.nc"):
-                logger.debug(f"Removing old met_em file {f}")
-                f.unlink()
+    for old_file in wps_dir.glob("met_em*.nc"):
+        logger.debug(f"Removing old met_em file {old_file}")
+        old_file.unlink()
 
     metgrid_path = wps_dir / "metgrid.exe"
     if not metgrid_path.is_file():
