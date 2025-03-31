@@ -75,9 +75,19 @@ class Experiment:
 
         # Make sure list is of the correct length and sorted correctly
         if len(self.members) != self.cfg.assimilation.n_members:
-            raise ValueError(
+            logger.warning(
                 f"Number of members in status file ({len(self.members)}) does not match configuration ({self.cfg.assimilation.n_members})"
             )
+            logger.warning("Changing status.toml to match configuration")
+
+            if len(self.members) > self.cfg.assimilation.n_members:
+                # Remove extra members
+                self.members = self.members[: self.cfg.assimilation.n_members]
+            else:
+                for i in range(len(self.members), self.cfg.assimilation.n_members):
+                    self.members.append(
+                        MemberStatus(i=i, advanced=False, runtime_statistics=[])
+                    )
         self.members.sort(key=lambda m: m.i)
 
     def write_status(self):
