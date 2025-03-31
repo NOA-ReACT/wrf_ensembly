@@ -10,7 +10,7 @@ packages = [{ include = "wrf_ensembly" }]
 wrf-ensembly = "wrf_ensembly:wrf_ensembly.cli"
 
 [tool.poetry.dependencies]
-python = "^3.11,<3.13"
+python = "^3.11,<3.14"
 netcdf4 = "^1.6.2"
 tomli = "^2.0.1"
 rich = "^13.3.5"
@@ -19,7 +19,7 @@ scipy = "^1.10.1"
 matplotlib = "^3.7.1"
 tomli-w = "^1.0.0"
 xarray = "^2023.5.0"
-cartopy = "^0.22.0"
+cartopy = "^0.24.1"
 pytest = "^7.4.3"
 click = "^8.1.7"
 setuptools = "^69.1.1"
