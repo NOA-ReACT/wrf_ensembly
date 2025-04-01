@@ -407,9 +407,16 @@ class Experiment:
         # Link wrfinput, required by filter to read coordinates
         wrfinput_path = dart_dir / "wrfinput_d01"
         wrfinput_path.unlink(missing_ok=True)
-        wrfinput_cur_cycle_path = (
-            self.paths.data_icbc / f"wrfinput_d01_cycle_{self.current_cycle_i}"
-        )
+        if self.cfg.data.per_member_meteorology:
+            wrfinput_cur_cycle_path = (
+                self.paths.data_icbc
+                / "member_00"
+                / f"wrfinput_d01_member_00_cycle_{self.current_cycle_i}"
+            )
+        else:
+            wrfinput_cur_cycle_path = (
+                self.paths.data_icbc / f"wrfinput_d01_cycle_{self.current_cycle_i}"
+            )
         wrfinput_path.symlink_to(wrfinput_cur_cycle_path)
         logger.info(f"Linked {wrfinput_path} to {wrfinput_cur_cycle_path}")
 
