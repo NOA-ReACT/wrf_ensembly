@@ -239,7 +239,10 @@ def preprocess_for_wrf(experiment_path: Path, backup: bool):
     exp.set_dart_environment()
 
     # Find a wrfinput file to get the domain
-    wrfinput = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
+    if exp.cfg.data.per_member_meteorology:
+        wrfinput = exp.paths.data_icbc / "member_00" / "wrfinput_d01_member_00_cycle_0"
+    else:
+        wrfinput = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
     if not wrfinput.exists():
         logger.error(f"wrfinput file not found at {wrfinput}")
         sys.exit(1)
