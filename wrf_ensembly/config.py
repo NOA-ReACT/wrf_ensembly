@@ -343,6 +343,18 @@ class PostprocessConfig:
     concatenate_cores: int = 1
     """How many cores to use for the `concatenate` step"""
 
+    cdo_path = "cdo"
+    """
+    Path to the CDO executable or command needed to run cdo (e.g. micromamba run cdo).
+    If not set, will use the one in the PATH environment variable.
+    """
+
+    ncrcat_cmd = "ncra"
+    """
+    Path to the NCO executable or command needed to run ncrcat (e.g. micromamba run ncrcat).
+    If not set, will use the one in the PATH environment variable.
+    """
+
     def __post_init__(self):
         """Validates the `script` field, making sure that all commands at least take the `{in}` and `{out}` placeholders."""
         for script in self.scripts:

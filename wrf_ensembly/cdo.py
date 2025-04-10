@@ -3,7 +3,9 @@ from pathlib import Path
 from wrf_ensembly.external import ExternalProcess
 
 
-def average(input_files: list[Path], output_file: Path) -> ExternalProcess:
+def average(
+    cdo_cmd: str, input_files: list[Path], output_file: Path
+) -> ExternalProcess:
     """
     Average a set of netCDF files using CDO
     You need to execute the returned object to run the command using external.run()
@@ -13,7 +15,7 @@ def average(input_files: list[Path], output_file: Path) -> ExternalProcess:
 
     return ExternalProcess(
         [
-            "cdo",
+            *cdo_cmd.split(" "),
             "-L",
             "-f",
             "nc4",
@@ -26,7 +28,9 @@ def average(input_files: list[Path], output_file: Path) -> ExternalProcess:
     )
 
 
-def standard_deviation(input_files: list[Path], output_file: Path) -> ExternalProcess:
+def standard_deviation(
+    cdo_cmd: str, input_files: list[Path], output_file: Path
+) -> ExternalProcess:
     """
     Calculate the standard deviation of a set of netCDF files using NCO
     You need to execute the returned object to run the command using external.run()
@@ -36,7 +40,7 @@ def standard_deviation(input_files: list[Path], output_file: Path) -> ExternalPr
 
     return ExternalProcess(
         [
-            "cdo",
+            *cdo_cmd.split(" "),
             "-L",
             "-f",
             "nc4",

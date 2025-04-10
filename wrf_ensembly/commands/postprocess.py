@@ -254,13 +254,21 @@ def statistics(
             "_post", "_mean"
         )
         analysis_mean_file.unlink(missing_ok=True)
-        commands.append(cdo.average(analysis_files, analysis_mean_file))
+        commands.append(
+            cdo.average(
+                exp.cfg.postprocess.cdo_path, analysis_files, analysis_mean_file
+            )
+        )
 
         analysis_sd_file = scratch_analysis_dir / analysis_files[0].name.replace(
             "_post", "_sd"
         )
         analysis_sd_file.unlink(missing_ok=True)
-        commands.append(cdo.standard_deviation(analysis_files, analysis_sd_file))
+        commands.append(
+            cdo.standard_deviation(
+                exp.cfg.postprocess.cdo_path, analysis_files, analysis_sd_file
+            )
+        )
     else:
         logger.warning("No analysis files found!")
 
@@ -355,6 +363,7 @@ def concatenate(
     if len(forecast_files) > 0:
         commands.append(
             nco.concatenate(
+                exp.cfg.postprocess.ncrcat_cmd,
                 forecast_files,
                 forecast_dir / f"forecast_mean_cycle_{cycle:03d}.nc",
                 cmp_args,
@@ -364,6 +373,7 @@ def concatenate(
     if len(forecast_files) > 0:
         commands.append(
             nco.concatenate(
+                exp.cfg.postprocess.ncrcat_cmd,
                 forecast_files,
                 forecast_dir / f"forecast_sd_cycle_{cycle:03d}.nc",
                 cmp_args,
@@ -377,6 +387,7 @@ def concatenate(
     if len(analysis_files) > 0:
         commands.append(
             nco.concatenate(
+                exp.cfg.postprocess.ncrcat_cmd,
                 analysis_files,
                 analysis_dir / f"analysis_mean_cycle_{cycle:03d}.nc",
                 cmp_args,
@@ -386,6 +397,7 @@ def concatenate(
     if len(analysis_files) > 0:
         commands.append(
             nco.concatenate(
+                exp.cfg.postprocess.ncrcat_cmd,
                 analysis_files,
                 analysis_dir / f"analysis_sd_cycle_{cycle:03d}.nc",
                 cmp_args,
@@ -400,8 +412,10 @@ def concatenate(
             )
             commands.append(
                 nco.concatenate(
+                    exp.cfg.postprocess.ncrcat_cmd,
                     sorted(forecast_files),
                     forecast_dir / f"forecast_member_{i:02d}_cycle_{cycle:03d}.nc",
+                    cmp_args,
                 )
             )
 
