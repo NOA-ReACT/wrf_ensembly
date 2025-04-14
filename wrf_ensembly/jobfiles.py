@@ -292,6 +292,21 @@ def generate_postprocess_jobfile(
     if clean:
         commands.append(_build_command(base_cmd, "clean"))
 
+    max_used_jobs = max(
+        exp.cfg.postprocess.wrf_post_cores,
+        exp.cfg.postprocess.apply_scripts_cores,
+        exp.cfg.postprocess.statistics_cores,
+        exp.cfg.postprocess.concatenate_cores,
+    )
+    if max_used_jobs < int(jobs):
+        logger.warning(
+            f"Number of SLURM tasks ({jobs}) is less than the maximum number of jobs used ({max_used_jobs})."
+        )
+    if max_used_jobs > int(jobs):
+        logger.warning(
+            f"Number of SLURM tasks ({jobs}) is greater than the maximum number of jobs used ({max_used_jobs})."
+        )
+
     jobfile.write_text(
         templates.generate(
             "slurm_job.sh.j2",
