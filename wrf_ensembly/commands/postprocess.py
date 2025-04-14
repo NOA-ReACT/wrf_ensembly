@@ -291,11 +291,19 @@ def statistics(
 
         forecast_mean_file = scratch_forecast_dir / name.replace("_post", "_mean")
         forecast_mean_file.unlink(missing_ok=True)
-        commands.append(cdo.average(forecast_files, forecast_mean_file))
+        commands.append(
+            cdo.average(
+                exp.cfg.postprocess.cdo_path, forecast_files, forecast_mean_file
+            )
+        )
 
         forecast_sd_file = scratch_forecast_dir / name.replace("_post", "_sd")
         forecast_sd_file.unlink(missing_ok=True)
-        commands.append(cdo.standard_deviation(forecast_files, forecast_sd_file))
+        commands.append(
+            cdo.standard_deviation(
+                exp.cfg.postprocess.cdo_path, forecast_files, forecast_sd_file
+            )
+        )
 
     # Execute commands
     failure = False
