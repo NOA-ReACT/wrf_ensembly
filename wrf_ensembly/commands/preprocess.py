@@ -8,7 +8,7 @@ from typing import Optional
 import click
 
 from wrf_ensembly import config, experiment, external, utils, wrf
-from wrf_ensembly.click_utils import pass_experiment_path
+from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 
 
@@ -31,7 +31,7 @@ def check_is_member_option_is_required(
     return value
 
 
-@click.group(name="preprocess")
+@click.group(name="preprocess", cls=GroupWithStartEndPrint)
 def preprocess_cli():
     pass
 

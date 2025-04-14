@@ -8,11 +8,11 @@ import click
 import netCDF4
 
 from wrf_ensembly import experiment, utils
-from wrf_ensembly.click_utils import pass_experiment_path
+from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 
 
-@click.group(name="ensemble")
+@click.group(name="ensemble", cls=GroupWithStartEndPrint)
 def ensemble_cli():
     pass
 

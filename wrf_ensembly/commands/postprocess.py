@@ -7,11 +7,11 @@ from typing import Optional
 import click
 
 from wrf_ensembly import experiment, external, nco, cdo, postprocess, utils
-from wrf_ensembly.click_utils import pass_experiment_path
+from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 
 
-@click.group(name="postprocess")
+@click.group(name="postprocess", cls=GroupWithStartEndPrint)
 def postprocess_cli():
     pass
 

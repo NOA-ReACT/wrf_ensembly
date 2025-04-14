@@ -10,11 +10,11 @@ from rich.console import Console
 from rich.table import Column, Table
 
 from wrf_ensembly import config, cycling, experiment, utils
-from wrf_ensembly.click_utils import pass_experiment_path
+from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 
 
-@click.group(name="experiment")
+@click.group(name="experiment", cls=GroupWithStartEndPrint)
 def experiment_cli():
     pass
 
