@@ -3,9 +3,9 @@ import shutil
 import sys
 from pathlib import Path
 from typing import Optional
+from importlib import resources
 
 import click
-import pkg_resources
 from rich.console import Console
 from rich.table import Column, Table
 
@@ -35,20 +35,18 @@ def create(experiment_path: Path, template: str):
         logger.error(f"Could not create directory `{root}`: {ex}")
         sys.exit(1)
 
-    config_template_path = pkg_resources.resource_filename(
-        "wrf_ensembly", f"config_templates/{template}.toml"
-    )
-    config_template_path = Path(config_template_path)
-    if not config_template_path.exists():
-        logger.error(f"Template `{template}` not found")
+    with resources.path(
+        "wrf_ensembly.config_templates", f"{template}.toml"
+    ) as config_template_path:
+        if config_template_path is None or not config_template_path.exists():
+            available_files = [f.stem for f in config_template_path.parent.iterdir()]
+            available_files = ", ".join(available_files)
 
-        available_files = [f.stem for f in config_template_path.parent.iterdir()]
-        available_files = ", ".join(available_files)
+            logger.error(f"Template `{template}` not found.")
+            logger.error(f"Available templates: {available_files}")
+            sys.exit(1)
 
-        logger.error(f"Available templates: {available_files}")
-        sys.exit(1)
-
-    utils.copy(config_template_path, root / "config.toml")
+        utils.copy(config_template_path, root / "config.toml")
 
     exp = experiment.Experiment(experiment_path)
     exp.paths.create_directories()
