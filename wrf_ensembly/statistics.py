@@ -17,12 +17,18 @@ type CompressionLevel = Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 @dataclass
 class NetCDFVariable:
-    """Represents a variable in a netCDF file."""
+    """
+    Represents a variable in a netCDF file.
+    If the variable is non-numeric, the value is stored in `non_numeric_value` which is
+    copied to the output file from the first member file.
+    """
 
     name: str
     dimensions: tuple[str, ...]
     attributes: dict[str, str]
     dtype: np.dtype
+
+    non_numeric_value = None
 
 
 @dataclass
@@ -55,6 +61,10 @@ def get_structure(file: Path) -> NetCDFFile:
                 attributes={attr: getattr(var, attr) for attr in var.ncattrs()},
                 dtype=var.dtype,
             )
+
+            # Check if the variable is non-numeric and store the value as a constant
+            if not np.issubdtype(var.dtype, np.number):
+                variables[var_name].non_numeric_value = var[:]
 
         attrs = {attr: getattr(ds, attr) for attr in ds.ncattrs()}
 
@@ -97,6 +107,9 @@ def create_file(
             if attr_name == "_FillValue":
                 continue
             var.setncattr(attr_name, attr_value)
+
+        if var_tmpl.non_numeric_value is not None:
+            var[:] = var_tmpl.non_numeric_value
 
     for attr_name, attr_value in template.global_attributes.items():
         ds.setncattr(attr_name, attr_value)
@@ -181,6 +194,10 @@ def compute_ensemble_statistics(
         # For each variable, run welford_update and keep the state in `results`
         with netCDF4.Dataset(path, "r") as ds:
             for var_name, var in ds.variables.items():
+                # Skip non-numeric variables
+                if not np.issubdtype(var.dtype, np.number):
+                    continue
+
                 if var_name not in results:
                     results[var_name] = WelfordState(
                         0, np.zeros(var.shape), np.zeros(var.shape)
