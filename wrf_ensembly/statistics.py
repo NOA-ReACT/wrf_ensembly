@@ -11,9 +11,6 @@ import numpy as np
 
 from wrf_ensembly.console import logger
 
-# To silence spicy warning in netCDF4.Dataset.createVariable
-type CompressionLevel = Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-
 
 @dataclass
 class NetCDFVariable:
@@ -72,7 +69,10 @@ def get_structure(file: Path) -> NetCDFFile:
 
 
 def create_file(
-    path: Path, template: NetCDFFile, zlib=True, complevel: CompressionLevel = 2
+    path: Path,
+    template: NetCDFFile,
+    zlib=True,
+    complevel: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9] = 2,
 ) -> netCDF4.Dataset:
     """
     Creates a netCDF4 file at the given path with the structure of the template.
@@ -163,7 +163,7 @@ def compute_ensemble_statistics(
     output_mean_file: Path,
     output_std_file: Path,
     zlib=True,
-    complevel: CompressionLevel = 2,
+    complevel: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9] = 2,
 ):
     """
     Compute ensemble mean and standard deviation for a list of member files.
