@@ -96,7 +96,7 @@ def xwrf_post(
         # Filter variables if needed
         if variables_to_keep:
             patterns = [re.compile(v) for v in variables_to_keep]
-            ds = ds[[v for v in ds.data_vars if any(p.match(v) for p in patterns)]]
+            ds = ds[[v for v in ds.data_vars if any(p.match(str(v)) for p in patterns)]]
 
         comp = dict(zlib=True, complevel=5)
         encoding = {var: comp for var in ds.data_vars}
