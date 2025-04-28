@@ -56,7 +56,7 @@ def xwrf_post(
         }
 
         # Compute more diagnostics and destagger
-        ds = ds.xwrf.postprocess().xwrf.destagger()
+        ds: xr.Dataset = ds.xwrf.postprocess().xwrf.destagger()
 
         # Fix time dimension
         ds = ds.drop_vars("Time")
@@ -98,7 +98,7 @@ def xwrf_post(
             patterns = [re.compile(v) for v in variables_to_keep]
             ds = ds[[v for v in ds.data_vars if any(p.match(str(v)) for p in patterns)]]
 
-        comp = dict(zlib=True, complevel=5)
+        comp = dict(zlib=True, complevel=3)
         encoding = {var: comp for var in ds.data_vars}
 
         ds.to_netcdf(output_path, unlimited_dims=["Time"], encoding=encoding)
