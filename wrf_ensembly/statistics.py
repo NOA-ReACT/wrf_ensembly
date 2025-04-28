@@ -78,6 +78,8 @@ def create_file(
     Creates a netCDF4 file at the given path with the structure of the template.
     The opened file is returned in write mode.
 
+    The `time` dimension is created as an unlimited dimension, regardless of the original size.
+
     Args:
         path: Path to the output file.
         template: Template structure to copy.
@@ -91,7 +93,11 @@ def create_file(
     ds = netCDF4.Dataset(path, "w", format="NETCDF4")
 
     for dim_name, dim_size in template.dimensions.items():
-        ds.createDimension(dim_name, dim_size)
+        if dim_name.lower() == "t":
+            # Create time as an unlimited dimension
+            ds.createDimension(dim_name, None)
+        else:
+            ds.createDimension(dim_name, dim_size)
 
     for var_name, var_tmpl in template.variables.items():
         var = ds.createVariable(
