@@ -97,7 +97,7 @@ def prepare(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
             for file, out in cycle_files[c.index][key]:
                 commands.append(
                     external.ExternalProcess(
-                        [obs_group.converter, file, out], cwd=obs_group.converter.parent
+                        [*obs_group.converter.split(" "), file, out], cwd=obs_group.cwd
                     )
                 )
     for res in external.run_in_parallel(commands, jobs):
@@ -116,7 +116,11 @@ def prepare(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
             if not cycle_files_list:
                 continue
 
-            print(cycle_files_list)
+            # Filter only for files that exist because a converter will not create an empty
+            # obs_seq if the input file doesn't have any valid data.
+            cycle_files_list = [
+                f for f in cycle_files_list if f.exists() and f.stat().st_size > 0
+            ]
 
             futures.append(
                 executor.submit(

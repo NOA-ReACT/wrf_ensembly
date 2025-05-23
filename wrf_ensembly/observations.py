@@ -49,14 +49,19 @@ class ObservationGroup(DataClassTOMLMixin):
     kind: str
     """DART kind for the observation"""
 
-    converter: Path
+    converter: str
     """
     Path to converter executable. Must take input and output file as first and second
-    arguments
+    arguments. You can add any other arguments you want to pass to the converter in the
+    TOML file, they will be passed to the converter as well, but before the input and
+    output file.
     """
 
     files: list[Observation]
     """Files in this group"""
+
+    cwd: Path = Path(".")
+    """Working directory for the converter"""
 
     def get_files_in_window(
         self, start: dt.datetime, end: dt.datetime
@@ -75,8 +80,8 @@ class ObservationGroup(DataClassTOMLMixin):
 
         res = external.run(
             external.ExternalProcess(
-                [self.converter, file.path, output_file],
-                cwd=self.converter.parent,
+                [*self.converter.split(" "), file.path, output_file],
+                cwd=Path(self.converter).parent,
                 log_filename=f"converter_{file.path.name}.log",
             )
         )
@@ -156,6 +161,7 @@ def join_obs_seq(
         # Write all input files inside a text file
         filelist_path = tmp_dir / "input_list"
         filelist_path.write_text("\n".join(str(f.resolve()) for f in obs_seq_files))
+        print(filelist_path.read_text())
 
         # Call obs_sequence_tool, check results
         res = external.run(
