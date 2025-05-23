@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import click
+import pandas as pd
 from rich.console import Console
 from rich.table import Column, Table
 
@@ -89,6 +90,23 @@ def convert_obs(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]
             *(str(len(cycle_files[c.index][k])) for k in names),
         )
     Console().print(table)
+
+    # Write a dataframe with all files that match each cycle
+    rows = []
+    for c in cycles:
+        for group_name in names:
+            for file, out in cycle_files[c.index][group_name]:
+                rows.append(
+                    {
+                        "cycle": c.index,
+                        "obs_group": group_name,
+                        "file": file.resolve(),
+                    }
+                )
+    df = pd.DataFrame(rows)
+    df = df.sort_values(by=["cycle", "obs_group"])
+    df = df.reset_index(drop=True)
+    df.to_csv(obs_path / "observations_files_used.csv", index=False, header=True)
 
     # Convert observation files for each cycle in parallel
     commands = []
