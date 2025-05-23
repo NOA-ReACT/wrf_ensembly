@@ -27,10 +27,10 @@ def observations_cli():
     help="How many files to process in parallel",
 )
 @pass_experiment_path
-def prepare(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
-    """Converts observation files to DART obs_seq format"""
+def convert_obs(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
+    """Converts observation files to DART obs_seq format (does not join per cycle)"""
 
-    logger.setup("observations-prepare", experiment_path)
+    logger.setup("observations-convert-obs", experiment_path)
     exp = experiment.Experiment(experiment_path)
     exp.set_dart_environment()
 
@@ -106,7 +106,52 @@ def prepare(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
             logger.error(res.output)
             sys.exit(1)
 
-    # Join files per cycle
+    logger.info("Conversion complete. Run 'combine-obs' to join files per cycle.")
+
+
+@observations_cli.command()
+@click.argument("cycle", required=False, type=int)
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    help="How many cycles to process in parallel",
+)
+@pass_experiment_path
+def combine_obs(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
+    """Joins converted observation files into a single obs_seq per cycle"""
+
+    logger.setup("observations-combine-obs", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+    exp.set_dart_environment()
+
+    jobs = utils.determine_jobs(jobs)
+    logger.info(f"Using {jobs} jobs")
+
+    # If a cycle is not given, we will combine for all cycles
+    cycles = exp.cycles
+    if cycle is not None:
+        cycles = [c for c in cycles if c.index == cycle]
+
+    obs_path = exp.paths.obs
+    obs_groups = observations.read_observations(obs_path)
+    names = list(obs_groups.keys())
+
+    if len(names) == 0:
+        logger.error("No observation groups found!")
+        sys.exit(1)
+
+    logger.info(f"Found observation groups: {', '.join(names)}")
+
+    # Gather all files for combining
+    cycle_files = {}
+    for c in cycles:
+        cycle_files[c.index] = {}
+        for key in obs_groups.keys():
+            # Find all files matching the pattern for this cycle and group
+            files = sorted(obs_path.glob(f"cycle_{c.index}.{key}.*.obs_seq"))
+            cycle_files[c.index][key] = [(None, f) for f in files]
+
+    # Combine files per cycle
     with ThreadPoolExecutor(max_workers=jobs) as executor:
         futures = []
         for c in cycles:
@@ -116,8 +161,7 @@ def prepare(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
             if not cycle_files_list:
                 continue
 
-            # Filter only for files that exist because a converter will not create an empty
-            # obs_seq if the input file doesn't have any valid data.
+            # Filter only for files that exist and are non-empty
             cycle_files_list = [
                 f for f in cycle_files_list if f.exists() and f.stat().st_size > 0
             ]
@@ -140,6 +184,8 @@ def prepare(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
         for key in names:
             for _, out in cycle_files[c.index][key]:
                 out.unlink()
+
+    logger.info("Combine complete.")
 
 
 @observations_cli.command()
