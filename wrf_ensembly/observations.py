@@ -2,9 +2,10 @@ import datetime as dt
 import re
 import shutil
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from mashumaro import field_options
 from mashumaro.mixins.toml import DataClassTOMLMixin
 
 from wrf_ensembly import external, fortran_namelists, utils
@@ -16,10 +17,22 @@ from wrf_ensembly.console import logger
 class Observation:
     """Represents one observation file"""
 
-    start_date: dt.datetime
+    start_date: dt.datetime = field(
+        metadata=field_options(
+            deserialize=lambda v: dt.datetime.strptime(v, "%Y%m%dT%H%M%S").replace(
+                tzinfo=dt.timezone.utc
+            )
+        )
+    )
     """Timestamp of the first datapoint inside the file"""
 
-    end_date: dt.datetime
+    end_date: dt.datetime = field(
+        metadata=field_options(
+            deserialize=lambda v: dt.datetime.strptime(v, "%Y%m%dT%H%M%S").replace(
+                tzinfo=dt.timezone.utc
+            )
+        )
+    )
     """Timestamp of the last datapoint inside the file"""
 
     path: Path
