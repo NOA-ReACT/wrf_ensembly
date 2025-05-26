@@ -9,20 +9,19 @@ import pandas as pd
 import tomli_w
 
 
-def parse_spex_date(utc_date: np.ndarray, fraction_of_day: np.ndarray) -> np.ndarray:
+def parse_spex_date(
+    utc_date: np.ndarray, fraction_of_day: np.ndarray
+) -> pd.DatetimeIndex:
     """
     SPEX dates are provided in a UTC date as an integer and a float representing the fraction of day.
-    This function converts them to a pandas timestamp.
+    This function converts them to pandas timestamps.
     """
 
-    # Vectorize the conversion function
-    def convert_date(utc_date, fraction_of_day):
-        date = pd.to_datetime(str(int(utc_date)), format="%Y%m%d")
-        date += pd.Timedelta(hours=24) * fraction_of_day
-        return date
+    utcdate_str = np.array([str(int(date)) for date in utc_date])
+    date = pd.to_datetime(utcdate_str, format="%Y%m%d")
+    date = date + pd.to_timedelta(fraction_of_day, unit="D")
 
-    vectorized_convert_date = np.vectorize(convert_date)
-    return vectorized_convert_date(utc_date, fraction_of_day)
+    return date
 
 
 def process_spex_file(nc_path: Path) -> tuple[pd.Timestamp, pd.Timestamp] | None:
@@ -38,7 +37,7 @@ def process_spex_file(nc_path: Path) -> tuple[pd.Timestamp, pd.Timestamp] | None
             # Mask out fill values for utcdate (29990101)
             mask = utcdate != 29990101
 
-            timestamps = pd.Series(parse_spex_date(utcdate[mask], fracday[mask]))
+            timestamps = parse_spex_date(utcdate[mask], fracday[mask])
         except pd.errors.OutOfBoundsDatetime as ex:
             print(f"File {nc_path} has invalid dates!" + str(ex))
             return None
