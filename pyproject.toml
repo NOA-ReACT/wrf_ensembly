@@ -11,21 +11,21 @@ wrf-ensembly = "wrf_ensembly:wrf_ensembly.cli"
 
 [tool.poetry.dependencies]
 python = "^3.11,<3.14"
-netcdf4 = "^1.6.2"
-tomli = "^2.0.1"
-rich = "^13.3.5"
-jinja2 = "^3.1.2"
-scipy = "^1.10.1"
-matplotlib = "^3.7.1"
-tomli-w = "^1.0.0"
-xarray = "^2023.5.0"
+netcdf4 = "^1.7.2"
+tomli = "^2.2.1"
+rich = "^14.0.0"
+jinja2 = "^3.1.6"
+scipy = "^1.15.3"
+matplotlib = "^3.10.3"
+tomli-w = "^1.2.0"
+xarray = "^2025.4.0"
 cartopy = "^0.24.1"
 pytest = "^7.4.3"
-click = "^8.1.7"
-setuptools = "^69.1.1"
+click = "^8.2.0"
+setuptools = "^80.7.1"
 dataclass-binder = "^0.3.4"
-mashumaro = { extras = ["toml"], version = "^3.12" }
-interpolator-for-wrfchem = "^1.3.2"
+mashumaro = { extras = ["toml"], version = "^3.15" }
+interpolator-for-wrfchem = "^1.4.0"
 xwrf = "^0.0.4"
 
 
