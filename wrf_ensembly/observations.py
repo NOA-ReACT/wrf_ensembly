@@ -68,12 +68,7 @@ class ObservationGroup(DataClassTOMLMixin):
     ) -> list[Observation]:
         """Returns all files that overlap with the given window"""
 
-        return [
-            f
-            for f in self.files
-            if (f.start_date <= start <= f.end_date)
-            or (f.start_date <= end <= f.end_date)
-        ]
+        return [f for f in self.files if f.start_date <= end and start <= f.end_date]
 
     def convert_file(self, file: Observation, output_file: Path):
         """Converts a file to DART obs_seq format by running the appropriate converter"""
