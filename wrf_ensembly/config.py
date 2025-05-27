@@ -349,7 +349,7 @@ class PostprocessConfig:
     If not set, will use the one in the PATH environment variable.
     """
 
-    ncrcat_cmd = "ncra"
+    ncrcat_cmd = "ncrcat"
     """
     Path to the NCO executable or command needed to run ncrcat (e.g. micromamba run ncrcat).
     If not set, will use the one in the PATH environment variable.
