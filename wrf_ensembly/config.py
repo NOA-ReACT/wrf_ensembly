@@ -236,6 +236,12 @@ class PerturbationVariableConfig:
     boundary: int = 0
     """Size of the perturbation boundary, in grid points. If > 0, the given amount of rows/columns at the edges will not be pertubated (with a smoothing filter)."""
 
+    min_value: Optional[float] = None
+    """Minimum value of the perturbation field. If None, no minimum is applied."""
+
+    max_value: Optional[float] = None
+    """Maximum value of the perturbation field. If None, no maximum is applied."""
+
     def __str__(self) -> str:
         return f"operation={self.operation}, mean={self.mean:.2f}, sd={self.sd:.2f}, rounds={self.rounds}, boundary={self.boundary}"
 

@@ -21,7 +21,13 @@ def set_boundaries(arr: np.ndarray, boundary_size: int, value: float) -> np.ndar
 
 
 def generate_perturbation_field(
-    shape: Tuple[int, ...], mean: float, sd: float, rounds=10, boundary=0
+    shape: Tuple[int, ...],
+    mean: float,
+    sd: float,
+    rounds=10,
+    boundary=0,
+    min_value: float | None = None,
+    max_value: float | None = None,
 ):
     """
     Generates a random pseudo-spatially-collerated field. Based on the technique
@@ -36,6 +42,8 @@ def generate_perturbation_field(
         mean: Desired mean value of the field, after normalization
         sd: Desired standard deviation of the field, after normalization
         rounds: Number of rounds of gaussian smoothing to apply
+        min_value: Optional minimum value for the field. If provided, values below this will be set to this value.
+        max_value: Optional maximum value for the field. If provided, values above this will be set to this value.
 
     Returns:
         The generated field as a numpy array.
@@ -49,4 +57,9 @@ def generate_perturbation_field(
         x = uniform_filter(x, size=3)
     x = (x - x.mean()) / x.std()
     x = x * sd + mean
+
+    if min_value is not None:
+        x = np.maximum(x, min_value)
+    if max_value is not None:
+        x = np.minimum(x, max_value)
     return x

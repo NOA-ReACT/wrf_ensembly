@@ -145,6 +145,8 @@ class Experiment:
                         sd=pert_config.sd,
                         rounds=pert_config.rounds,
                         boundary=pert_config.boundary,
+                        min_value=pert_config.min_value,
+                        max_value=pert_config.max_value,
                     )
                     for _ in range(self.cfg.assimilation.n_members)
                 ],
