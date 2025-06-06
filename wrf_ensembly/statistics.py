@@ -16,7 +16,7 @@ from wrf_ensembly.console import logger
 class NetCDFVariable:
     """
     Represents a variable in a netCDF file.
-    If the variable is non-numeric, the value is stored in `non_numeric_value` which is
+    If the variable is non-numeric or a coordinate variable, the value is stored in `constant_value` which is
     copied to the output file from the first member file.
     """
 
@@ -25,7 +25,11 @@ class NetCDFVariable:
     attributes: dict[str, str]
     dtype: np.dtype
 
-    non_numeric_value = None
+    constant_value = None
+
+
+# List of coordinate variables name in wrf-ensembly forecast files.
+COORDINATE_VARIABLES = {"XLAT", "XLONG", "x", "y", "z", "t"}
 
 
 @dataclass
@@ -59,9 +63,12 @@ def get_structure(file: Path) -> NetCDFFile:
                 dtype=var.dtype,
             )
 
-            # Check if the variable is non-numeric and store the value as a constant
-            if not np.issubdtype(var.dtype, np.number):
-                variables[var_name].non_numeric_value = var[:]
+            # Check if the variable is non-numeric or a coordinate variable and store the value as a constant
+            if (
+                not np.issubdtype(var.dtype, np.number)
+                or var_name in COORDINATE_VARIABLES
+            ):
+                variables[var_name].constant_value = var[:]
 
         attrs = {attr: getattr(ds, attr) for attr in ds.ncattrs()}
 
@@ -114,8 +121,8 @@ def create_file(
                 continue
             var.setncattr(attr_name, attr_value)
 
-        if var_tmpl.non_numeric_value is not None:
-            var[:] = var_tmpl.non_numeric_value
+        if var_tmpl.constant_value is not None:
+            var[:] = var_tmpl.constant_value
 
     for attr_name, attr_value in template.global_attributes.items():
         ds.setncattr(attr_name, attr_value)
@@ -175,6 +182,8 @@ def compute_ensemble_statistics(
     Compute ensemble mean and standard deviation for a list of member files.
     The output files are created with the same structure as the member files.
 
+    Statistics will not be computed for coordinate variables or non-numeric variables.
+
     Args:
         member_files: List of paths to the member files for a given cycle.
         output_mean_file: Path to the output mean file.
@@ -200,8 +209,11 @@ def compute_ensemble_statistics(
         # For each variable, run welford_update and keep the state in `results`
         with netCDF4.Dataset(path, "r") as ds:
             for var_name, var in ds.variables.items():
-                # Skip non-numeric variables
-                if not np.issubdtype(var.dtype, np.number):
+                # Skip non-numeric variables and coordinate variables
+                if (
+                    not np.issubdtype(var.dtype, np.number)
+                    or var_name in COORDINATE_VARIABLES
+                ):
                     continue
 
                 if var_name not in results:
