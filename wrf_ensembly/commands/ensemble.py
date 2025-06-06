@@ -64,6 +64,97 @@ def setup(experiment_path: Path):
 
 
 @ensemble_cli.command()
+@click.argument(
+    "other-experiment", type=click.Path(dir_okay=True, file_okay=False, path_type=Path)
+)
+@click.option("--cycle", required=True, help="Which cycle to use for initialisation")
+@pass_experiment_path
+def setup_from_other_experiment(
+    experiment_path: Path, other_experiment: Path, cycle: int
+):
+    """
+    Setup the ensemble using a forecast from another experiment.
+
+    The usecase for this command is having a control experiment that starts earlier, for
+    spin-up reasons. You can initialise a second experiment from a mid-point and work
+    forwards.
+
+    The other experiment must have the same cycle setup (start/end dates, output interval,
+    boundary conditions interval) and the same domain. The forecast files for the requested cycle
+    must be available in the scratch directory.
+    """
+
+    logger.setup("ensemble-setup-from-other-experiment", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    logger.info(f"Opening second experiment at {other_experiment}")
+    other_exp = experiment.Experiment(other_experiment.resolve())
+
+    # Check if the domain and time control setups are the same
+    res = exp.cfg.domain_control.is_equal(other_exp.cfg.domain_control)
+    if type(res) is str:
+        logger.error(f"Field is not equal in [domain_control]: {res}")
+        sys.exit(1)
+    res = exp.cfg.time_control.is_equal(other_exp.cfg.time_control)
+    if type(res) is str:
+        logger.error(f"Field is not equal in [time_control]: {res}")
+        sys.exit(1)
+    if exp.cfg.time_control.cycles != {} or other_exp.cfg.time_control.cycles != {}:
+        logger.warning(
+            "[time_control.cycles] is defined in at least one of the experiments. Be careful!"
+        )
+    if exp.cfg.assimilation.n_members != other_exp.cfg.assimilation.n_members:
+        logger.error("Experiments do not have the same amount of members")
+        sys.exit(1)
+
+    # Link other experiments IC/BC directory to current exp.
+    icbc_dir = exp.paths.data_icbc
+    logger.info(
+        f"Removing current IC/BC directory {icbc_dir} and linking to {other_exp.paths.data_icbc}"
+    )
+    if icbc_dir.is_dir():
+        icbc_dir.rmdir()
+    elif icbc_dir.is_symlink():
+        icbc_dir.unlink()
+    icbc_dir.symlink_to(other_exp.paths.data_icbc, target_is_directory=True)
+
+    # Check if the required forecasts exist in the scratch directory & link them in the current experiment
+    cycle_end = other_exp.cycles[cycle].end
+    required_wrfout_filename = f"wrfout_d01_{cycle_end:%Y-%m-%d_%H:%M:%S}"
+    logger.info(f"Required forecast filename: {required_wrfout_filename}")
+
+    for i in range(exp.cfg.assimilation.n_members):
+        target_scratch = other_exp.paths.scratch_forecasts_path(cycle=cycle, member=i)
+        required_wrfout_file = (target_scratch / required_wrfout_filename).resolve()
+        if not required_wrfout_file.exists():
+            logger.error(f"Forecast doesn't exist at {required_wrfout_file}")
+            sys.exit(1)
+
+        new_dir = exp.paths.scratch_forecasts_path(cycle=cycle, member=i)
+        new_dir.mkdir(exist_ok=True, parents=True)
+
+        symlink_loc = new_dir / required_wrfout_filename
+        if symlink_loc.exists() and not symlink_loc.is_symlink():
+            logger.error(
+                f"File already exists at {symlink_loc} and is not a symlink. Too scared to replace."
+            )
+            sys.exit(1)
+        symlink_loc.unlink(missing_ok=True)
+        logger.info(f"Linking {symlink_loc} to {required_wrfout_file}")
+        symlink_loc.symlink_to(required_wrfout_file)
+
+        # Set member as advanced
+        exp.members[i].advanced = True
+
+    # Update experiment status & metadata
+    exp.current_cycle_i = cycle
+    exp.write_status()
+
+    logger.info(f"Linked to {other_exp}, cycle = {cycle}.")
+    logger.info("Use the `cycle` command to advance this experiment to the next cycle")
+
+
+@ensemble_cli.command()
 @click.option(
     "--jobs",
     type=click.IntRange(min=0, max=None),

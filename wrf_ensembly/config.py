@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
@@ -87,6 +87,22 @@ class DomainControlConfig:
     pole_lon: Optional[float] = None
     """Pole longitude for the projection"""
 
+    def is_equal(self, other) -> bool | str:
+        """
+        Compares with another instance of DomainControlConfig
+
+        If they are exactly the same, returns True. If any field is different, returns
+        the field name. If `other` is of different type, returns False.
+        """
+
+        if type(self) is not type(other):
+            return False
+
+        for f in fields(self):
+            if getattr(self, f.name) != getattr(other, f.name):
+                return f.name
+        return True
+
 
 @dataclass
 class CycleConfig:
@@ -128,6 +144,28 @@ class TimeControlConfig:
     One line per list item.
     More info: https://github.com/wrf-model/WRF/blob/master/doc/README.io_config
     """
+
+    def is_equal(self, other) -> bool | str:
+        """
+        Compares with another instance of TimeControlConfig
+
+        If they are exactly the same, returns True. If any field is different, returns
+        the field name. If `other` is of different type, returns False.
+
+        The `runtime_io` and `cycles` fields is not included in the comparison.
+        """
+
+        ignored_fields = ["runtime_io", "cycles"]
+
+        if type(self) is not type(other):
+            return False
+
+        for f in fields(self):
+            if f in ignored_fields:
+                continue
+            if getattr(self, f.name) != getattr(other, f.name):
+                return f.name
+        return True
 
 
 @dataclass
