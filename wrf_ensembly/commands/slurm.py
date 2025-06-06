@@ -140,6 +140,9 @@ def queue_all_postprocessing(
     is_flag=True,
     help="Only queue the advance steps",
 )
+@click.option(
+    "--run-until", type=int, required=False, help="Run until this cycle (end-inclusive)"
+)
 @pass_experiment_path
 def run_experiment(
     experiment_path: Path,
@@ -147,6 +150,7 @@ def run_experiment(
     run_postprocess: bool,
     clean_scratch: bool,
     only_advance: bool,
+    run_until: int | None,
 ):
     """
     Creates jobfiles for all experiment steps and queues them in the correct order. This
@@ -193,8 +197,18 @@ def run_experiment(
         return
 
     # Generate the analysis jobfile, queue it and keep jobid
+    queue_next_cycle = all_cycles
+    if run_until is not None and current_cycle.index == run_until:
+        logger.warning("Reached --run-until limit, will not queue next cycle")
+        queue_next_cycle = False
+
     jf = jobfiles.generate_make_analysis_jobfile(
-        exp, current_cycle.index, all_cycles, run_postprocess, clean_scratch
+        exp,
+        current_cycle.index,
+        queue_next_cycle,
+        run_postprocess,
+        clean_scratch,
+        run_until,
     )
     if len(ids) > 0:
         dependency = "--dependency=afterok:" + ":".join(map(str, ids))

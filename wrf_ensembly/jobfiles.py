@@ -141,6 +141,7 @@ def generate_make_analysis_jobfile(
     queue_next_cycle: bool = False,
     compute_postprocess: bool = False,
     clean_scratch: bool = False,
+    run_until: int | None = None,
 ):
     """
     Generates a jobfile for the `filter`, `analysis` and `cycle` steps. At runtime, the
@@ -154,6 +155,7 @@ def generate_make_analysis_jobfile(
         queue_next_cycle: Whether to queue the next cycle after the current one is done.
         compute_postprocess: Whether to compute postprocess after the analysis step.
         delete_members: Whether to delete the members' forecasts after processing them.
+        run_until: --run-until argument to pass to `run-experiment`
 
     Returns:
         A Path object to the jobfile
@@ -208,6 +210,8 @@ def generate_make_analysis_jobfile(
             args += " --run-postprocess"
             if clean_scratch:
                 args += " --clean-scratch"
+        if run_until is not None:
+            args += f" --run-until {run_until}"
 
         commands.append(
             f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path} slurm run-experiment {args}"
