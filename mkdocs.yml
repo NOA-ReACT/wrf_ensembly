@@ -1,0 +1,26 @@
+site_name: WRF Ensembly
+site_description: Documentation for WRF Ensembly, a WRF/DART assimilation toolkit
+repo_url: https://github.com/NOA-ReACT/wrf_ensembly
+theme:
+  name: terminal
+
+plugins:
+  - mermaid2
+
+markdown_extensions:
+  - attr_list
+  - md_in_html
+  - mkdocs-click
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Core Concepts: core-concepts.md
+  - Getting Started: getting-started.md
+  - User Guide:
+    - Installation: user-guide/installation.md
+    - Configuration: user-guide/configuration.md
+    - Usage Examples: user-guide/examples.md
+  - API Reference: api-reference.md
+  - Contributing: contributing.md

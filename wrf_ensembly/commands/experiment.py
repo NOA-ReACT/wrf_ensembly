@@ -23,7 +23,14 @@ def experiment_cli():
 @click.argument("template", required=True)
 @pass_experiment_path
 def create(experiment_path: Path, template: str):
-    """Create a new experiment directory."""
+    """
+    Create a new experiment directory at EXPERIMENT_PATH. The TEMPLATE argument specifies
+    which config file template to use when creating the experiment. Available templates are
+    located in `wrf_ensembly/config_templates/`. The template name should not include the `.toml`
+    extension, e.g., `default` for `default.toml`.
+
+    If in doubt, use the `iridium_chem_4.6.0` template and modify it to your needs.
+    """
 
     logger.setup("experiment-create", experiment_path)
 
@@ -63,7 +70,9 @@ def create(experiment_path: Path, template: str):
 )
 @pass_experiment_path
 def copy_model(experiment_path: Path, force: bool):
-    """Setup the experiment (i.e., copy WRF/WPS, generate namelists, ...)"""
+    """
+    Setup the experiment by doing the following
+    """
 
     logger.setup("experiment-copy-model", experiment_path)
     exp = experiment.Experiment(experiment_path)
