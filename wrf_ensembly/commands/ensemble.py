@@ -148,7 +148,7 @@ def setup_from_other_experiment(
 
     # Update experiment status & metadata
     exp.current_cycle_i = cycle
-    exp.write_status()
+    exp.save_status_to_db()
 
     logger.info(f"Linked to {other_exp}, cycle = {cycle}.")
     logger.info("Use the `cycle` command to advance this experiment to the next cycle")
@@ -293,8 +293,7 @@ def filter(experiment_path: Path):
     logger.setup("ensemble-filter", experiment_path)
     exp = experiment.Experiment(experiment_path)
     exp.set_dart_environment()
-    if exp.filter():
-        exp.write_status()
+    exp.filter()
 
 
 @ensemble_cli.command()
@@ -353,7 +352,7 @@ def analysis(experiment_path: Path):
 
     # Update experiment status
     exp.analysis_run = True
-    exp.write_status()
+    exp.save_status_to_db()
 
 
 @ensemble_cli.command()
@@ -412,21 +411,4 @@ def cycle(experiment_path: Path, use_forecast: bool, jobs: Optional[int]):
 
     # Update experiment status
     exp.set_next_cycle()
-    exp.write_status()
-
-
-@ensemble_cli.command()
-@pass_experiment_path
-def status(experiment_path: Path):
-    """Prints the current status of all members (i.e., which cycles have been completed)"""
-
-    logger.setup("experiment-status", experiment_path)
-    exp = experiment.Experiment(experiment_path)
-
-    logger.info(f"Current cycle: {exp.current_cycle_i}")
-    logger.info(f"Members: {exp.cfg.assimilation.n_members}")
-    logger.info(f"Filter run: {exp.filter_run}")
-    logger.info(f"Analysis run: {exp.analysis_run}")
-
-    for member in exp.members:
-        logger.info(f"Member {member.i} advanced: {member.advanced}")
+    exp.save_status_to_db()

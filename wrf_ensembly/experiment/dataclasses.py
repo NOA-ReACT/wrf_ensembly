@@ -1,8 +1,6 @@
 import datetime as dt
 from dataclasses import dataclass
 
-from mashumaro.mixins.toml import DataClassTOMLMixin
-
 
 @dataclass
 class RuntimeStatistics:
@@ -35,8 +33,8 @@ class MemberStatus:
 
 
 @dataclass
-class ExperimentStatus(DataClassTOMLMixin):
-    """Status of the entire experiment"""
+class ExperimentStatus:
+    """Status of the entire experiment - now handled by database"""
 
     current_cycle: int
     """The experiment's current cycle"""

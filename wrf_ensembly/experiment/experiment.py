@@ -3,8 +3,8 @@ import os
 from pathlib import Path
 
 import netCDF4
-import xarray as xr
 import numpy as np
+import xarray as xr
 
 from wrf_ensembly import (
     config,
@@ -18,7 +18,8 @@ from wrf_ensembly import (
 )
 from wrf_ensembly.console import logger
 
-from .dataclasses import ExperimentStatus, MemberStatus, RuntimeStatistics
+from .database import ExperimentDatabase
+from .dataclasses import MemberStatus, RuntimeStatistics
 from .paths import ExperimentPaths
 
 
@@ -35,84 +36,84 @@ class Experiment:
     paths: ExperimentPaths
     members: list[MemberStatus] = []
 
-    status_file_path: Path
+    db: ExperimentDatabase
 
     def __init__(self, experiment_path: Path):
         self.cfg = config.read_config(experiment_path / "config.toml")
         self.cycles = cycling.get_cycle_information(self.cfg)
 
-        # Read experiment status from status.toml
-        self.status_file_path = experiment_path / "status.toml"
-        if self.status_file_path.exists():
-            self.read_status()
-        else:
-            # If the file does not exist, maybe this is a fresh experiment. Assume we are at cycle 0
-            self.current_cycle_i = 0
-            self.filter_run = False
-            self.analysis_run = False
-            self.members = [
-                MemberStatus(i=i, advanced=False, runtime_statistics=[])
-                for i in range(self.cfg.assimilation.n_members)
-            ]
+        # Initialize database
+        db_path = experiment_path / "status.db"
+        self.db = ExperimentDatabase(db_path)
+
+        # Initialize members in database
+        self.db.initialize_members(self.cfg.assimilation.n_members)
+
+        # Read experiment status from database
+        self.load_status_from_db()
 
         self.paths = ExperimentPaths(experiment_path, self.cfg)
 
-    def read_status(self):
-        """Read the status of the experiment from status.toml"""
-
-        status = ExperimentStatus.from_toml(self.status_file_path.read_text())
-        self.current_cycle_i = status.current_cycle
-        self.filter_run = status.filter_run
-        self.analysis_run = status.analysis_run
-        self.members = [
-            MemberStatus(
-                i=member_status.i,
-                advanced=member_status.advanced,
-                runtime_statistics=member_status.runtime_statistics,
-            )
-            for member_status in status.members
-        ]
-
-        # Make sure list is of the correct length and sorted correctly
-        if len(self.members) != self.cfg.assimilation.n_members:
-            logger.warning(
-                f"Number of members in status file ({len(self.members)}) does not match configuration ({self.cfg.assimilation.n_members})"
-            )
-            logger.warning("Changing status.toml to match configuration")
-
-            if len(self.members) > self.cfg.assimilation.n_members:
-                # Remove extra members
-                self.members = self.members[: self.cfg.assimilation.n_members]
-            else:
-                for i in range(len(self.members), self.cfg.assimilation.n_members):
-                    self.members.append(
-                        MemberStatus(i=i, advanced=False, runtime_statistics=[])
-                    )
-        self.members.sort(key=lambda m: m.i)
-
-    def write_status(self):
-        """
-        Write the current status of the experiment to status.toml
-        """
-
-        status = ExperimentStatus(
-            self.current_cycle_i, self.filter_run, self.analysis_run, self.members
+    def load_status_from_db(self):
+        """Load the status of the experiment from the database"""
+        # Get experiment state
+        self.current_cycle_i, self.filter_run, self.analysis_run = (
+            self.db.get_experiment_state()
         )
 
-        self.status_file_path.write_text(status.to_toml())
+        # Get member status
+        members_data = self.db.get_all_members_status()
+        self.members = []
+
+        for member_i, advanced in members_data:
+            # Get runtime statistics for this member
+            runtime_stats = self.db.get_member_runtime_statistics(member_i)
+
+            self.members.append(
+                MemberStatus(
+                    i=member_i, advanced=advanced, runtime_statistics=runtime_stats
+                )
+            )
+
+        # Ensure we have the right number of members
+        while len(self.members) < self.cfg.assimilation.n_members:
+            member_i = len(self.members)
+            self.members.append(
+                MemberStatus(i=member_i, advanced=False, runtime_statistics=[])
+            )
+
+        self.members.sort(key=lambda m: m.i)
+
+    def save_status_to_db(self):
+        """Save the current status of the experiment to the database"""
+        # Save experiment state
+        self.db.set_experiment_state(
+            self.current_cycle_i, self.filter_run, self.analysis_run
+        )
+
+        # Save member status
+        for member in self.members:
+            self.db.set_member_advanced(member.i, member.advanced)
 
     def set_next_cycle(self):
         """
         Update status to the next cycle
         """
-
         self.current_cycle_i += 1
         if self.current_cycle_i >= len(self.cycles):
             raise ValueError("No more cycles to run")
         self.filter_run = False
         self.analysis_run = False
+
+        # Reset all members' advanced status in database
+        self.db.reset_members_advanced()
+
+        # Update local member status
         for member in self.members:
             member.advanced = False
+
+        # Save to database
+        self.save_status_to_db()
 
     def generate_perturbations(self, cycle_i: int):
         """
@@ -198,7 +199,9 @@ class Experiment:
 
         perts = xr.open_dataset(pert_file).sel(member=member_i)
 
-        with netCDF4.Dataset(self.paths.member_path(member_i) / "wrfinput_d01", "r+") as member_icbc:  # type: ignore
+        with netCDF4.Dataset(
+            self.paths.member_path(member_i) / "wrfinput_d01", "r+"
+        ) as member_icbc:  # type: ignore
             for var, pert_config in self.cfg.perturbations.variables.items():
                 logger.debug(f"Applying perturbation to {var} for member {member_i}")
                 if var not in member_icbc.variables:
@@ -332,25 +335,31 @@ class Experiment:
             logger.info(f"Removing first output file {first_output}")
             first_output.unlink()
 
-        # Update member status, take some basic precautions against other processes
-        # doing the same.
-        with utils.LockFile(self.status_file_path):
-            # First read the status file again to make sure it hasn't changed
-            self.read_status()
+        # Update member status using database instead of file locking
+        # The database handles concurrency internally
+        self.members[member_idx].advanced = True
 
-            # Add info about the current run
-            self.members[member_idx].advanced = True
-            self.members[member_idx].runtime_statistics.append(
-                RuntimeStatistics(
-                    cycle=self.current_cycle_i,
-                    start=start_time,
-                    end=end_time,
-                    duration_s=int((end_time - start_time).total_seconds()),
-                )
+        # Add runtime statistics to database
+        self.db.add_runtime_statistics(
+            member_idx,
+            self.current_cycle_i,
+            start_time,
+            end_time,
+            int((end_time - start_time).total_seconds()),
+        )
+
+        # Update member status in database
+        self.db.set_member_advanced(member_idx, True)
+
+        # Update local runtime statistics
+        self.members[member_idx].runtime_statistics.append(
+            RuntimeStatistics(
+                cycle=self.current_cycle_i,
+                start=start_time,
+                end=end_time,
+                duration_s=int((end_time - start_time).total_seconds()),
             )
-
-            # Write to disk
-            self.write_status()
+        )
 
         return True
 
@@ -453,6 +462,7 @@ class Experiment:
         )
 
         self.filter_run = True
+        self.save_status_to_db()
         return True
 
     def cycle_member(self, member_i: int, use_forecast: bool):

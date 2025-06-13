@@ -1,9 +1,9 @@
 import csv
 import shutil
 import sys
+from importlib import resources
 from pathlib import Path
 from typing import Optional
-from importlib import resources
 
 import click
 from rich.console import Console
@@ -57,7 +57,7 @@ def create(experiment_path: Path, template: str):
 
     exp = experiment.Experiment(experiment_path)
     exp.paths.create_directories()
-    exp.write_status()
+    exp.save_status_to_db()
 
     logger.info("Experiment created successfully!")
 
