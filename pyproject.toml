@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "wrf-ensembly"
-version = "0.8.6"
+version = "0.9.0"
 description = "Support scripts for using DART w/ WRF"
 authors = ["Thanasis Georgiou <ageorgiou@noa.gr>"]
 readme = "README.md"
