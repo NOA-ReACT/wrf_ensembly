@@ -119,7 +119,7 @@ class XWRFPostProcessor(DataProcessor):
         ds = ds.drop_vars("Time")
         ds = ds.rename({"XTIME": "t"})
         ds = ds.set_xindex("t")
-        ds = ds.swap_dims({"Time": "t"})
+        ds = ds.rename({"Time": "t"})
         ds.t.attrs["standard_name"] = "time"
         ds.t.attrs["axis"] = "T"
 
@@ -135,7 +135,7 @@ class XWRFPostProcessor(DataProcessor):
             "XLAT_U": "latitude",
             "XLONG_V": "longitude",
             "XLAT_V": "latitude",
-            "XTIME": "",
+            "XTIME": "t",
         }
         for var in ds.data_vars:
             if "grid_mapping" in ds[var].attrs:
