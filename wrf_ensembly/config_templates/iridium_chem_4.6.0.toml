@@ -133,10 +133,35 @@ ntasks = 32
 cpus-per-task = 1
 
 [postprocess]
-# Shuffle + zstandard, level 3
-compression_filters = "shf|zst,3"
+# Only keep dust-related variables for debugging
+variables_to_keep = [
+  'DUST_\d',
+  'SEAS_\d',
+  'EDUST\d',
+  'U',
+  'V',
+  'wind_.*',
+  'air_pressure',
+  'air_density',
+  'geopotential_height',
+  'RHO',
+  'X.*',
+  'Z.*',
+]
+# Standard shuffle + deflate filters
+compression_filters = "shf|dfl"
 # GBR w/ 3 significant digits, 6 for coordinates
 ppc_filter = "default=3#Z.*=6#X.*=6"
+keep_per_member = false
+compute_ensemble_statistics_in_job = true
+
+processor_cores = 24
+statistics_cores = 24
+concatenate_cores = 24
+
+[[postprocess.processors]]
+processor = "/home/thgeorgiou/work/AIRSENSE/aod_python_operator/postproc_wrfout.py:ExtinctionOperatorProcessor"
+params = { optical_properties_file = "/home/thgeorgiou/work/L2Aplus/extinction_operator/parse_optical_prop_tables/qext/hex_mixtures/hexmix_optical_props.csv" }
 
 # -- WRF NAMELIST OPTIONS --
 [wrf_namelist]

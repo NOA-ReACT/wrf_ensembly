@@ -266,13 +266,10 @@ def generate_postprocess_jobfile(
     base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} postprocess {{subcommand}}"
     commands = [
         _build_command(
-            base_cmd, "wrf-post", cycle=cycle, jobs=exp.cfg.postprocess.wrf_post_cores
-        ),
-        _build_command(
             base_cmd,
-            "apply-scripts",
+            "process-pipeline",
             cycle=cycle,
-            jobs=exp.cfg.postprocess.apply_scripts_cores,
+            jobs=exp.cfg.postprocess.processor_cores,
         ),
     ]
     if exp.cfg.postprocess.compute_ensemble_statistics_in_job:
@@ -297,8 +294,7 @@ def generate_postprocess_jobfile(
         commands.append(_build_command(base_cmd, "clean"))
 
     max_used_jobs = max(
-        exp.cfg.postprocess.wrf_post_cores,
-        exp.cfg.postprocess.apply_scripts_cores,
+        exp.cfg.postprocess.processor_cores,
         exp.cfg.postprocess.statistics_cores,
         exp.cfg.postprocess.concatenate_cores,
     )

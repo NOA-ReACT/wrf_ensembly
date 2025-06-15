@@ -326,11 +326,24 @@ class SlurmConfig:
 
 
 @dataclass
+class ProcessorConfig:
+    """
+    Configuration for a data processor, which are used to apply transformations to the wrfout files
+    """
+
+    processor: str
+    """Name of the processor to use. Can be a built-in processor or an external one."""
+
+    params: dict[str, Any] = field(default_factory=dict)
+    """Additional parameters for the processor. Depends on the processor type."""
+
+
+@dataclass
 class PostprocessConfig:
     variables_to_keep: Optional[list[str]] = None
     """
     Optionally, filter the variables in a file by a list of regular expressions. If None, all variables are kept.
-    This filtering is applied during the `postprocess wrf-post` step.
+    This filtering is applied during the `postprocess process-pipeline` step.
     """
 
     compression_filters: str = "shf|zst,3"
@@ -349,16 +362,26 @@ class PostprocessConfig:
     A small investigation has yielded that these values are a good compromise between file size and precision, at least for dust and wind related fields. Set to empty string to disable quantization.
     """
 
-    scripts: list[str] = field(default_factory=list)
-    # """
-    # List to postprocessing scripts to run on each output analysis and forecast file.
-    # The string can be any command. The script should write to the given path.
-    # The following placeholders will be replaced:
-    # - {in}: path to the input file (analysis or forecast, netCDF4)
-    # - {out}: path to the output file (analysis or forecast, netCDF4)
-    # - {d} member number
-    # - {c} cycle number
-    # """
+    processors: list[ProcessorConfig] = field(default_factory=lambda: [])
+    """
+    List of data processors to apply to each output analysis and forecast file.
+    Each processor is specified as a dictionary with a 'processor' key indicating
+    the processor type, and additional keys for processor-specific configuration.
+
+    By default, the built-in XWRFProcessor will always be used as the first step.
+
+    Other built-in processors:
+    - "script": Run external scripts (for backward compatibility with 0.9.0 where we had the `apply-scripts` command).
+
+    External processors can be specified as "module.path:ClassName" or as a path to a Python file.
+
+    Examples:
+    processors = [
+        {"processor" = "script", "parameters" = {"script" = "python enhance_data.py {in} {out}"}},
+        {"processor" = "my_package.processors:CustomProcessor", "parameters" = {"param" =  "value"}}
+        {"processor" = "/path/to/file.py:MyProcessor", "parameters" = {"param2": "value2"}},
+    ]
+    """
 
     compute_ensemble_statistics_in_job: bool = True
     """
@@ -375,11 +398,8 @@ class PostprocessConfig:
     If enabled, you will get a `forecast_mean`, `forecast_sd` and `forecast_member_{d}` file for each cycle.
     """
 
-    wrf_post_cores: int = 1
-    """How many cores to use for the `wrf-post` step"""
-
-    apply_scripts_cores: int = 1
-    """How many cores to use for the `apply-scripts` step"""
+    processor_cores: int = 1
+    """How many cores to use for the processor pipeline step"""
 
     statistics_cores: int = 1
     """How many cores to use for the `statistics` step"""
@@ -398,14 +418,6 @@ class PostprocessConfig:
     Path to the NCO executable or command needed to run ncrcat (e.g. micromamba run ncrcat).
     If not set, will use the one in the PATH environment variable.
     """
-
-    def __post_init__(self):
-        """Validates the `script` field, making sure that all commands at least take the `{in}` and `{out}` placeholders."""
-        for script in self.scripts:
-            if "{in}" not in script or "{out}" not in script:
-                raise ValueError(
-                    f"Postprocessing script '{script}' does not contain the required placeholders {{in}} and {{out}}"
-                )
 
 
 @dataclass

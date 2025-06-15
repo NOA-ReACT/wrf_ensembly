@@ -8,11 +8,12 @@ from typing import Optional
 import click
 import xarray as xr
 
-from wrf_ensembly import experiment, external, nco, postprocess
+from wrf_ensembly import experiment, external, nco, processors
 from wrf_ensembly import statistics as stats
 from wrf_ensembly import utils
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
+from wrf_ensembly.processors import ProcessingContext, process_file_with_pipeline
 
 
 @click.group(name="postprocess", cls=GroupWithStartEndPrint)
@@ -85,22 +86,15 @@ def print_variables_to_keep(experiment_path: Path):
     help="How many files to process in parallel",
 )
 @pass_experiment_path
-def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
+def process_pipeline(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
     """
-    Does some basic postprocessing on the wrfout files:
-    - Make units pint friendly
-    - Rename dimensions to (t, x, y, z)
-    - Destagger variables
-    - Compute derived variables such as air temperature and earth-relative wind speed
-    - Computes X and Y arrays in the model's projection for interpolation purposes
-    - If `postprocess.variables_to_keep` is set in the config, apply the list of regex
-      filters to the netCDF variables. Anything not matching at least one regex is removed.
-    Essentially uses the excellent [xwrf](https://github.com/xarray-contrib/xwrf) to make the files a bit more CF-compliant.
+    Apply the configured data processor pipeline to output files.
 
-    This function is applied to each wrfout file before computing statistics (mean/SD).
+    This command replaces apply-scripts with a more efficient plugin-based approach
+    that processes data in memory using a configurable pipeline of DataProcessor instances.
     """
 
-    logger.setup("postprocess-wrf_post", experiment_path)
+    logger.setup("postprocess-process-pipeline", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
     if cycle is None:
@@ -111,139 +105,77 @@ def wrf_post(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
     jobs = utils.determine_jobs(jobs)
     logger.info(f"Using {jobs} jobs")
 
-    files_to_process = []
+    try:
+        pipeline = processors.create_pipeline_from_config(
+            exp.cfg.postprocess.processors
+        )
+        logger.info(
+            f"Created pipeline with processors: {[p.name for p in pipeline.processors]}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to create processor pipeline: {e}")
+        sys.exit(1)
 
-    # Find all forecast files, clean any old `_post` first
     scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
+    scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
+
+    # Clean any old _post files first
     for f in scratch_forecast_dir.rglob("wrfout*_post"):
         logger.debug(f"Removing old file {f}")
         f.unlink()
-
-    forecast_files = list(scratch_forecast_dir.rglob("member_*/wrfout*"))
-    for f in forecast_files:
-        output_path = f.parent / f"{f.name}_post"
-        if output_path.exists():
-            output_path.unlink()
-        files_to_process.append((f, output_path, exp.cfg.postprocess.variables_to_keep))
-
-    # Find all analysis files, clean any old `_post` first
-    scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
     for f in scratch_analysis_dir.rglob("wrfout*_post"):
         logger.debug(f"Removing old file {f}")
         f.unlink()
 
-    analysis_files = scratch_analysis_dir.rglob("member_*/wrfout*")
-    for f in analysis_files:
-        output_path = f.parent / f"{f.name}_post"
-        if output_path.exists():
-            output_path.unlink()
-        files_to_process.append((f, output_path, exp.cfg.postprocess.variables_to_keep))
-
-    # Execute commands
-    logger.info(
-        f"Processing {len(files_to_process)} files in parallel, using {jobs} jobs"
+    files_to_process = list(scratch_analysis_dir.rglob("member_*/wrfout*")) + list(
+        scratch_forecast_dir.rglob("member_*/wrfout*")
     )
-    for old, new, _ in files_to_process:
-        logger.info(
-            f"{old.relative_to(old.parent.parent)} -> {new.relative_to(new.parent.parent)}"
-        )
+    # Filter out any _post files that might still exist, just in case?
+    files_to_process = [f for f in files_to_process if not f.name.endswith("_post")]
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=jobs) as executor:
-        results = executor.map(postprocess._xwrf_post, files_to_process)
-        for _ in results:
-            pass
-
-
-@postprocess_cli.command()
-@click.option(
-    "--cycle",
-    type=int,
-    help="Cycle to compute statistics for. Will compute for all current cycle if missing.",
-)
-@click.option(
-    "--jobs",
-    type=click.IntRange(min=0, max=None),
-    help="How many files to process in parallel",
-)
-@click.option(
-    "--keep-temp",
-    is_flag=True,
-    help="Keep temporary files after processing (scratch/postprocessing)",
-)
-@pass_experiment_path
-def apply_scripts(
-    experiment_path: Path, cycle: Optional[int], jobs: Optional[int], keep_temp: bool
-):
-    """
-    Apply postprocessing scripts to the output files.
-    The scripts are defined in the `PostprocessConfig:scripts` variable of the
-    configuration file.
-    """
-
-    logger.setup("postprocess-wrf_post", experiment_path)
-    exp = experiment.Experiment(experiment_path)
-
-    if cycle is None:
-        cycle = exp.current_cycle_i
-
-    logger.info(f"Cycle: {exp.cycles[cycle]}")
-
-    jobs = utils.determine_jobs(jobs)
-    logger.info(f"Using {jobs} jobs")
-
-    # Sanity check that the scripts are defined
-    if len(exp.cfg.postprocess.scripts) == 0:
-        logger.error("No postprocessing scripts defined, exiting")
-        sys.exit(0)
-
-    # Gather all the files for processing
-    scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
-    scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
-    files_to_process = list(scratch_analysis_dir.rglob("wrfout*_post")) + list(
-        scratch_forecast_dir.rglob("wrfout*_post")
-    )
     logger.info(f"Found {len(files_to_process)} files to process")
 
-    # Create a scratch dir. for temporary files
-    scratch_dir = exp.paths.scratch / "postprocess" / f"cycle_{cycle:03d}"
-    scratch_dir.mkdir(parents=True, exist_ok=True)
+    if len(files_to_process) == 0:
+        logger.warning("No files found to process")
+        return
 
-    # Prepare commands and a directory for each file
-    results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as executor:
-        for i, f in enumerate(files_to_process):
-            workdir = scratch_dir / f"{i}"
-            workdir.mkdir(exist_ok=True)
+    # Create processor arguments for each file
+    process_args = []
+    for file_path in files_to_process:
+        # Extract metadata from file path
+        member_match = re.search(r"member_(\d+)", str(file_path))
+        member_id = int(member_match.group(1)) if member_match else 0
 
-            results.append(
-                executor.submit(
-                    postprocess.apply_scripts_to_file,
-                    exp.cfg.postprocess.scripts,
-                    f,
-                    workdir,
-                )
-            )
+        # Create output file path with _post suffix
+        output_file = file_path.parent / f"{file_path.name}_post"
 
-        # If finished successfully, move the files back
-        results = [x for x in concurrent.futures.as_completed(results)]
-
-    # Only move files if all were successful
-    # It would throw an error is any of the commands failed, so by this point we know all were successful
-    try:
-        for res in results:
-            orig_path, target_path = res.result()
-            logger.debug(f"Moving {target_path} to {orig_path}")
-            orig_path.unlink()
-            target_path.rename(orig_path)
-    except external.ExternalProcessFailed:
-        logger.error(
-            "At least one of the postprocessing scripts failed, files are NOT modified!"
+        context = ProcessingContext(
+            member=member_id,
+            cycle=cycle,
+            input_file=file_path,
+            output_file=output_file,
+            config=exp.cfg,
         )
 
-    # Clean up the scratch directory
-    if not keep_temp:
-        logger.debug(f"Removing temp. directory {scratch_dir}")
-        utils.rm_tree(scratch_dir)
+        process_args.append(
+            (file_path, output_file, exp.cfg.postprocess.processors, context)
+        )
+
+    logger.info(f"Processing {len(files_to_process)} files through pipeline")
+    with concurrent.futures.ProcessPoolExecutor(max_workers=jobs) as executor:
+        futures = [
+            executor.submit(process_file_with_pipeline, args) for args in process_args
+        ]
+
+        # Wait for all to complete and handle any errors
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                logger.error(f"Pipeline processing failed: {e}")
+                sys.exit(1)
+
+    logger.info("Pipeline processing completed successfully")
 
 
 @postprocess_cli.command()
