@@ -36,6 +36,8 @@ class ExperimentDatabase:
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
+            conn.execute("PRAGMA journal_mode = WAL")  # Better concurrency
+
             # Only one row allowed in ExperimentState
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS ExperimentState (
@@ -83,7 +85,6 @@ class ExperimentDatabase:
         try:
             conn = sqlite3.connect(self.db_path, timeout=30.0)
             conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute("PRAGMA journal_mode = WAL")  # Better concurrency
             yield conn
         except Exception as e:
             if conn:
