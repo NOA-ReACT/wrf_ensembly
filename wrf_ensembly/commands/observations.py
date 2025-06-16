@@ -356,3 +356,75 @@ def preprocess_for_wrf(experiment_path: Path, backup: bool):
             exp.cfg.observations.boundary_error_factor,
             exp.cfg.observations.boundary_error_width,
         )
+
+
+@observations_cli.command()
+@click.argument("cycle", required=True, type=int)
+@click.option(
+    "--write-to-file",
+    type=click.Path(path_type=Path),
+    help="Write filenames to the specified text file (one per line)",
+)
+@pass_experiment_path
+def list_files(experiment_path: Path, cycle: int, write_to_file: Optional[Path]):
+    """Lists observation files that match the given cycle's assimilation window"""
+
+    logger.setup("observations-list-files", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    # Find the specified cycle
+    cycles = [c for c in exp.cycles if c.index == cycle]
+    if not cycles:
+        logger.error(f"Cycle {cycle} not found!")
+        sys.exit(1)
+
+    target_cycle = cycles[0]
+
+    # Prepare observation groups
+    obs_path = exp.paths.obs
+    obs_groups = observations.read_observations(obs_path)
+    names = list(obs_groups.keys())
+
+    if len(names) == 0:
+        logger.error("No observation groups found!")
+        sys.exit(1)
+
+    # Calculate assimilation window (same logic as convert_obs)
+    assimilation_window_start = target_cycle.end - dt.timedelta(minutes=30)
+    assimilation_window_end = target_cycle.end + dt.timedelta(minutes=30)
+
+    logger.info(f"Cycle {cycle} assimilation window:")
+    logger.info(f"  Start: {assimilation_window_start.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"  End: {assimilation_window_end.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("")
+
+    # Find matching files for each observation group
+    total_files = 0
+    all_files = []
+    for group_name, obs_group in obs_groups.items():
+        matching_files = list(
+            obs_group.get_files_in_window(
+                assimilation_window_start, assimilation_window_end
+            )
+        )
+
+        logger.info(
+            f"Group '{group_name}' ({obs_group.kind}): {len(matching_files)} files"
+        )
+        for file in matching_files:
+            logger.info(f"  {file.path}")
+            all_files.append(str(file.path))
+
+        total_files += len(matching_files)
+        if matching_files:
+            logger.info("")
+
+    logger.info(f"Total files: {total_files}")
+
+    # Write to file if requested
+    if write_to_file:
+        write_to_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(write_to_file, "w") as f:
+            for filepath in all_files:
+                f.write(f"{filepath}\n")
+        logger.info(f"Filenames written to {write_to_file}")
