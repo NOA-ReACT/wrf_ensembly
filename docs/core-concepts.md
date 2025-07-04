@@ -25,7 +25,7 @@ flowchart LR
   observations[("Observations")] --> dart
 ```
 
-Since the system is an **Ensemble** assimilation system, the forward run is actually a set of forward runs, one for each member of the ensemble. Then, DART is used to produce the analysis (for all members) and you can optionally use essembly to get ensemble statistics (e.g. mean, spread).
+Since the system is an **Ensemble** assimilation system, the forward run is actually a set of forward runs, one for each member of the ensemble. Then, DART is used to produce the analysis (for all members) and you can optionally use ensembly to get ensemble statistics (e.g. mean, spread).
 
 Since the output of WRF does not include all variables to start the model (think SST, the model doesn't advance it but you need it to initialise), at the end of each cycle we combine the analysis with a set of initial conditions generated for that cycle's end time. Hopefully the figure below clarifies this:
 
@@ -113,13 +113,15 @@ Experiments are configured through the `config.toml` file, in [TOML format](http
 In the typical WRF-Ensembly workflow, we don't use the raw wrfout files. The following steps are followed before you get the output **forecast**/**analysis** files:
 
 1. Use [xwrf](https://github.com/xarray-contrib/xwrf) to make the files a bit more convenient (shorter dimension names, some diagnostics computed, CF-compliant attributes added). Remove any uneeded variables to save space.
-2. Optionally, apply external scripts to compute diagnostics.
+2. Optionally, apply any external processors on the files.
 3. Concatenate all files into a single file, one per cycle and member.
 4. Compute the ensemble statistics (mean and standard deviation), leaving you with two files per cycle.
 
 During the final steps, the files are also compressed using a netCDF-compatible algorithm (zstd is recommended, but zlib is more widely available) and the variables are 'packed' to avoid storing too many insignificant digits. Both these processes are optional and configurable (see the `[postprocess]` section of the [Configuration](./configuration.md#Postprocess)). The user can select whether to store only the ensemble statistics or all member files, the first cutting down the output size significantly.
 
 Because there are many tools that use raw wrfout files, the above is all optional. You can find the wrfout files inside the `scratch/` directory.
+
+More information about postprocessing is available in the [Postprocessing](./postprocessing.md) section, including how the processing pipeline is setup.
 
 
 ## HPC intergration (SLURM)
@@ -157,7 +159,7 @@ If for any reason the experiment is interrupted, it can be resumed without re-ru
 
 ## Experiment status tracking
 
-The status of the experiment is tracked through a `status.toml` file, which stores the current cycle, which members have been advanced (i.e. WRF successfully completed) and whether assimilation filter has been completed. It also stores some statistics about how long it took to advance each member to the next cycle. Rarely, you might want to edit this file so you can repeat a step (like running the assimilation filter) after a configuration change.
+The status of the experiment is tracked through a `status.db` file, which stores the current cycle, which members have been advanced (i.e. WRF successfully completed) and whether assimilation filter has been completed. It also stores some statistics about how long it took to advance each member to the next cycle. The file is an sqlite database which can be inspected with any sqlite client, but you also have a set of commands available (`wrf-ensembly status`). More info in the [Status](./status.md) section.
 
 
 # What to read next

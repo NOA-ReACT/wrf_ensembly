@@ -48,3 +48,7 @@ poetry install
 ```
 
 Poetry should create a virtual environment for you that contains WRF-Ensembly in editable mode. Any changes you make in the repository should apply to the `wrf-ensembly` command.
+
+## Read next
+
+You can either go through the [Usage](./usage.md) section to learn how to use WRF-Ensembly, or you can read about the [Core concepts](./core-concepts.md) to understand how it works. There is also a [Tutorial](./tutorial.md) that walks you through a simple experiment.
