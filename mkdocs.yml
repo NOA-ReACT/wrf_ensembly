@@ -4,23 +4,35 @@ repo_url: https://github.com/NOA-ReACT/wrf_ensembly
 theme:
   name: terminal
 
-plugins:
-  - mermaid2
-
 markdown_extensions:
   - attr_list
   - md_in_html
   - mkdocs-click
   - toc:
       permalink: true
+  - pymdownx.superfences:
+      preserve_tabs: true
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid
+  - pymdownx.highlight:
+      use_pygments: true
+      pygments_style: default
+      noclasses: true
+  - pymdownx.inlinehilite
+
+extra_javascript:
+  - config.js
+  - https://cdn.jsdelivr.net/npm/mermaid@11.7.0/dist/mermaid.min.js
 
 nav:
   - Home: index.md
   - Core Concepts: core-concepts.md
-  - Getting Started: getting-started.md
+  - Tutorial: tutorial.md
   - User Guide:
-    - Installation: user-guide/installation.md
-    - Configuration: user-guide/configuration.md
-    - Usage Examples: user-guide/examples.md
+    - Installation: installation.md
+    - Usage: usage.md
+    - Configuration: configuration.md
+    - Postprocessing: postprocessing.md
   - API Reference: api-reference.md
-  - Contributing: contributing.md

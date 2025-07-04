@@ -38,6 +38,8 @@ mkdocs = "^1.6.1"
 mkdocs-terminal = "^4.7.0"
 mkdocs-click = "^0.9.0"
 mkdocs-mermaid2-plugin = "^1.2.1"
+pygments = "^2.19.2"
+pymdown-extensions = "^10.16"
 
 [build-system]
 requires = ["poetry-core"]
