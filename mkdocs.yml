@@ -34,5 +34,5 @@ nav:
     - Installation: installation.md
     - Usage: usage.md
     - Configuration: configuration.md
-    - Postprocessing: postprocessing.md
-  - API Reference: api-reference.md
+    - Postprocessing: postprocess.md
+    - WRF-Chem: wrf-chem.md
