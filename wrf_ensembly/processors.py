@@ -106,20 +106,20 @@ class XWRFPostProcessor(DataProcessor):
         ).rename({"bottom_top_stag": "bottom_top"})  # Destagger vertically
         ph_e = ph_e / ds.DNW
 
-        ds["air_density"] = -(ds.MUB + ds.MU) / ph_e
+        ds["air_density"] = (-(ds.MUB + ds.MU) / ph_e).compute()
         ds["air_density"].attrs = {
             "units": "kg m-3",
             "standard_name": "air_density",
         }
 
         # Compute more diagnostics and destagger
-        ds = ds.xwrf.postprocess().xwrf.destagger()
+        ds = ds.xwrf.postprocess().xwrf.destagger().compute()
 
         # Fix time dimension
         ds = ds.drop_vars("Time")
         ds = ds.rename({"XTIME": "t"})
         ds = ds.set_xindex("t")
-        ds = ds.rename({"Time": "t"})
+        ds = ds.swap_dims({"Time": "t"})
         ds.t.attrs["standard_name"] = "time"
         ds.t.attrs["axis"] = "T"
 
