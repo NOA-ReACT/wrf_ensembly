@@ -67,7 +67,9 @@ def setup(experiment_path: Path):
 @click.argument(
     "other-experiment", type=click.Path(dir_okay=True, file_okay=False, path_type=Path)
 )
-@click.option("--cycle", required=True, help="Which cycle to use for initialisation")
+@click.option(
+    "--cycle", type=int, required=True, help="Which cycle to use for initialisation"
+)
 @pass_experiment_path
 def setup_from_other_experiment(
     experiment_path: Path, other_experiment: Path, cycle: int
