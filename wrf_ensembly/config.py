@@ -235,6 +235,9 @@ class AssimilationConfig:
     filter_mpi_tasks: int = 1
     """If != 1, then filter will be executed w/ MPI and this many tasks (mpirun -n <filter_mpi_tasks>). Also check `slurm.mpirun_command`."""
 
+    half_window_length_minutes: int = 30
+    """Half-length of the window in which observations will be considered, in minutes. For example, if set to 30, then observations from 30 minutes before and after the cycle end time will be used. Default is 30 minutes."""
+
 
 @dataclass
 class ObservationsConfig:

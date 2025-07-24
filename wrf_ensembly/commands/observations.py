@@ -59,9 +59,12 @@ def convert_obs(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]
     for c in cycles:
         cycle_files[c.index] = {}
 
-        # TODO Calculate window length!
-        assimilation_window_start = c.end - dt.timedelta(minutes=30)
-        assimilation_window_end = c.end + dt.timedelta(minutes=30)
+        assimilation_window_start = c.end - dt.timedelta(
+            minutes=exp.cfg.assimilation.half_window_length_minutes
+        )
+        assimilation_window_end = c.end + dt.timedelta(
+            minutes=exp.cfg.assimilation.half_window_length_minutes
+        )
 
         for key, obs_group in obs_groups.items():
             cycle_files[c.index][key] = []
