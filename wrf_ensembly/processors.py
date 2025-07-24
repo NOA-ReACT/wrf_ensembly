@@ -8,8 +8,10 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+import traceback
 from typing import List
 
+import numpy as np
 import xarray as xr
 import xwrf  # noqa: F401
 
@@ -98,22 +100,26 @@ class XWRFPostProcessor(DataProcessor):
         """Apply xWRF postprocessing operations."""
         logger.debug(f"Applying xWRF postprocessing with {self.name}")
 
-        # Compute air density
-        ph_e = ds["PH"] + ds["PHB"]
-        ph_e = (
-            ph_e.isel(bottom_top_stag=slice(1, None))
-            - ph_e.isel(bottom_top_stag=slice(None, -1))
-        ).rename({"bottom_top_stag": "bottom_top"})  # Destagger vertically
-        ph_e = ph_e / ds.DNW
+        # Get model level thickness before destaggering
+        geopotential = ds["PH"] + ds["PHB"]
+        height = geopotential / 9.81
+        model_level_thickness = np.diff(height, axis=1)  # This is a numpy array
 
-        ds["air_density"] = (-(ds.MUB + ds.MU) / ph_e).compute()
+        # Compute more diagnostics and destagger
+        ds = ds.xwrf.postprocess().xwrf.destagger().compute()
+        ds["level_thickness"] = (("t", "z", "y", "x"), model_level_thickness)
+
+        # Compute air density
+        column_mass_per_area = (ds["MU"] + ds["MUB"]) / 9.81
+        layer_mass_per_area = np.stack(
+            [column_mass_per_area.values] * ds.sizes["z"], axis=1
+        ) * (-ds["DNW"].values.reshape(-1, 1, 1))
+        air_density = layer_mass_per_area / model_level_thickness
+        ds["air_density"] = (("t", "z", "y", "x"), air_density)
         ds["air_density"].attrs = {
             "units": "kg m-3",
             "standard_name": "air_density",
         }
-
-        # Compute more diagnostics and destagger
-        ds = ds.xwrf.postprocess().xwrf.destagger().compute()
 
         # Fix time dimension
         ds = ds.drop_vars("Time")
@@ -406,5 +412,5 @@ def process_file_with_pipeline(args):
         logger.debug(f"Successfully processed {input_file} -> {output_file}")
 
     except Exception as e:
-        logger.error(f"Error processing {input_file}: {e}")
+        logger.error(f"Error processing {input_file}: {e} ({traceback.format_exc()})")
         raise
