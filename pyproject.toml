@@ -1,49 +1,46 @@
-[tool.poetry]
+[project]
 name = "wrf-ensembly"
 version = "0.11.0"
 description = "Support scripts for using DART w/ WRF"
-authors = ["Thanasis Georgiou <ageorgiou@noa.gr>"]
+authors = [{ name = "Thanasis Georgiou", email = "ageorgiou@noa.gr" }]
 readme = "README.md"
-packages = [{ include = "wrf_ensembly" }]
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "netcdf4>=1.7.2",
+  "tomli>=2.2.1",
+  "rich>=14.0.0",
+  "jinja2>=3.1.6",
+  "scipy>=1.15.3",
+  "matplotlib>=3.10.3",
+  "tomli-w>=1.2.0",
+  "xarray>=2025.4.0",
+  "cartopy>=0.24.1",
+  "pytest>=7.4.3",
+  "click>=8.2.0",
+  "setuptools>=80.7.1",
+  "dataclass-binder>=0.3.4",
+  "mashumaro[toml]>=3.15",
+  "interpolator-for-wrfchem>=1.5.0",
+  "xwrf>=0.0.4",
+]
 
-[tool.poetry.scripts]
-wrf-ensembly = "wrf_ensembly:wrf_ensembly.cli"
+[project.scripts]
+wrf-ensembly = "wrf_ensembly.wrf_ensembly:cli"
 
-[tool.poetry.dependencies]
-python = "^3.11,<3.14"
-netcdf4 = "^1.7.2"
-tomli = "^2.2.1"
-rich = "^14.0.0"
-jinja2 = "^3.1.6"
-scipy = "^1.15.3"
-matplotlib = "^3.10.3"
-tomli-w = "^1.2.0"
-xarray = "^2025.4.0"
-cartopy = "^0.24.1"
-pytest = "^7.4.3"
-click = "^8.2.0"
-setuptools = "^80.7.1"
-dataclass-binder = "^0.3.4"
-mashumaro = { extras = ["toml"], version = "^3.15" }
-interpolator-for-wrfchem = "^1.4.0"
-xwrf = "^0.0.4"
-
-
-[tool.poetry.group.dev.dependencies]
-ipykernel = "^6.29.5"
-
-
-[tool.poetry.group.docs.dependencies]
-mkdocs = "^1.6.1"
-mkdocs-terminal = "^4.7.0"
-mkdocs-click = "^0.9.0"
-mkdocs-mermaid2-plugin = "^1.2.1"
-pygments = "^2.19.2"
-pymdown-extensions = "^10.16"
+[project.optional-dependencies]
+dev = ["ipykernel>=6.29.5"]
+docs = [
+  "mkdocs>=1.6.1",
+  "mkdocs-terminal>=4.7.0",
+  "mkdocs-click>=0.9.0",
+  "mkdocs-mermaid2-plugin>=1.2.1",
+  "pygments>=2.19.2",
+  "pymdown-extensions>=10.16",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.isort]
 profile = "black"

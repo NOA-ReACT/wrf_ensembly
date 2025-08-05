@@ -39,15 +39,15 @@ conda install -c conda-forge cdo nco
 
 ## Development & Contributing
 
-If you want to contribute to WRF-Ensembly, you can clone the repository and install it in editable mode. This allows you to make changes to the code and test them without reinstalling the package. We use [Poetry](https://python-poetry.org/) for dependency management and packaging. After installing poetry, clone the repository and install the dependencies:
+If you want to contribute to WRF-Ensembly, you can clone the repository and install it in editable mode. This allows you to make changes to the code and test them without reinstalling the package. We use [uv](https://docs.astral.sh/uv/) for dependency management and packaging. After installing uv, clone the repository and install the dependencies:
 
 ```bash
 git clone https://github.com/NOA-ReACT/wrf_ensembly.git
 cd wrf_ensembly
-poetry install
+uv sync
 ```
 
-Poetry should create a virtual environment for you that contains WRF-Ensembly in editable mode. Any changes you make in the repository should apply to the `wrf-ensembly` command.
+uv will create a virtual environment for you that contains WRF-Ensembly in editable mode. Any changes you make in the repository should apply to the `wrf-ensembly` command.
 
 ## Read next
 
