@@ -162,12 +162,21 @@ class XWRFPostProcessor(DataProcessor):
             ds.longitude.attrs["axis"] = "X"
             ds.latitude.attrs["axis"] = "Y"
 
-        # Filter variables if needed
+        # Filter variables if needed, ensuring we keep time and vertical coordinates
         variables_to_keep = context.config.postprocess.variables_to_keep
         if variables_to_keep:
             patterns = [re.compile(v) for v in variables_to_keep]
-            ds = ds[[v for v in ds.data_vars if any(p.match(str(v)) for p in patterns)]]
+            vars_to_drop = [
+                v for v in ds.data_vars if not any(p.match(str(v)) for p in patterns)
+            ]
+            ds = ds.drop_vars(vars_to_drop)
 
+        # Remove staggered dimensions
+        ds = ds.drop_vars(
+            ["XLAT_U", "XLONG_U", "XLAT_V", "XLONG_V", "x_stag", "y_stag", "z_stag"]
+        )
+
+        print(ds.coords)
         return ds
 
     @property
