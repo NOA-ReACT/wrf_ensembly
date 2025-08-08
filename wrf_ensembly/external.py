@@ -95,25 +95,45 @@ def runc(
     return run(ExternalProcess(command, cwd, log_filename))
 
 
-def run_in_parallel(commands: list[ExternalProcess], max_processes: int = 1):
+def run_in_parallel(
+    commands: list[ExternalProcess],
+    max_processes: int = 1,
+    stop_on_failure: bool = False,
+):
     """
     Runs a list of commands in parallel, with a maximum of `max_processes` processes running at the same time.
+    If stop_on_failure is True, cancels remaining jobs when the first failure occurs.
     """
 
     with ThreadPoolExecutor(max_workers=max_processes) as executor:
         futures = [executor.submit(run, command) for command in commands]
 
-    for future in as_completed(futures):
-        res = future.result()
-        str_cmd = " ".join(res.command)
+        try:
+            for future in as_completed(futures):
+                res = future.result()
+                str_cmd = " ".join(res.command)
 
-        if res.returncode != 0:
-            logger.error(f"Command {str_cmd} failed with return code {res.returncode}")
-        else:
-            logger.debug(
-                f"Command {str_cmd} finished with return code {res.returncode}"
-            )
-        yield res
+                if res.returncode != 0:
+                    logger.error(
+                        f"Command {str_cmd} failed with return code {res.returncode}"
+                    )
+                    if stop_on_failure:
+                        # Cancel all remaining futures
+                        for f in futures:
+                            f.cancel()
+                        yield res
+                        return
+                else:
+                    logger.debug(
+                        f"Command {str_cmd} finished with return code {res.returncode}"
+                    )
+                yield res
+        except KeyboardInterrupt:
+            logger.info("KeyboardInterrupt received, cancelling remaining jobs...")
+            # Cancel all futures
+            for f in futures:
+                f.cancel()
+            raise
 
 
 def assert_all_successful(results: list[ExternalProcessResult]):
