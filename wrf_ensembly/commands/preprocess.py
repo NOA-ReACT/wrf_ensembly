@@ -164,7 +164,7 @@ def ungrib(experiment_path: Path, member: Optional[int]):
     if i == -1:
         logger.error("No GRIB files found")
         sys.exit(1)
-    logger.info(f"Linked {i+1} GRIB files to {wps_dir} from {data_dir}")
+    logger.info(f"Linked {i + 1} GRIB files to {wps_dir} from {data_dir}")
 
     # Run ungrib.exe
     ungrib_path = wps_dir / "ungrib.exe"
@@ -397,7 +397,6 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optiona
                 "interpolator-for-wrfchem",
                 chem.model_name,
                 chem.path,
-                met_em_path,
                 mapping_path,
                 wrfinput_path,
             ],
@@ -406,6 +405,11 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optiona
     )
     for cycle in exp.cycles:
         if exp.cfg.data.per_member_meteorology:
+            wrfinput_path = (
+                exp.paths.data_icbc
+                / f"member_{member:02d}"
+                / f"wrfinput_d01_member_{member:02d}_cycle_{cycle.index}"
+            )
             wrfbdy_path = (
                 exp.paths.data_icbc
                 / f"member_{member:02d}"
@@ -413,13 +417,13 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optiona
             )
         else:
             wrfbdy_path = exp.paths.data_icbc / f"wrfbdy_d01_cycle_{cycle.index}"
+            wrfinput_path = exp.paths.data_icbc / f"wrfinput_d01_cycle_{cycle.index}"
         commands.append(
             external.ExternalProcess(
                 [
                     "interpolator-for-wrfchem",
                     chem.model_name,
                     chem.path,
-                    met_em_path,
                     mapping_path,
                     wrfinput_path,
                     f"--wrfbdy={wrfbdy_path}",
@@ -440,7 +444,7 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optiona
             logger.warning(
                 "No job count specified (--jobs or SLURM_NTASKS), running with 1 job"
             )
-    for res in external.run_in_parallel(commands, jobs):
+    for res in external.run_in_parallel(commands, jobs, stop_on_failure=True):
         if res.returncode != 0:
             logger.error(
                 f"interpolator-for-wrfchem failed with exit code {res.returncode}"
