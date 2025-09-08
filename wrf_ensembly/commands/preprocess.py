@@ -4,8 +4,12 @@ import sys
 from itertools import chain
 from pathlib import Path
 from typing import Optional
+import datetime as dt
 
 import click
+from interpolator_for_wrfchem.global_models import (
+    GLOBAL_MODELS as INTERPOLATOR_GLOBAL_MODELS,
+)
 
 from wrf_ensembly import config, experiment, external, utils, wrf
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
@@ -375,6 +379,23 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optiona
         logger.error(f"Species mapping file {mapping_path.resolve()} does not exist")
         sys.exit(1)
 
+    # Check that the provided global model contains data for all our cycles
+    global_model = INTERPOLATOR_GLOBAL_MODELS[chem.model_name](chem.path, mapping_path)
+    global_model_times = [t.replace(tzinfo=dt.timezone.utc) for t in global_model.times]
+    missing_times = []
+    for cycle in exp.cycles:
+        if cycle.start not in global_model_times:
+            missing_times.append(cycle.start)
+        if cycle.end not in global_model_times:
+            missing_times.append(cycle.end)
+
+    if missing_times:
+        string_times = ", ".join([str(t) for t in missing_times])
+        logger.error(
+            f"Global model is missing data for the following times: {string_times}"
+        )
+        sys.exit(1)
+
     # Disable HDF5 locking since we are taking care only to write from one process at each file
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"  # Good luck!
 
@@ -382,7 +403,6 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optiona
     # The necessary commands are gathered inside the array to run in parallel.
     commands = []
 
-    met_em_path = exp.paths.work_preprocessing_wps
     if exp.cfg.data.per_member_meteorology:
         wrfinput_path = (
             exp.paths.data_icbc
