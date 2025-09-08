@@ -107,6 +107,16 @@ class XWRFPostProcessor(DataProcessor):
 
         # Compute more diagnostics and destagger
         ds = ds.xwrf.postprocess().xwrf.destagger().compute()
+
+        # Fix time dimension
+        ds = ds.swap_dims({"Time": "t"})
+        ds = ds.rename({"XTIME": "t"})
+        ds = ds.set_xindex("t")
+        ds = ds.drop_vars("Time")
+        ds.t.attrs["standard_name"] = "time"
+        ds.t.attrs["axis"] = "T"
+
+        # Store level thickness
         ds["level_thickness"] = (("t", "z", "y", "x"), model_level_thickness)
 
         # Compute air density
@@ -121,13 +131,13 @@ class XWRFPostProcessor(DataProcessor):
             "standard_name": "air_density",
         }
 
-        # Fix time dimension
-        ds = ds.drop_vars("Time")
-        ds = ds.rename({"XTIME": "t"})
-        ds = ds.set_xindex("t")
-        ds = ds.swap_dims({"Time": "t"})
-        ds.t.attrs["standard_name"] = "time"
-        ds.t.attrs["axis"] = "T"
+        # Rename XLONG and XLAT to longitude and latitude
+        if "XLONG" in ds and "XLAT" in ds:
+            ds = ds.rename({"XLONG": "longitude", "XLAT": "latitude"})
+            ds.longitude.attrs["standard_name"] = "longitude"
+            ds.latitude.attrs["standard_name"] = "latitude"
+            ds.longitude.attrs["axis"] = "X"
+            ds.latitude.attrs["axis"] = "Y"
 
         # Since the projection object is not serialisable, we need to drop it before saving
         ds = ds.drop_vars("wrf_projection")
@@ -154,14 +164,6 @@ class XWRFPostProcessor(DataProcessor):
                 ds[var].encoding["coordinates"] = coordinates
         ds = ds.drop("CLAT")
 
-        # Rename XLONG and XLAT to longitude and latitude
-        if "XLONG" in ds and "XLAT" in ds:
-            ds = ds.rename({"XLONG": "longitude", "XLAT": "latitude"})
-            ds.longitude.attrs["standard_name"] = "longitude"
-            ds.latitude.attrs["standard_name"] = "latitude"
-            ds.longitude.attrs["axis"] = "X"
-            ds.latitude.attrs["axis"] = "Y"
-
         # Filter variables if needed, ensuring we keep time and vertical coordinates
         variables_to_keep = context.config.postprocess.variables_to_keep
         if variables_to_keep:
@@ -176,7 +178,6 @@ class XWRFPostProcessor(DataProcessor):
             ["XLAT_U", "XLONG_U", "XLAT_V", "XLONG_V", "x_stag", "y_stag", "z_stag"]
         )
 
-        print(ds.coords)
         return ds
 
     @property
