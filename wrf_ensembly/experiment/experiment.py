@@ -10,7 +10,7 @@ from wrf_ensembly import (
     config,
     cycling,
     external,
-    observations,
+    obs_sequence,
     perturbations,
     update_bc,
     utils,
@@ -457,7 +457,7 @@ class Experiment:
             self.paths.data_diag / f"cycle_{self.current_cycle_i}.obs_seq.final",
         )
         obs_seq_final_nc = self.paths.data_diag / f"cycle_{self.current_cycle_i}.nc"
-        observations.obs_seq_to_nc(
+        obs_sequence.obs_seq_to_nc(
             self.cfg.directories.dart_root, obs_seq_final, obs_seq_final_nc
         )
 

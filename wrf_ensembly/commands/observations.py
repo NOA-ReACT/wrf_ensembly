@@ -10,7 +10,7 @@ import pandas as pd
 from rich.console import Console
 from rich.table import Column, Table
 
-from wrf_ensembly import experiment, external, observations, utils
+from wrf_ensembly import experiment, external, obs_sequence, utils
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 
@@ -45,7 +45,7 @@ def convert_obs(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]
 
     # Prepare observation groups for all toml file
     obs_path = exp.paths.obs
-    obs_groups = observations.read_observations(obs_path)
+    obs_groups = obs_sequence.read_observations(obs_path)
     names = list(obs_groups.keys())
 
     if len(names) == 0:
@@ -154,7 +154,7 @@ def combine_obs(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]
         cycles = [c for c in cycles if c.index == cycle]
 
     obs_path = exp.paths.obs
-    obs_groups = observations.read_observations(obs_path)
+    obs_groups = obs_sequence.read_observations(obs_path)
     names = list(obs_groups.keys())
 
     if len(names) == 0:
@@ -189,7 +189,7 @@ def combine_obs(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]
 
             futures.append(
                 executor.submit(
-                    observations.join_obs_seq,
+                    obs_sequence.join_obs_seq,
                     exp.cfg,
                     cycle_files_list,
                     obs_path / f"cycle_{c.index}.obs_seq",
@@ -230,7 +230,7 @@ def prepare_custom_window(
 
     # Prepare observation groups for all toml file
     obs_path = exp.paths.obs
-    obs_groups = observations.read_observations(obs_path)
+    obs_groups = obs_sequence.read_observations(obs_path)
     names = list(obs_groups.keys())
 
     if len(names) == 0:
@@ -267,7 +267,7 @@ def prepare_custom_window(
     # Join files for this group
     logger.info("Joining files...")
     kinds = [v.kind for v in obs_groups.values()]
-    observations.join_obs_seq(exp.cfg, window_files, output_path, kinds)
+    obs_sequence.join_obs_seq(exp.cfg, window_files, output_path, kinds)
 
     # Remove temporary files
     for f in window_files:
@@ -287,7 +287,7 @@ def obs_seq_to_nc(experiment_path: Path, obs_seq_path: Path, nc_path: Path):
     exp.set_dart_environment()
     logger.setup("observations-convert-obs-seq", experiment_path)
 
-    observations.obs_seq_to_nc(exp.cfg.directories.dart_root, obs_seq_path, nc_path)
+    obs_sequence.obs_seq_to_nc(exp.cfg.directories.dart_root, obs_seq_path, nc_path)
 
 
 @observations_cli.command()
@@ -350,7 +350,7 @@ def preprocess_for_wrf(experiment_path: Path, backup: bool):
         assimilation_dt = assimilation_dt.replace(tzinfo=dt.timezone.utc)
 
         logger.info(f"Preprocessing {obs_seq}")
-        observations.preprocess_for_wrf(
+        obs_sequence.preprocess_for_wrf(
             exp.cfg.directories.dart_root,
             wrfinput,
             obs_seq,
@@ -385,7 +385,7 @@ def list_files(experiment_path: Path, cycle: int, write_to_file: Optional[Path])
 
     # Prepare observation groups
     obs_path = exp.paths.obs
-    obs_groups = observations.read_observations(obs_path)
+    obs_groups = obs_sequence.read_observations(obs_path)
     names = list(obs_groups.keys())
 
     if len(names) == 0:
