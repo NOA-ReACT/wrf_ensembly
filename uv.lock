@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11, <3.14"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -1778,7 +1778,7 @@ requires-dist = [
     { name = "tomli", specifier = ">=2.2.1" },
     { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "xarray", specifier = ">=2025.4.0" },
-    { name = "xwrf", specifier = ">=0.0.4" },
+    { name = "xwrf", specifier = "==0.0.5" },
 ]
 provides-extras = ["dev", "docs"]
 
@@ -1798,14 +1798,14 @@ wheels = [
 
 [[package]]
 name = "xwrf"
-version = "0.0.4"
+version = "0.0.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "donfig" },
     { name = "pyproj" },
     { name = "xarray" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5b/d6/a433dcfb41585a82ad6f01d4f6fbd5aea223ca4da8ec4bd2dff6a2f61408/xwrf-0.0.4.tar.gz", hash = "sha256:88456783df035e6c5d07f60d402f382663e20b2c808417bcdf9461d07fddf8be", size = 48202, upload-time = "2024-05-09T12:51:39.564Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fd/7b/c4b7e35923922b0b50ab0f9ed014054834d1a20883ae2aed2dd02ee8ea9a/xwrf-0.0.5.tar.gz", hash = "sha256:d7821a2fc001c009bf80a717decf2504f507365f5e3e159930654c5de0f60923", size = 48513, upload-time = "2025-09-02T18:17:43.119Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/80/ff/304123d20207e272ccf05431352db8d828c10706809f1d64b764c77c4525/xwrf-0.0.4-py3-none-any.whl", hash = "sha256:6ca946720318bf08b514214f162364ee434e66c2e57063fa133a9952de7c61dd", size = 19856, upload-time = "2024-05-09T12:51:37.938Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/0f/e945564500b694b1749ca3864b3eda8a5b02e474c6ecd2b10764a6de6b3d/xwrf-0.0.5-py3-none-any.whl", hash = "sha256:9f1b7f4b876239a831a8265eef5c4c08a51f690000e3ab37e87a73a7f3526f76", size = 19957, upload-time = "2025-09-02T18:17:42.017Z" },
 ]
