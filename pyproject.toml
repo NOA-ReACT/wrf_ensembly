@@ -26,6 +26,7 @@ dependencies = [
 
 [project.scripts]
 wrf-ensembly = "wrf_ensembly.wrf_ensembly:cli"
+wrf-ensembly-obs = "wrf_ensembly.observation.cli:cli"
 
 [project.optional-dependencies]
 dev = ["ipykernel>=6.29.5"]
