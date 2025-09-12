@@ -15,12 +15,12 @@ from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_pat
 from wrf_ensembly.console import logger
 
 
-@click.group(name="observations", cls=GroupWithStartEndPrint)
-def observations_cli():
+@click.group(name="observation-sequence", cls=GroupWithStartEndPrint)
+def observation_sequence_cli():
     pass
 
 
-@observations_cli.command()
+@observation_sequence_cli.command()
 @click.argument("cycle", required=False, type=int)
 @click.option(
     "--jobs",
@@ -130,7 +130,7 @@ def convert_obs(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]
     logger.info("Conversion complete. Run 'combine-obs' to join files per cycle.")
 
 
-@observations_cli.command()
+@observation_sequence_cli.command()
 @click.argument("cycle", required=False, type=int)
 @click.option(
     "--jobs",
@@ -209,7 +209,7 @@ def combine_obs(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]
     logger.info("Combine complete.")
 
 
-@observations_cli.command()
+@observation_sequence_cli.command()
 @click.argument("window_center", required=False, type=click.DateTime())
 @click.argument(
     "output_path", required=True, type=click.Path(path_type=Path, writable=True)
@@ -274,7 +274,7 @@ def prepare_custom_window(
         f.unlink()
 
 
-@observations_cli.command()
+@observation_sequence_cli.command()
 @click.argument(
     "obs_seq_path", required=True, type=click.Path(exists=True, path_type=Path)
 )
@@ -290,7 +290,7 @@ def obs_seq_to_nc(experiment_path: Path, obs_seq_path: Path, nc_path: Path):
     obs_sequence.obs_seq_to_nc(exp.cfg.directories.dart_root, obs_seq_path, nc_path)
 
 
-@observations_cli.command()
+@observation_sequence_cli.command()
 @click.option(
     "--backup/--no-backup",
     is_flag=True,
@@ -361,7 +361,7 @@ def preprocess_for_wrf(experiment_path: Path, backup: bool):
         )
 
 
-@observations_cli.command()
+@observation_sequence_cli.command()
 @click.argument("cycle", required=True, type=int)
 @click.option(
     "--write-to-file",
