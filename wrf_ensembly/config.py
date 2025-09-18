@@ -1,13 +1,32 @@
 import os
 from dataclasses import dataclass, field, fields
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
 import rich
 from mashumaro.mixins.toml import DataClassTOMLMixin
+from mashumaro.config import BaseConfig
+from mashumaro.types import SerializationStrategy
 
 from wrf_ensembly.console import console
+
+
+class UTCDatetimeStrategy(SerializationStrategy):
+    """
+    Ensure datetimes are always serialized/deserialized with timezone info
+    If the datetime has no timezone info, assume UTC.
+    """
+
+    def serialize(self, value: datetime) -> str:
+        return value.isoformat()
+
+    def deserialize(self, value: str) -> datetime:
+        dt = datetime.fromisoformat(value)
+        # If no timezone info, assume UTC
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
 
 
 @dataclass
@@ -243,6 +262,9 @@ class AssimilationConfig:
 class ObservationsConfig:
     """Configuration related to observation preprocessing (mainly for the `observations preprocess-for-wrf` command)"""
 
+    instruments_to_assimilate: Optional[list[str]] = None
+    """Which instruments to assimilate. If None, all available instruments are used."""
+
     boundary_width: float = 0
     """By how many grid points to reduce the domain by when removing obs. from outside the domain"""
 
@@ -425,6 +447,9 @@ class PostprocessConfig:
 
 @dataclass
 class Config(DataClassTOMLMixin):
+    class Config(BaseConfig):
+        serialization_strategy = {datetime: UTCDatetimeStrategy()}
+
     metadata: MetadataConfig
     """Metadata about the experiment (name, ...)"""
 
