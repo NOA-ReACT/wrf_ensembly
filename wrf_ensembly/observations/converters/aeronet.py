@@ -7,7 +7,7 @@ import click
 import numpy as np
 import pandas as pd
 
-from wrf_ensembly.observation import io as obs_io
+from wrf_ensembly.observations import io as obs_io
 
 
 def convert_aeronet(path: Path, quantities: list[str] = ["AOD_340", "AOD_500"]):
@@ -28,10 +28,11 @@ def convert_aeronet(path: Path, quantities: list[str] = ["AOD_340", "AOD_500"]):
                 f"Requested quantity '{col}' not found in AERONET file columns"
             )
 
+    # Ensure TZ is UTC
     aeronet_df["timestamp"] = pd.to_datetime(
         aeronet_df["Date(dd:mm:yyyy)"] + " " + aeronet_df["Time(hh:mm:ss)"],
         format="%d:%m:%Y %H:%M:%S",
-    )
+    ).dt.tz_localize("UTC")
     aeronet_df = aeronet_df.drop(columns=["Date(dd:mm:yyyy)", "Time(hh:mm:ss)"])
 
     # -999 is used as a missing data marker

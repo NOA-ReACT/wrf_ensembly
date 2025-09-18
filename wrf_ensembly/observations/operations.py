@@ -9,7 +9,7 @@ from rich.progress import track
 from rich.table import Table
 
 from wrf_ensembly.console import console
-from wrf_ensembly.observation import io as obs_io
+from wrf_ensembly.observations import io as obs_io
 
 
 @click.command()

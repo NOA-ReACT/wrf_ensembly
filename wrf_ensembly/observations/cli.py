@@ -25,8 +25,8 @@ The resulting CLI will be: wrf-ensembly-obs-convert your_format [args...]
 
 import click
 
-from wrf_ensembly.observation.converters.aeronet import aeronet
-from wrf_ensembly.observation.operations import filter_obs, join_files, dump_info
+from wrf_ensembly.observations.converters.aeronet import aeronet
+from wrf_ensembly.observations.operations import dump_info, filter_obs, join_files
 
 
 @click.group()
@@ -35,7 +35,7 @@ def cli():
 
 
 @cli.group()
-def converter_group():
+def convert_group():
     """Convert raw observation files to WRF-Ensembly observation format.
 
     This tool provides converters for various observation data formats.
@@ -45,7 +45,7 @@ def converter_group():
     pass
 
 
-converter_group.add_command(aeronet)
+convert_group.add_command(aeronet)
 
 
 @cli.group()

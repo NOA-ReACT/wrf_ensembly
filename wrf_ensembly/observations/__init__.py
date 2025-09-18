@@ -5,9 +5,12 @@ files, independenly from an experiment
 Structure:
 - io.py: Core I/O functions and schema validation, use this to read/write files
 - cli.py: CLI entry point for the `wrf-ensembly-obs` command
+- operations.py: CLI commands for interacting with observation files
+- utils.py: Pure functions for handling observation dataframes
 - converters/: Individual converter modules for instruments, each containing both conversion functions and CLI commands
 """
 
 from . import converters, io
+from .utils import project_locations_to_wrf
 
-__all__ = ["io", "converters"]
+__all__ = ["io", "converters", "project_locations_to_wrf"]
