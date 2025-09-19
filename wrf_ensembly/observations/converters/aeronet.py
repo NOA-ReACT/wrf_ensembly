@@ -10,7 +10,9 @@ import pandas as pd
 from wrf_ensembly.observations import io as obs_io
 
 
-def convert_aeronet(path: Path, quantities: list[str] = ["AOD_340", "AOD_500"]):
+def convert_aeronet(
+    path: Path, quantities: list[str] = ["AOD_340", "AOD_500"]
+) -> None | pd.DataFrame:
     """Convert an AERONET file to WRF-Ensembly Observation format.
 
     Args:
@@ -32,7 +34,8 @@ def convert_aeronet(path: Path, quantities: list[str] = ["AOD_340", "AOD_500"]):
     aeronet_df["timestamp"] = pd.to_datetime(
         aeronet_df["Date(dd:mm:yyyy)"] + " " + aeronet_df["Time(hh:mm:ss)"],
         format="%d:%m:%Y %H:%M:%S",
-    ).dt.tz_localize("UTC")
+    )
+    aeronet_df["timestamp"] = aeronet_df["timestamp"].dt.tz_localize("UTC")
     aeronet_df = aeronet_df.drop(columns=["Date(dd:mm:yyyy)", "Time(hh:mm:ss)"])
 
     # -999 is used as a missing data marker
@@ -52,6 +55,14 @@ def convert_aeronet(path: Path, quantities: list[str] = ["AOD_340", "AOD_500"]):
         var_name="quantity",
         value_name="value",
     )
+
+    # Drop rows without values
+    aeronet_df = aeronet_df.dropna(subset=["value"]).reset_index(drop=True)
+    if aeronet_df.empty:
+        return None  # Nothing to do
+
+    # Ensure the value column is float
+    aeronet_df["value"] = aeronet_df["value"].astype(float)
 
     # Rename existing columns to the correct names, assign the rest
     aeronet_df = aeronet_df.rename(
@@ -108,6 +119,9 @@ def aeronet(input_path: Path, output_path: Path, quantities: List[str]):
 
     # Convert the data
     converted_df = convert_aeronet(input_path, list(quantities))
+    if converted_df is None or converted_df.empty:
+        print("No observations found in the input file, aborting")
+        return
 
     # Save to output path as parquet
     obs_io.write_obs(converted_df, output_path)
