@@ -25,7 +25,7 @@ The resulting CLI will be: wrf-ensembly-obs-convert your_format [args...]
 
 import click
 
-from wrf_ensembly.observations.converters.aeronet import aeronet
+from wrf_ensembly.observations.converters import aeronet_cli, remotap_spexone_cli
 from wrf_ensembly.observations.operations import dump_info, filter_obs, join_files
 
 
@@ -45,7 +45,8 @@ def convert_group():
     pass
 
 
-convert_group.add_command(aeronet)
+convert_group.add_command(aeronet_cli)
+convert_group.add_command(remotap_spexone_cli)
 
 
 @cli.group()

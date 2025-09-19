@@ -21,7 +21,7 @@ REQUIRED_COLUMNS = [
     "metadata",
 ]
 
-Z_TYPES = ["surface", "pressure", "height", "model_level"]
+Z_TYPES = ["surface", "pressure", "height", "model_level", "columnar"]
 
 
 def validate_schema(df: pd.DataFrame):
