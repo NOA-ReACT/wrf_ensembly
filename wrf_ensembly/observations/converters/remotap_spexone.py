@@ -1,6 +1,7 @@
 """Converter for RemoTAP-spexone AOD observations"""
 
 from pathlib import Path
+import re
 
 import click
 import numpy as np
@@ -22,6 +23,7 @@ def parse_spex_date(
     utcdate_str[utcdate_str == "29990101"] = np.nan
     dates = pd.to_datetime(utcdate_str, format="%Y%m%d")
     dates += pd.to_timedelta(fraction_of_day, unit="D")
+    dates = dates.tz_localize("UTC")
 
     return dates
 
@@ -101,22 +103,83 @@ def convert_remotap_spexone(path: Path) -> None | pd.DataFrame:
 @click.command()
 @click.argument("input_path", type=click.Path(exists=True, path_type=Path))
 @click.argument("output_path", type=click.Path(path_type=Path))
-def remotap_spexone(input_path: Path, output_path: Path):
+@click.option(
+    "--imerg-path",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to IMERG file to mark ocean/land points as invalid",
+)
+@click.option(
+    "--drop-bad-obs/--keep-bad-obs",
+    default=True,
+    help="Whether to drop bad observations (qc_flag != 0) from the output file",
+)
+def remotap_spexone(
+    input_path: Path,
+    output_path: Path,
+    imerg_path: Path | None = None,
+    drop_bad_obs: bool = True,
+):
     """Convert RemoTAP-spexone netCDF file to WRF-Ensembly observation format.
 
     Args:
         INPUT_PATH: Path to the input RemoTAP-spexone netCDF file.
         OUTPUT_PATH: Path to save the converted parquet file.
+
+    If `--imerg-path` is given, the script will try to determine if this is a land or
+    an ocean file based on the input filename. Then it will mark all mismatching points
+    as invalid QC (qc_flag = 1). So if the input file is a land file, all ocean points
+    will be marked as invalid, and vice versa. A threshold of >60% is used to determine
+    which points are ocean based on the IMERG landseamask variable.
     """
 
     print(f"Converting RemoTAP-SPEX file: {input_path}")
     print(f"Output path: {output_path}")
+
+    # Sanity check product mane
+    with xr.open_dataset(input_path) as root_ds:
+        product_name = root_ds.attrs.get("product_name", "unknown")
+    if not re.match(r"PACE_SPEXONE.*AER_(?:LAND|OCEAN)_REMOTAP\.nc", product_name):
+        raise ValueError(
+            f"File {input_path} is not a valid SPEX file. "
+            r"Expected product name to match 'PACE_SPEXONE.*AER_(?:LAND|OCEAN)_REMOTAP\.nc', "
+            f"but got '{product_name}'"
+        )
+
+    if imerg_path is not None:
+        imerg = xr.open_dataset(imerg_path)
+        imerg["is_ocean"] = imerg["landseamask"] > 60
+        is_ocean_retrieval = "OCEAN" in product_name
+        print(
+            f"Using IMERG file {imerg_path} to mark {'ocean' if is_ocean_retrieval else 'land'} points as invalid"
+        )
 
     # Convert the data
     converted_df = convert_remotap_spexone(input_path)
     if converted_df is None or converted_df.empty:
         print("No observations found in the input file, aborting")
         return
+
+    # If imerg_path is given, mark ocean/land points as invalid
+    if imerg_path is not None:
+        is_ocean = converted_df.apply(
+            lambda row: imerg["is_ocean"]
+            .sel(lat=row["latitude"], lon=row["longitude"], method="nearest")
+            .item(),
+            axis=1,
+        )
+        if is_ocean_retrieval:
+            converted_df.loc[~is_ocean, "qc_flag"] = 1
+            print(f"Marked {sum(~is_ocean)} land points as invalid")
+        else:
+            converted_df.loc[is_ocean, "qc_flag"] = 1
+            print(f"Marked {sum(is_ocean)} ocean points as invalid")
+
+    if drop_bad_obs:
+        n_before = len(converted_df)
+        converted_df = converted_df[converted_df["qc_flag"] == 0]
+        n_after = len(converted_df)
+        print(f"Dropped {n_before - n_after} bad observations, {n_after} remaining")
 
     # Save to output path as parquet
     obs_io.write_obs(converted_df, output_path)
