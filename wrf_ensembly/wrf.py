@@ -2,8 +2,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+import pyproj
+import xarray as xr
+
 from wrf_ensembly import fortran_namelists
-from wrf_ensembly.config import Config
+from wrf_ensembly.config import Config, DomainControlConfig
 from wrf_ensembly.console import logger
 from wrf_ensembly.cycling import CycleInformation
 from wrf_ensembly.experiment.paths import ExperimentPaths
@@ -191,9 +194,9 @@ def generate_wrf_namelist(
     if member is not None and paths is not None:
         wrfout_dest = paths.scratch_forecasts_path(cycle.index, member)
         wrfout_dest.mkdir(parents=True, exist_ok=True)
-        wrf_namelist["time_control"][
-            "history_outname"
-        ] = f"{wrfout_dest}/wrfout_d<domain>_<date>"
+        wrf_namelist["time_control"]["history_outname"] = (
+            f"{wrfout_dest}/wrfout_d<domain>_<date>"
+        )
 
     # Add iofields
     if (
@@ -242,3 +245,82 @@ def generate_wrf_namelist(
         path = path / "namelist.input"
     fortran_namelists.write_namelist(wrf_namelist, path)
     logger.info(f"Wrote namelist to {path}")
+
+
+def get_wrf_proj_transformer(domain: DomainControlConfig):
+    """
+    Returns a pyproj transformer for the given WRF domain. Source projection is always
+    WGS84 (EPSG:4326).
+
+    You can use this transformer to convert lat/lon coordinates to the WRF domain's (x, y) projection,
+    where grid points are regularly spaced. The returned transformer uses (lon, lat) ordering.
+
+    Only works for Lambert Conformal Conic projections!
+    """
+
+    if domain.projection.lower() != "lambert":
+        raise NotImplementedError(
+            f"Projection {domain.projection} not supported yet in get_wrf_proj_transformer()"
+        )
+
+    wrf_crs = pyproj.CRS(
+        {
+            "x_0": 0,
+            "y_0": 0,
+            "a": 6370000,
+            "b": 6370000,
+            "proj": "lcc",
+            "lat_1": domain.truelat1,
+            "lat_2": domain.truelat2,
+            "lat_0": domain.ref_lat,
+            "lon_0": domain.stand_lon,
+        }
+    )
+
+    return pyproj.Transformer.from_crs(pyproj.CRS("EPSG:4326"), wrf_crs, always_xy=True)
+
+
+def get_spatial_domain_bounds(wrfinput_path: Path) -> tuple[float, float, float, float]:
+    """
+    Returns the spatial bounds of a WRF domain from a WRF input file (wrfinput_d01 or similar).
+
+    Args:
+        wrfinput_path: Path to the WRF input file.
+
+    Returns:
+        A tuple of (x_min, x_max, y_min, y_max) in the WRF projection's units.
+    """
+
+    with xr.open_dataset(wrfinput_path) as ds:
+        ds = ds.xwrf.postprocess()
+        x = ds["x"]  # .isel(Time=0).values
+        y = ds["y"]  # .isel(Time=0).values
+
+        x_min = float(x.min().item())
+        x_max = float(x.max().item())
+        y_min = float(y.min().item())
+        y_max = float(y.max().item())
+
+    return x_min, x_max, y_min, y_max
+
+
+def get_temporal_domain_bounds(
+    cycles: list[CycleInformation],
+) -> tuple[datetime, datetime]:
+    """
+    Returns the temporal bounds of a list of cycles.
+
+    Args:
+        cycles: List of CycleInformation objects.
+
+    Returns:
+        A tuple of (start, end) datetimes.
+    """
+
+    if len(cycles) == 0:
+        raise ValueError("cycles list is empty")
+
+    start = cycles[0].start
+    end = cycles[-1].end
+
+    return start, end

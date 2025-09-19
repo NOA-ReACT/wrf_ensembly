@@ -21,6 +21,7 @@ from wrf_ensembly.console import logger
 from .database import ExperimentDatabase
 from .dataclasses import MemberStatus, RuntimeStatistics
 from .paths import ExperimentPaths
+from .observations import ExperimentObservations
 
 
 class Experiment:
@@ -37,6 +38,7 @@ class Experiment:
     members: list[MemberStatus] = []
 
     db: ExperimentDatabase
+    obs: ExperimentObservations
 
     def __init__(self, experiment_path: Path):
         self.cfg = config.read_config(experiment_path / "config.toml")
@@ -53,6 +55,7 @@ class Experiment:
         self.load_status_from_db()
 
         self.paths = ExperimentPaths(experiment_path, self.cfg)
+        self.obs = ExperimentObservations(self.cfg, self.cycles, self.paths)
 
     def load_status_from_db(self):
         """Load the status of the experiment from the database"""

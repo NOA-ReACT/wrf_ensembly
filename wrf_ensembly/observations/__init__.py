@@ -10,7 +10,7 @@ Structure:
 - converters/: Individual converter modules for instruments, each containing both conversion functions and CLI commands
 """
 
-from . import converters, io
+from . import converters, dart, io
 from .utils import project_locations_to_wrf
 
-__all__ = ["io", "converters", "project_locations_to_wrf"]
+__all__ = ["io", "converters", "project_locations_to_wrf", "dart"]
