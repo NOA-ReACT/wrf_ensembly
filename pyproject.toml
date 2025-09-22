@@ -1,6 +1,6 @@
 [project]
 name = "wrf-ensembly"
-version = "0.11.0"
+version = "0.11.1"
 description = "Support scripts for using DART w/ WRF"
 authors = [{ name = "Thanasis Georgiou", email = "ageorgiou@noa.gr" }]
 readme = "README.md"
@@ -22,11 +22,14 @@ dependencies = [
   "mashumaro[toml]>=3.15",
   "interpolator-for-wrfchem>=1.5.1",
   "xwrf==0.0.5",
+  "pyarrow>=21.0.0",
+  "pyproj>=3.7.1",
+  "duckdb>=1.4.0",
 ]
 
 [project.scripts]
 wrf-ensembly = "wrf_ensembly.wrf_ensembly:cli"
-wrf-ensembly-obs = "wrf_ensembly.observation.cli:cli"
+wrf-ensembly-obs = "wrf_ensembly.observations.cli:cli"
 
 [project.optional-dependencies]
 dev = ["ipykernel>=6.29.5"]
