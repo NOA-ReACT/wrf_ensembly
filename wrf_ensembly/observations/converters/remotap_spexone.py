@@ -96,6 +96,9 @@ def convert_remotap_spexone(path: Path) -> None | pd.DataFrame:
         for i in range(df.shape[0])
     ]
 
+    # Drop row if obs_value is NaN
+    df = df.dropna(subset=["value"])
+
     df = df[obs_io.REQUIRED_COLUMNS]
     return df
 
