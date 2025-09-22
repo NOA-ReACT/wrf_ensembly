@@ -77,21 +77,28 @@ def show(experiment_path: Path):
     help="Skip converting to DART obs_seq format, only write parquet files",
 )
 @pass_experiment_path
-def convert_to_dart(
+def prepare_cycles(
     experiment_path: Path,
     cycle: int | None = None,
     jobs: int | None = None,
     skip_dart: bool = False,
 ):
     """
-    Converts the experiment's observation files to DART obs_seq format.
+    Prepares observation files for each cycle by extracting relevant observations for that
+    cycle's time window and converting them to DART obs_seq format.
+
     Required for `filter` to be able to use the observations.
 
     You must build the `wrf_ensembly` observation converter in DART for this to work,
     check the `DART/observations/obs_converters/wrf_ensembly` directory.
+
+    The command will create one parquet and one obs_seq file per cycle in the experiment's
+    `obs/` directory, named `cycle_XXX.parquet` and `cycle_XXX.obs_seq` respectively.
+    You can skip the obs_seq conversion with `--skip-dart` if you only want the parquet files
+    for inspection.
     """
 
-    logger.setup("observations-convert-to-dart", experiment_path)
+    logger.setup("observations-prepare-cycles", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
     if cycle is not None:
