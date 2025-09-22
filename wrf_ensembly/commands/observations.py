@@ -70,9 +70,18 @@ def show(experiment_path: Path):
     default=None,
     help="Number of parallel jobs to use",
 )
+@click.option(
+    "--skip-dart",
+    is_flag=True,
+    default=False,
+    help="Skip converting to DART obs_seq format, only write parquet files",
+)
 @pass_experiment_path
 def convert_to_dart(
-    experiment_path: Path, cycle: int | None = None, jobs: int | None = None
+    experiment_path: Path,
+    cycle: int | None = None,
+    jobs: int | None = None,
+    skip_dart: bool = False,
 ):
     """
     Converts the experiment's observation files to DART obs_seq format.
@@ -99,6 +108,10 @@ def convert_to_dart(
             logger.info(f"No observations found for cycle {c.index}, skipping")
             continue
 
+        # Also write to parquet for easy inspection later
+        parquet_path = exp.paths.obs / f"cycle_{c.index:03d}.parquet"
+        observations.io.write_obs(cycle_obs, parquet_path)
+
         output_path = exp.paths.obs / f"cycle_{c.index:03d}.obs_seq"
         commands.append(
             observations.dart.convert_to_dart_obs_seq(
@@ -107,6 +120,10 @@ def convert_to_dart(
                 output_location=output_path,
             )
         )
+
+    if skip_dart:
+        logger.info("Skipping DART obs_seq conversion as per --skip-dart")
+        return
 
     jobs = determine_jobs(jobs)
     for res in external.run_in_parallel(commands, jobs, stop_on_failure=True):
