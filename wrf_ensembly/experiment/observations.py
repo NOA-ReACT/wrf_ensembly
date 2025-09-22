@@ -109,12 +109,53 @@ class ExperimentObservations:
 
         df = obs.utils.project_locations_to_wrf(df, transformer)
         df = df[(df["time"] >= start_time) & (df["time"] <= end_time)]
-        df = df[
+        df["in_domain"] = (
             (df["x"] >= x_min)
             & (df["x"] <= x_max)
             & (df["y"] >= y_min)
             & (df["y"] <= y_max)
-        ]
+        )
+
+        # For spatial filtering, we must make sure that the final array has no NaNs after
+        # reshaping into the original shape.
+        # Thus, we gotta check if after grouping by the original coordinates (keeping
+        # the fastest-changing dimension out), there are any groups with at least one
+        # observation inside the domain. Only the rest can be thrown out.
+        # This proceedure must be done for each orig_filename,quantity pair separately
+        per_quantity_dfs = []
+        for (orig_filename, quantity), df_subset in df.groupby(
+            ["orig_filename", "quantity"]
+        ):
+            if df_subset.empty:
+                continue
+
+            # Find the fastest-changing dimension (the one with the smallest size in 'shape')
+            orig_coords = df_subset["orig_coords"].iloc[0]
+            shape = orig_coords["shape"]
+            smalled_dim_index = shape.argmin()
+
+            # Create a column with the groups, excluding the fastest-changing dimension
+            df_subset["group_key"] = df_subset["orig_coords"].apply(
+                lambda x: tuple(
+                    idx for i, idx in enumerate(x["indices"]) if i != smalled_dim_index
+                )
+            )
+
+            # Find groups with at least one observation inside the domain
+            valid_groups = df_subset[df_subset["in_domain"]].groupby("group_key").size()
+            valid_group_keys = valid_groups[valid_groups > 0].index
+
+            # Keep only observations in valid groups
+            df_subset = df_subset[df_subset["group_key"].isin(valid_group_keys)]
+
+            # Set all outside-domain observations to NaN
+            df_subset.loc[~df_subset["in_domain"], "value"] = pd.NA
+            df_subset.loc[~df_subset["in_domain"], "value_uncertainty"] = pd.NA
+
+            per_quantity_dfs.append(df_subset)
+
+        df = pd.concat(per_quantity_dfs, ignore_index=True)
+        df = df.drop(columns=["in_domain", "group_key"])
 
         trimmed_len = len(df.index)
         print(
