@@ -96,9 +96,6 @@ def convert_remotap_spexone(path: Path) -> None | pd.DataFrame:
         for i in range(df.shape[0])
     ]
 
-    # Drop row if obs_value is NaN
-    df = df.dropna(subset=["value"])
-
     df = df[obs_io.REQUIRED_COLUMNS]
     return df
 
@@ -112,16 +109,10 @@ def convert_remotap_spexone(path: Path) -> None | pd.DataFrame:
     default=None,
     help="Path to IMERG file to mark ocean/land points as invalid",
 )
-@click.option(
-    "--drop-bad-obs/--keep-bad-obs",
-    default=True,
-    help="Whether to drop bad observations (qc_flag != 0) from the output file",
-)
 def remotap_spexone(
     input_path: Path,
     output_path: Path,
     imerg_path: Path | None = None,
-    drop_bad_obs: bool = True,
 ):
     """Convert RemoTAP-spexone netCDF file to WRF-Ensembly observation format.
 
@@ -177,12 +168,6 @@ def remotap_spexone(
         else:
             converted_df.loc[is_ocean, "qc_flag"] = 1
             print(f"Marked {sum(is_ocean)} ocean points as invalid")
-
-    if drop_bad_obs:
-        n_before = len(converted_df)
-        converted_df = converted_df[converted_df["qc_flag"] == 0]
-        n_after = len(converted_df)
-        print(f"Dropped {n_before - n_after} bad observations, {n_after} remaining")
 
     # Save to output path as parquet
     obs_io.write_obs(converted_df, output_path)
