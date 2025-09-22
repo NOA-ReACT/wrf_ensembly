@@ -8,6 +8,7 @@ from wrf_ensembly.external import ExternalProcess
 
 OBS_TYPE_TABLE = {
     "AOD_500nm": "AIRSENSE_AOD",
+    "AOD_550nm": "AIRSENSE_AOD",
 }
 
 
@@ -55,7 +56,7 @@ def convert_to_dart_obs_seq(
     observations["second"] = observations["time"].dt.second
     observations["vert"] = observations["z"]
     observations["obs_value"] = observations["value"]
-    observations["obs_error"] = observations["value_uncertainty"].fillna(0)
+    observations["obs_error"] = observations["value_uncertainty"]
     observations["obs_meta"] = observations["metadata"].apply(lambda x: str(x))
     observations = observations[
         [
@@ -77,6 +78,9 @@ def convert_to_dart_obs_seq(
 
     # Longitude must be in [0, 360) range for DART
     observations["longitude"] = (observations["longitude"] + 360) % 360
+
+    # Delete rows where AOD is NaN
+    observations = observations.dropna(subset=["obs_value"])
 
     csv_data = observations.to_csv(index=False)
 
