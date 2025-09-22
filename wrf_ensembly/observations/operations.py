@@ -8,7 +8,9 @@ import pandas as pd
 from rich.progress import track
 from rich.table import Table
 
+from wrf_ensembly import external
 from wrf_ensembly.console import console
+from wrf_ensembly.observations import dart as observations_dart
 from wrf_ensembly.observations import io as obs_io
 
 
@@ -162,3 +164,39 @@ def filter_obs(
         f"Filtered observations from {original_len} to {len(df)} based on spatial criteria."
     )
     obs_io.write_obs(df, output_path)
+
+
+@click.command()
+@click.option(
+    "--dart-path", type=click.Path(exists=True, path_type=Path), required=True
+)
+@click.argument("obs_file", type=click.Path(exists=True, path_type=Path))
+@click.argument("output_file", type=click.Path(path_type=Path))
+def to_obs_seq(obs_file: Path, output_file: Path, dart_path: Path):
+    """
+    Convert a WRF-Ensembly observation file to DART obs_seq format.
+
+    You must have built the `wrf_ensembly` observation converter in DART for this to work, check the `DART/observations/obs_converters/wrf_ensembly` directory.
+
+    Args:
+        obs_file: Path to the input WRF-Ensembly observation file.
+        output_file: Path where the output DART obs_seq file will be saved.
+        dart_path: Path to the root of the DART installation.
+
+    Example usage:
+        wrf-ensembly-obs convert-to-obs-seq --dart-path /path/to/DART /path/to/input.parquet /path/to/output.obs_seq
+    """
+
+    process = observations_dart.convert_to_dart_obs_seq(
+        dart_path=dart_path,
+        observations=obs_io.read_obs(obs_file),
+        output_location=output_file,
+    )
+    result = external.run(process)
+    print("Converter output:")
+    print(result.output)
+
+    if result.returncode != 0:
+        print("Error converting to DART obs_seq!")
+    else:
+        print(f"Successfully converted to DART obs_seq: {output_file}")
