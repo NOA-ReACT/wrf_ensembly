@@ -75,6 +75,9 @@ def convert_to_dart_obs_seq(
         ]
     ]
 
+    # Longitude must be in [0, 360) range for DART
+    observations["longitude"] = (observations["longitude"] + 360) % 360
+
     csv_data = observations.to_csv(index=False)
 
     return ExternalProcess(
