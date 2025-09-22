@@ -1,12 +1,16 @@
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
-import uuid
 
 import duckdb
 import pandas as pd
+
+from wrf_ensembly import external
+from wrf_ensembly import observations as obs
+from wrf_ensembly import wrf
 from wrf_ensembly.config import Config
+from wrf_ensembly.console import logger
 from wrf_ensembly.cycling import CycleInformation
-from wrf_ensembly import external, observations as obs, wrf
 from wrf_ensembly.experiment.paths import ExperimentPaths
 
 
@@ -139,7 +143,7 @@ class ExperimentObservations:
             output_path = output_dir / f"{file_uuid}_{instr}.parquet"
 
             obs.io.write_obs(df, output_path)
-            print(f"Wrote {len(df.index)} observations to {output_path}")
+            logger.info(f"Wrote {len(df.index)} observations to {output_path}")
 
     def get_observations_for_cycle(
         self, cycle: CycleInformation
@@ -152,8 +156,6 @@ class ExperimentObservations:
         """
 
         instruments = self.cfg.observations.instruments_to_assimilate
-        if instruments is not None:
-            print(f"Filtering observations to instruments: {instruments}")
 
         start_time = cycle.start - pd.Timedelta(
             minutes=self.cfg.assimilation.half_window_length_minutes
@@ -164,7 +166,7 @@ class ExperimentObservations:
 
         # Query the observations with duck db, find only files that overlap with the time window and instrument list
         con = duckdb.connect()
-        query = f"SELECT * FROM read_parquet('{self.paths.obs}/**/*.parquet') WHERE time >= '{start_time}' AND time <= '{end_time}'"
+        query = f"SELECT * FROM read_parquet('{self.paths.obs}/**/*.parquet', union_by_name=True) WHERE time >= '{start_time}' AND time <= '{end_time}'"
         observations = con.execute(query).fetchdf()
         if instruments is not None:
             observations = observations[observations["instrument"].isin(instruments)]
@@ -176,7 +178,9 @@ class ExperimentObservations:
 
         df = self.get_observations_for_cycle(cycle)
         if df is None or df.empty:
-            print(f"No observations for cycle {cycle.index}, skipping DART conversion")
+            logger.info(
+                f"No observations for cycle {cycle.index}, skipping DART conversion"
+            )
             return
 
         output_path = self.paths.obs / f"obs_seq.{cycle.index:03d}"
@@ -185,11 +189,13 @@ class ExperimentObservations:
             observations=df,
             output_location=output_path,
         )
-        print(f"Converting observations for cycle {cycle.index} to DART obs_seq...")
+        logger.info(
+            f"Converting observations for cycle {cycle.index} to DART obs_seq..."
+        )
         result = external.run(dart_process)
         if result.returncode != 0:
-            print(result.output)
+            logger.error(result.output)
             raise RuntimeError(
                 f"DART conversion failed for cycle {cycle.index} with return code {result.returncode}"
             )
-        print(f"Wrote DART obs_seq file to {output_path}")
+        logger.info(f"Wrote DART obs_seq file to {output_path}")

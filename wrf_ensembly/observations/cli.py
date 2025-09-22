@@ -26,7 +26,12 @@ The resulting CLI will be: wrf-ensembly-obs-convert your_format [args...]
 import click
 
 from wrf_ensembly.observations.converters import aeronet_cli, remotap_spexone_cli
-from wrf_ensembly.observations.operations import dump_info, filter_obs, join_files
+from wrf_ensembly.observations.operations import (
+    dump_info,
+    filter_obs,
+    join_files,
+    to_obs_seq,
+)
 
 
 @click.group()
@@ -62,6 +67,7 @@ def operations_group():
 operations_group.add_command(join_files)
 operations_group.add_command(dump_info)
 operations_group.add_command(filter_obs)
+operations_group.add_command(to_obs_seq)
 
 if __name__ == "__main__":
     cli()

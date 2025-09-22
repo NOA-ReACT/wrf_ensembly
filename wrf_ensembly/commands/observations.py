@@ -2,6 +2,7 @@
 Commands about handling observations in the context of an experiment (adding, retrieving, etc).
 """
 
+import json
 from pathlib import Path
 
 import click
@@ -10,7 +11,7 @@ from rich.table import Table
 
 from wrf_ensembly import experiment, external, observations
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
-from wrf_ensembly.console import logger
+from wrf_ensembly.console import logger, console
 from wrf_ensembly.utils import determine_jobs
 
 
@@ -142,3 +143,85 @@ def prepare_cycles(
         logger.debug(res.output)
 
     logger.info("Finished converting observations to DART obs_seq format")
+
+
+@observations_cli.command()
+@click.argument("cycle", type=int, required=True, default=None)
+@click.option("--as_json", is_flag=True, default=False, help="Output in JSON format")
+@pass_experiment_path
+def cycle_stats(experiment_path: Path, cycle: int, as_json: bool):
+    """
+    Print a summary of the observations for a specific cycle.
+
+    Specifically: Number of observations, instruments, obs per instrument, original files.
+    """
+
+    logger.setup("observations-cycle-stats", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    cycle_info = exp.cycles[cycle]
+
+    parquet_path = exp.paths.obs / f"cycle_{cycle_info.index:03d}.parquet"
+    if not parquet_path.is_file():
+        logger.error(
+            f"Cycle {cycle_info.index} parquet file {parquet_path} does not exist, run `wrf-ensembly obs prepare-cycles` first"
+        )
+        return
+    obs = observations.io.read_obs(parquet_path)
+    if obs is None or obs.empty:
+        logger.error(f"Cycle {cycle_info.index} has no observations, cannot show stats")
+        return
+
+    stats = {}
+    stats["count"] = len(obs)
+    stats["instruments"] = {
+        instr: {
+            "count": obs[obs["instrument"] == instr].shape[0],
+            "files": obs[obs["instrument"] == instr]["orig_filename"]
+            .value_counts()
+            .to_dict(),
+            "qc": {
+                int(qc): int((obs[obs["instrument"] == instr]["qc_flag"] == qc).sum())
+                for qc in obs[obs["instrument"] == instr]["qc_flag"].unique()
+            },
+        }
+        for instr in obs["instrument"].unique()
+    }
+    stats["quantities"] = obs["quantity"].value_counts().to_dict()
+    stats["qc"] = obs["qc_flag"].value_counts().to_dict()
+
+    # If JSON, dump the `stats` dict. Otherwise print some nice tables with rich
+    if as_json:
+        print(json.dumps(stats, indent=2))
+        return
+
+    console.print(f"[bold]Observation stats for cycle {cycle_info.index}:[/bold]")
+    console.print(f"Time window: {cycle_info.start} to {cycle_info.end}")
+    console.print(f"Total observations: {stats['count']}")
+    console.print(
+        f"Valid observations (qc_flag=0): {stats['qc'].get(0, 0)} ({stats['qc'].get(0, 0) / stats['count'] * 100:.2f}%)"
+    )
+
+    instr_table = Table(title="Instruments")
+    instr_table.add_column("Instrument", style="cyan", no_wrap=True)
+    instr_table.add_column("Count", style="green")
+    instr_table.add_column("Valid QC (qc_flag=0)", style="green")
+    for instr, info in stats["instruments"].items():
+        instr_table.add_row(instr, str(info["count"]), str(info["qc"].get(0, 0)))
+    console.print(instr_table)
+
+    quantities_table = Table(title="Quantities")
+    quantities_table.add_column("Quantity", style="cyan", no_wrap=True)
+    quantities_table.add_column("Count", style="green")
+    for qty, count in stats["quantities"].items():
+        quantities_table.add_row(qty, str(count))
+    console.print(quantities_table)
+
+    # Print files per instrument
+    for instr, info in stats["instruments"].items():
+        files_table = Table(title=f"Files for instrument {instr}")
+        files_table.add_column("File", style="cyan")
+        files_table.add_column("Count", style="green")
+        for fname, count in info["files"].items():
+            files_table.add_row(fname, str(count))
+        console.print(files_table)
