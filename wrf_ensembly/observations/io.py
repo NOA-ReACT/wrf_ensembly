@@ -93,4 +93,4 @@ def write_obs(df: pd.DataFrame, path: Path | str):
     """Write a pandas DataFrame to a WRF-Ensembly Observation data file."""
 
     validate_schema(df)
-    df.to_parquet(path)
+    df.to_parquet(path, index=False)
