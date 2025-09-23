@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.scripts]
-wrf-ensembly = "wrf_ensembly.wrf_ensembly:cli"
+wrf-ensembly = "wrf_ensembly.cli:cli"
 wrf-ensembly-obs = "wrf_ensembly.observations.cli:cli"
 
 [project.optional-dependencies]
