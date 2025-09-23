@@ -23,6 +23,8 @@ class ExperimentPaths:
         self.data_diag = self.data / "diagnostics"
 
         self.obs = experiment_path / "obs"
+        self.obs_temp = self.obs / "temp"  # Temporary files during processing
+        self.obs_db = experiment_path / "observations.duckdb"
 
         # Work directories
         self.work = experiment_path / "work"

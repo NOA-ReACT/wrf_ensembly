@@ -1,4 +1,3 @@
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,64 +31,79 @@ class ExperimentObservations:
         self.cycles = cycles
         self.paths = paths
 
-    def get_available_observation_files(self) -> list[ObservationFileMetadata]:
+    def _get_duckdb(self, read_only: bool) -> duckdb.DuckDBPyConnection:
+        if read_only:
+            return duckdb.connect(
+                database=str(self.paths.obs_db),
+                read_only=True,
+            )
+
+        # When also writing, ensure the observation table exists
+        con = duckdb.connect(
+            database=str(self.paths.obs_db),
+            read_only=False,
+        )
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS observations (instrument STRING, quantity STRING, time TIMESTAMP, longitude DOUBLE, latitude DOUBLE, x DOUBLE, y DOUBLE, z DOUBLE, z_type STRING, value DOUBLE, value_uncertainty DOUBLE, qc_flag INT, orig_coords STRUCT(indices INT[], shape INT[], names STRING[]), orig_filename STRING, metadata STRING)"
+        )
+        return con
+
+    def get_available_observations_overview(
+        self,
+    ) -> list[dict]:
+        """Returns a dataframe with observation filenames and their row counts, min time and max time."""
+
+        with self._get_duckdb(read_only=True) as con:
+            result = con.execute("""
+                SELECT
+                    orig_filename as filename,
+                    instrument as instrument,
+                    MIN(time) as start_time,
+                    MAX(time) as end_time,
+                    COUNT(*) as count
+                FROM observations
+                GROUP BY orig_filename, instrument
+                ORDER BY instrument, start_time
+            """).fetch_df()
+        return result.to_dict(orient="records")
+
+    def delete_observation_file(self, filename: str) -> int:
         """
-        Scans the observation directory and returns metadata about available observation files.
+        Removes all observations from a specific file from the database.
 
-        The files are stored at: `obs/INSTRUMENT/START_END_UUID_INSTRUMENT.parquet`
+        Args:
+            filename: The name of the file to remove (not the full path)
+
+        Returns:
+            The number of observations removed.
         """
 
-        obs_files = []
-        for instr_dir in self.paths.obs.iterdir():
-            if not instr_dir.is_dir():
-                continue
-            instrument = instr_dir.name
-            for file_path in instr_dir.glob("*.parquet"):
-                try:
-                    parts = file_path.stem.split("_")
-                    # Format: START_END_UUID_INSTRUMENT
-                    if len(parts) >= 4:
-                        start_str, end_str = parts[0], parts[1]
-                        # parts[2] is UUID (ignored for metadata)
-                        # parts[3] should be instrument name
-                    else:
-                        raise ValueError(f"Unexpected file format: {file_path.stem}")
+        with self._get_duckdb(read_only=False) as con:
+            result = con.execute(
+                f"DELETE FROM observations WHERE orig_filename = '{filename}'"
+            )
+            return result.rowcount
 
-                    start_time = pd.to_datetime(
-                        start_str, format="%Y%m%d%H%M"
-                    ).tz_localize("UTC")
-                    end_time = pd.to_datetime(end_str, format="%Y%m%d%H%M").tz_localize(
-                        "UTC"
-                    )
-                    obs_files.append(
-                        ObservationFileMetadata(
-                            path=file_path,
-                            instrument=instrument,
-                            start_time=start_time,
-                            end_time=end_time,
-                        )
-                    )
-                except Exception as e:
-                    print(
-                        f"Warning: Could not parse observation file name {file_path}: {e}"
-                    )
-        return obs_files
-
-    def add_observation_file(self, file_path: Path):
+    def trim_observation_file(
+        self, input_path: Path, output_path: Path
+    ) -> tuple[str, int, int]:
         """
-        Adds an observation file to the experiment:
-
-        - Ensures it is in the WRF-Ensembly observation format
-        - Trims it temporally and spatially according to the experiment configuration
-        - If it contains multiple instruments, splits it into separate files per instrument
-        - Saves it in the experiment's observation directory (obs/INSTRUMENT/UUID_INSTRUMENT.parquet)
-
-        Each file gets a unique UUID to ensure thread-safe parallel processing.
+        Trims an observation file temporally and spatially according to the experiment configuration.
+        The file is only created if there are observations left after trimming.
 
         This function assumes that preprocessing is completed (needs a wrfinput file to get the spatial bounds).
+
+        Args:
+            input_path: Path to the input observation file
+            output_path: Path where the trimmed observation file will be saved
+
+        Returns:
+            The input file name, the number of observations in the original file, and the
+            number of observations in the trimmed file.
         """
 
-        df = obs.io.read_obs(file_path)
+        filename = input_path.name
+        df = obs.io.read_obs(input_path)
         original_len = len(df.index)
 
         # Find wrfinput file
@@ -123,9 +137,7 @@ class ExperimentObservations:
         # observation inside the domain. Only the rest can be thrown out.
         # This proceedure must be done for each orig_filename,quantity pair separately
         per_quantity_dfs = []
-        for (orig_filename, quantity), df_subset in df.groupby(
-            ["orig_filename", "quantity"]
-        ):
+        for _, df_subset in df.groupby(["orig_filename", "quantity"]):
             if df_subset.empty:
                 continue
 
@@ -154,37 +166,57 @@ class ExperimentObservations:
 
             per_quantity_dfs.append(df_subset)
 
-        df = pd.concat(per_quantity_dfs, ignore_index=True)
-        df = df.drop(columns=["in_domain", "group_key"])
+        if not per_quantity_dfs:
+            trimmed_len = 0
+        else:
+            df = pd.concat(per_quantity_dfs, ignore_index=True)
+            df = df.drop(columns=["in_domain", "group_key"])
+            trimmed_len = len(df.index)
 
-        trimmed_len = len(df.index)
-        print(
-            f"Trimmed observation file {file_path}: {original_len} -> {trimmed_len} observations"
-        )
-        if trimmed_len == 0:
-            print(
-                f"No observations left after trimming, skipping file {file_path.name}."
-            )
-            return
-
-        # If required, split into separate files per instrument
-        instruments = df["instrument"].unique()
-        dataframes = {}
-        for instr in instruments:
-            df_instr = df[df["instrument"] == instr].copy()
-            dataframes[instr] = df_instr
-
-        # Write output files
-        for instr, df in dataframes.items():
-            output_dir = self.paths.obs / instr
-            output_dir.mkdir(parents=True, exist_ok=True)
-
-            # Use full UUID for guaranteed thread-safe unique naming
-            file_uuid = uuid.uuid4().hex
-            output_path = output_dir / f"{file_uuid}_{instr}.parquet"
-
+        # Save the trimmed observations to the output file
+        if trimmed_len > 0:
             obs.io.write_obs(df, output_path)
-            logger.info(f"Wrote {len(df.index)} observations to {output_path}")
+
+        return filename, original_len, trimmed_len
+
+    def add_observation_file(self, input_path: Path) -> int:
+        """
+        Adds an observation file to the experiment DuckDB database.
+
+        This function assumes the file is already in the WRF-Ensembly observation format
+        and has been trimmed as needed.
+
+        Args:
+            input_path: Path to the observation file to add to the database
+
+        Returns:
+            The number of observations added to the database.
+        """
+
+        df = obs.io.read_obs(input_path)
+        if df.empty:
+            return 0
+
+        # Grab a connection to the database and save the observations
+        with self._get_duckdb(read_only=False) as con:
+            # First, if observations from this file already exist, remove them
+            con.execute(
+                f"DELETE FROM observations WHERE orig_filename = '{input_path.name}'"
+            )
+
+            con.register("df_view", df)
+            con.execute("""
+                INSERT INTO observations (
+                    instrument, quantity, time, longitude, latitude, x, y, z, z_type,
+                    value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata
+                )
+                SELECT
+                    instrument, quantity, time, longitude, latitude, x, y, z, z_type,
+                    value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata
+                FROM df_view
+            """)
+
+        return len(df.index)
 
     def get_observations_for_cycle(
         self, cycle: CycleInformation
@@ -206,9 +238,10 @@ class ExperimentObservations:
         )
 
         # Query the observations with duck db, find only files that overlap with the time window and instrument list
-        con = duckdb.connect()
-        query = f"SELECT * FROM read_parquet('{self.paths.obs}/**/*.parquet', union_by_name=True) WHERE time >= '{start_time}' AND time <= '{end_time}'"
-        observations = con.execute(query).fetchdf()
+        with self._get_duckdb(read_only=True) as con:
+            observations = con.execute(
+                f"SELECT * FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}'"
+            ).fetchdf()
         if instruments is not None:
             observations = observations[observations["instrument"].isin(instruments)]
 

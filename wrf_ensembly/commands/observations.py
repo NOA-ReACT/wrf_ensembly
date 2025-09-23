@@ -2,12 +2,17 @@
 Commands about handling observations in the context of an experiment (adding, retrieving, etc).
 """
 
+import concurrent
+from concurrent.futures import ProcessPoolExecutor
+import concurrent.futures
 import json
 from pathlib import Path
+import sys
 
 import click
 from rich.console import Console
 from rich.table import Table
+from rich.progress import Progress, track
 
 from wrf_ensembly import experiment, external, observations
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
@@ -23,22 +28,94 @@ def observations_cli():
 
 @observations_cli.command()
 @click.argument("files", nargs=-1, type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--jobs", "-j", type=int, default=1, help="Number of parallel jobs to use"
+)
 @pass_experiment_path
-def add(experiment_path: Path, files: list[Path]):
-    """Bulk add observations to the experiment"""
+def add(experiment_path: Path, files: list[Path], jobs: int):
+    """
+    Bulk add observations to the experiment
+    The files are first spatially and temporally trimmed according to the experiment configuration,
+    then added to the experiment's observation database. The first step is done in parallel.
+    """
 
     logger.setup("observations-convert-obs", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    for file_path in files:
-        exp.obs.add_observation_file(file_path)
+    files_to_process = []
+    for p in files:
+        if p.is_dir():
+            files_to_process.extend(list(p.glob("*.parquet")))
+        else:
+            files_to_process.append(p)
+
+    # Compute a temp. output path for each file
+    exp.paths.obs_temp.mkdir(exist_ok=True, parents=True)
+    for f in exp.paths.obs_temp.glob("*.parquet"):
+        f.unlink()
+    io_paths = [(f, exp.paths.obs_temp / f.name) for f in files_to_process]
+
+    # Process the files in different processes, using a rich Progress to display a bar
+    jobs = determine_jobs(jobs)
+    counts = {}
+    with ProcessPoolExecutor(max_workers=jobs) as executor, Progress() as progress:
+        task = progress.add_task(
+            "[cyan]Trimming observation files...", total=len(files_to_process)
+        )
+        futures = [
+            executor.submit(
+                exp.obs.trim_observation_file,
+                input_path=input_path,
+                output_path=output_path,
+            )
+            for input_path, output_path in io_paths
+        ]
+
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                filename, avail_obs, used_obs = future.result()
+                counts[filename] = (avail_obs, used_obs)
+                progress.advance(task)
+                progress.console.print(
+                    f"{filename}: Trimmed {avail_obs} -> {used_obs} observations"
+                )
+            except Exception as e:
+                progress.console.print(f"[red]Error processing file: {e}[/red]")
+                sys.exit(1)
+
+    # Add the trimmed files to the duckDB
+    for _, output_path in track(
+        io_paths, description="Adding observations to database..."
+    ):
+        if output_path.is_file():
+            exp.obs.add_observation_file(output_path)
+
+    # Clean up temp files
+    for f in exp.paths.obs_temp.glob("*.parquet"):
+        f.unlink()
+
+    # Print a summary of what was added
+    table = Table(title="Observation Files Added")
+    table.add_column("File", style="cyan")
+    table.add_column("Observations Available", style="green")
+    table.add_column("Observations Added", style="green")
+    skipped_counter = 0
+    for f, (obs_avail, obs_added) in counts.items():
+        if obs_added > 0:
+            table.add_row(str(f), str(obs_avail), str(obs_added))
+        else:
+            skipped_counter += 1
+
+    console.print(table)
+    if skipped_counter > 0:
+        console.print(f"Skipped {skipped_counter} files that had no observations added")
 
 
 @observations_cli.command()
 @pass_experiment_path
 def show(experiment_path: Path):
     exp = experiment.Experiment(experiment_path)
-    obs_files = exp.obs.get_available_observation_files()
+    obs_files = exp.obs.get_available_observations_overview()
 
     table = Table(title="Available Observation Files")
     table.add_column("Instrument", style="cyan", no_wrap=True)
@@ -48,13 +125,27 @@ def show(experiment_path: Path):
 
     for obs_file in obs_files:
         table.add_row(
-            obs_file.instrument,
-            obs_file.start_time.strftime("%Y-%m-%d %H:%M"),
-            obs_file.end_time.strftime("%Y-%m-%d %H:%M"),
-            str(obs_file.path),
+            obs_file["instrument"],
+            obs_file["start_time"].strftime("%Y-%m-%d %H:%M"),
+            obs_file["end_time"].strftime("%Y-%m-%d %H:%M"),
+            str(obs_file["filename"]),
         )
 
     Console().print(table)
+
+
+@observations_cli.command()
+@click.argument("filename", type=str)
+@pass_experiment_path
+def delete(experiment_path: Path, filename: str):
+    """
+    Delete an observation file from the experiment's observation database.
+    """
+    exp = experiment.Experiment(experiment_path)
+    logger.setup("observations-delete", experiment_path)
+
+    rows = exp.obs.delete_observation_file(filename)
+    logger.info(f"Deleted {rows} rows from observation database")
 
 
 @observations_cli.command()
