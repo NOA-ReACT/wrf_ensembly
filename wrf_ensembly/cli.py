@@ -10,6 +10,7 @@ from wrf_ensembly.commands.postprocess import postprocess_cli
 from wrf_ensembly.commands.preprocess import preprocess_cli
 from wrf_ensembly.commands.slurm import slurm_cli
 from wrf_ensembly.commands.status import status_cli
+from wrf_ensembly.commands.validation import validation_cli
 
 
 @click.group()
@@ -32,6 +33,7 @@ cli.add_command(slurm_cli)
 cli.add_command(postprocess_cli)
 cli.add_command(status_cli)
 cli.add_command(observations_cli)
+cli.add_command(validation_cli)
 
 if __name__ == "__main__":
     cli()
