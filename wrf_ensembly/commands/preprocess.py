@@ -227,8 +227,15 @@ def metgrid(experiment_path: Path):
     callback=check_is_member_option_is_required,
     help="When using different IC/BC for each member, which member to process",
 )
+@click.option(
+    "--auto-clean-up/--no-auto-clean-up",
+    default=True,
+    help="If set, removes the temporary work directory after successful completion",
+)
 @pass_experiment_path
-def real(experiment_path: Path, cycle: int, cores, member: Optional[int]):
+def real(
+    experiment_path: Path, cycle: int, cores, member: Optional[int], auto_clean_up=True
+):
     """
     Run real.exe to produce the initial (wrfinput) and boundary (wrfbdy) conditions the
     given CYCLE. You should run this for all cycles to have initial/boundary conditions for
@@ -241,6 +248,16 @@ def real(experiment_path: Path, cycle: int, cores, member: Optional[int]):
     exp.set_wrf_environment()
     wps_dir = exp.paths.work_preprocessing_wps
     wrf_dir = exp.paths.work_preprocessing_wrf
+
+    # Copy WRF to a new directory to run real.exe (allows to run multiple in parallel)
+    work_dir = exp.paths.work_preprocessing / f"real_cycle_{cycle}"
+    if exp.cfg.data.per_member_meteorology:
+        work_dir = work_dir / f"member_{member:02d}"
+    if work_dir.is_dir():
+        logger.info(f"Removing old work directory {work_dir}")
+        shutil.rmtree(work_dir)
+    shutil.copytree(wrf_dir, work_dir)
+    wrf_dir = work_dir
 
     # Clean WRF dir from old met_em files
     for p in wrf_dir.glob("met_em*nc"):
@@ -341,6 +358,10 @@ def real(experiment_path: Path, cycle: int, cores, member: Optional[int]):
     logger.info(f"Moved wrfbdy_d01 to {wrfbdy_path}")
 
     utils.copy(wrf_dir / "namelist.input", data_dir / f"namelist.input_cycle_{cycle}")
+
+    if auto_clean_up:
+        logger.info(f"Removing temporary work directory {work_dir}")
+        shutil.rmtree(work_dir)
 
 
 @preprocess_cli.command()
