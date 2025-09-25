@@ -167,6 +167,29 @@ def delete(experiment_path: Path, filename: str):
 
 
 @observations_cli.command()
+@pass_experiment_path
+def superorbing(experiment_path: Path):
+    """
+    Downsample observations using superorbing, according to the experiment configuration.
+
+    Superorbing groups observations that are close in space and time, and combines them into
+    a single "superobservation". This can help reduce the number of observations, improving
+    performance and avoiding biases from over-represented areas.
+
+    The configuration for superorbing should be specified in the experiment's config file
+    under `observations.superorbing`. See the documentation for details on the configuration
+    options.
+
+    Note: This will remove any previously downsampled observations from the database before
+    applying superorbing again.
+    """
+
+    logger.setup("observations-superorbing", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+    exp.obs.apply_superorbing()
+
+
+@observations_cli.command()
 @click.option(
     "--cycle",
     type=int,

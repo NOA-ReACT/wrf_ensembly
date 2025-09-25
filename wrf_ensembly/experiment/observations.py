@@ -43,9 +43,32 @@ class ExperimentObservations:
             database=str(self.paths.obs_db),
             read_only=False,
         )
-        con.execute(
-            "CREATE TABLE IF NOT EXISTS observations (instrument STRING, quantity STRING, time TIMESTAMP, longitude DOUBLE, latitude DOUBLE, x DOUBLE, y DOUBLE, z DOUBLE, z_type STRING, value DOUBLE, value_uncertainty DOUBLE, qc_flag INT, orig_coords STRUCT(indices INT[], shape INT[], names STRING[]), orig_filename STRING, metadata STRING)"
-        )
+        con.execute("""
+                    CREATE TABLE IF NOT EXISTS observations (
+                        instrument STRING NOT NULL,
+                        quantity STRING NOT NULL,
+                        time TIMESTAMP NOT NULL,
+                        longitude DOUBLE NOT NULL,
+                        latitude DOUBLE NOT NULL,
+                        x DOUBLE NOT NULL,
+                        y DOUBLE NOT NULL,
+                        z DOUBLE NOT NULL,
+                        z_type STRING NOT NULL,
+                        value DOUBLE,
+                        value_uncertainty DOUBLE,
+                        qc_flag INT NOT NULL,
+                        orig_coords STRUCT(
+                            indices INT[], shape INT[], names STRING[]
+                        ) NOT NULL,
+                        orig_filename STRING NOT NULL,
+                        metadata STRING,
+                        downsampling_info STRUCT(
+                            method STRING,
+                            obs_count INT,
+                            time_spread_seconds DOUBLE,
+                            spatial_spread_meters DOUBLE
+                        )
+            )""")
         return con
 
     def get_available_quantities(self) -> list[dict]:
@@ -229,6 +252,65 @@ class ExperimentObservations:
             """)
 
         return len(df.index)
+
+    def apply_superorbing(self) -> None:
+        """
+        Applies the configured downsampling (super-orbing) methods to all observations in the database.
+
+        It will clear any old downsampled observations and replace them with the new ones.
+
+        The `observations.superorbing` configuration dictionary controls how to downsample each instrument. The keys are the `instrument.quantity` pairs, e.g. `radiosonde.temperature`, and the values are how to downsample, check the `SuperorbingConfig` dataclass in `config.py` for details.
+        """
+
+        if not self.cfg.observations.superorbing:
+            logger.info("No superorbing configuration found, skipping downsampling.")
+            return
+
+        with self._get_duckdb(read_only=False) as con:
+            # Clean up any old downsampled observations
+            res = con.execute(
+                "DELETE FROM observations WHERE downsampling_info IS NOT NULL"
+            )
+            if res.rowcount > 0:
+                logger.info(f"Removed {res.rowcount} old downsampled observations.")
+
+            for key, superorb_config in self.cfg.observations.superorbing.items():
+                try:
+                    instrument, quantity = key.split(".")
+                except ValueError:
+                    raise ValueError(
+                        f"Invalid superorbing key '{key}', must be in the format 'instrument.quantity'"
+                    )
+
+                logger.info(f"Applying superorbing for {instrument}.{quantity}'")
+
+                df = con.execute(
+                    f"SELECT * FROM observations WHERE instrument = '{instrument}' AND quantity = '{quantity}'"
+                ).fetchdf()
+                if df.empty:
+                    logger.warning(
+                        f"No observations found for {instrument}.{quantity}, skipping superorbing."
+                    )
+                    continue
+
+                df_superobed = obs.superorbing.superorb_dbscan(df, superorb_config)
+
+                # Insert the new superobed observations
+                con.register("df_superobed_view", df_superobed)
+                con.execute("""
+                    INSERT INTO observations (
+                        instrument, quantity, time, longitude, latitude, x, y, z, z_type,
+                        value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata, downsampling_info
+                    )
+                    SELECT
+                        instrument, quantity, time, longitude, latitude, x, y, z, z_type,
+                        value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata, downsampling_info
+                    FROM df_superobed_view
+                """)
+
+                logger.info(
+                    f"Superorbing complete for {instrument}.{quantity}, reduced from {len(df)} to {len(df_superobed)} observations."
+                )
 
     def get_observations_for_cycle(
         self, cycle: CycleInformation

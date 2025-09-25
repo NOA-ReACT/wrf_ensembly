@@ -259,11 +259,36 @@ class AssimilationConfig:
 
 
 @dataclass
+class SuperorbingConfig:
+    """Configuration of how to superorb a specific instrument's observations"""
+
+    spatial_radius_x_meters: float
+    """Spatial radius in the x direction, meters"""
+
+    spatial_radius_y_meters: float
+    """Spatial radius in the y direction, meters"""
+
+    spatial_radius_z: Optional[float] = None
+    """
+    Spatial radius in the z direction, in whatever units the observation's z_type is in
+    (e.g., meters for height, hPa for pressure).
+
+    If missing, no superobing in the z direction is done.
+    """
+
+    temporal_radius_seconds: int = 60
+    """Temporal radius in seconds"""
+
+
+@dataclass
 class ObservationsConfig:
     """Configuration related to observation preprocessing (mainly for the `observations preprocess-for-wrf` command)"""
 
     instruments_to_assimilate: Optional[list[str]] = None
     """Which instruments to assimilate. If None, all available instruments are used."""
+
+    superorbing: Dict[str, SuperorbingConfig] = field(default_factory=dict)
+    """Configuration of how to superorb specific instruments. Key is the instrument name."""
 
     boundary_width: float = 0
     """By how many grid points to reduce the domain by when removing obs. from outside the domain"""
