@@ -333,9 +333,26 @@ class ExperimentObservations:
 
         # Query the observations with duck db, find only files that overlap with the time window and instrument list
         with self._get_duckdb(read_only=True) as con:
-            observations = con.execute(
-                f"SELECT * FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}'"
-            ).fetchdf()
+            # If there are no super-orbed observations, we will use the original ones.
+            superorbed_count = con.execute("""
+                SELECT COUNT(*) FROM observations WHERE downsampling_info IS NOT NULL
+            """).fetchone()
+            superorbed_count = superorbed_count[0] if superorbed_count else 0
+            superorbed_available = superorbed_count > 0
+
+            if superorbed_available:
+                logger.info("Using super-orbed observations for assimilation.")
+                observations = observations = con.execute(
+                    f"SELECT * FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}' WHERE downsampling_info IS NOT NULL"
+                ).fetchdf()
+            else:
+                logger.info(
+                    "No super-orbed observations found, using original observations."
+                )
+                observations = con.execute(
+                    f"SELECT * FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}' AND downsampling_info IS NULL"
+                ).fetchdf()
+
         if instruments is not None:
             observations = observations[observations["instrument"].isin(instruments)]
 
