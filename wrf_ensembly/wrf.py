@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+import cartopy.crs as ccrs
 import pyproj
 import xarray as xr
 
@@ -278,6 +279,27 @@ def get_wrf_proj_transformer(domain: DomainControlConfig):
     )
 
     return pyproj.Transformer.from_crs(pyproj.CRS("EPSG:4326"), wrf_crs, always_xy=True)
+
+
+def get_wrf_cartopy_crs(domain: DomainControlConfig):
+    """
+    Returns a cartopy CRS for the given WRF domain.
+
+    Only works for Lambert Conformal Conic projections!
+    """
+
+    if domain.projection.lower() != "lambert":
+        raise NotImplementedError(
+            f"Projection {domain.projection} not supported yet in get_wrf_cartopy_crs()"
+        )
+    if domain.stand_lon is None or domain.ref_lat is None:
+        raise ValueError("stand_lon and ref_lat must be set in the domain config")
+
+    return ccrs.LambertConformal(
+        central_longitude=domain.stand_lon,
+        central_latitude=domain.ref_lat,
+        standard_parallels=(domain.truelat1, domain.truelat2),
+    )
 
 
 def get_spatial_domain_bounds(wrfinput_path: Path) -> tuple[float, float, float, float]:

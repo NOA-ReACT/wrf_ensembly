@@ -14,7 +14,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.progress import Progress, track
 
-from wrf_ensembly import experiment, external, observations
+from wrf_ensembly import experiment, external, observations, wrf
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger, console
 from wrf_ensembly.utils import determine_jobs
@@ -357,3 +357,61 @@ def cycle_stats(experiment_path: Path, cycle: int, as_json: bool):
         for fname, count in info["files"].items():
             files_table.add_row(fname, str(count))
         console.print(files_table)
+
+
+@observations_cli.command()
+@click.argument("cycle", type=int, required=True, default=None)
+@pass_experiment_path
+def plot_cycle_locations(experiment_path: Path, cycle: int):
+    """
+    Plot the locations of observations for a specific cycle on a map.
+
+    The plot will be saved to the plot subdirectory in the experiment directory, named
+    `obs_cycle_XXX_locations.png`.
+
+    Args:
+        cycle: The cycle index to plot observations for.
+    """
+
+    logger.setup("observations-plot-cycle-locations", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    cycle_info = exp.cycles[cycle]
+
+    parquet_path = exp.paths.obs / f"cycle_{cycle_info.index:03d}.parquet"
+    if not parquet_path.is_file():
+        logger.error(
+            f"Cycle {cycle_info.index} parquet file {parquet_path} does not exist, run `wrf-ensembly obs prepare-cycles` first or there are no observations for this cycle"
+        )
+        return
+    obs = observations.io.read_obs(parquet_path)
+    if obs is None or obs.empty:
+        logger.error(f"Cycle {cycle_info.index} has no observations, cannot plot")
+        return
+
+    # Find a wrfinput file
+    if not exp.cfg.data.per_member_meteorology:
+        wrfinput_path = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
+    else:
+        wrfinput_path = exp.paths.data_icbc / "member_00" / "wrfinput_d01_cycle_0"
+
+    if wrfinput_path.exists():
+        bounds = wrf.get_spatial_domain_bounds(wrfinput_path)
+    else:
+        logger.warning("No wrfinput file found, cannot set map bounds")
+        bounds = None
+
+    fig = observations.plotting.plot_observation_locations_on_map(
+        obs,
+        proj=wrf.get_wrf_cartopy_crs(exp.cfg.domain_control),
+        domain_bounds=bounds,
+    )
+    fig.suptitle(f"Observation Locations for Cycle {cycle_info.index}")
+
+    output_path = exp.paths.plots / f"obs_locations_cycle_{cycle_info.index:03d}.png"
+    output_path.parent.mkdir(exist_ok=True, parents=True)
+
+    fig.savefig(output_path)
+    logger.info(
+        f"Saved observation locations plot for cycle {cycle_info.index} to {output_path}"
+    )

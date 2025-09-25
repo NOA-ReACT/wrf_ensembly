@@ -9,6 +9,8 @@ from rich.logging import RichHandler
 
 console = Console()
 
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
+
 
 class Logger:
     experiment_path: Path

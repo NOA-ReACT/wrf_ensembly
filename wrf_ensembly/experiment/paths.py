@@ -26,6 +26,8 @@ class ExperimentPaths:
         self.obs_temp = self.obs / "temp"  # Temporary files during processing
         self.obs_db = experiment_path / "observations.duckdb"
 
+        self.plots = experiment_path / "plots"
+
         # Work directories
         self.work = experiment_path / "work"
         self.work_wrf = self.work / "WRF"
@@ -58,6 +60,7 @@ class ExperimentPaths:
         self.work.mkdir()
         self.work_preprocessing.mkdir()
         self.jobfiles.mkdir()
+        self.plots.mkdir()
 
         self.data.mkdir()
         self.data_analysis.mkdir()
