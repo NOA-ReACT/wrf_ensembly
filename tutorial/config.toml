@@ -1,0 +1,319 @@
+[metadata]
+name = "tutorial_da"
+description = "Config for the tutorial"
+
+[directories]
+wrf_root = "/home/thgeorgiou/work/WRF/WRFrepo"
+wps_root = "/home/thgeorgiou/work/WRF/WPS-4.6.0"
+dart_root = "/home/thgeorgiou/work/DART_AIRSENSE"
+
+[domain_control]
+xy_resolution = [30, 30] # km
+xy_size = [230, 130]     # grid points
+
+projection = "lambert"
+ref_lat = 20
+ref_lon = -17
+truelat1 = 20
+truelat2 = 18
+stand_lon = -11
+
+[time_control]
+# Start-end times for the whole experiment (all assimilation cycles)
+start = 2025-04-05T00:00:00Z
+end = 2025-04-06T00:00:00Z
+# Corresponds to interval_seconds in WRF, but in minutes
+boundary_update_interval = 180 # 3h
+# Output file interval, in minutes (WRF history_interval)
+output_interval = 60 # 1h
+# How often the analysis is run, in minutes
+analysis_interval = 180
+# Add emissions to output
+runtime_io = ["+:h:0:EDUST1,EDUST2,EDUST3,EDUST4,EDUST5"]
+
+[geogrid]
+table = "GEOGRID.TBL.ARW_CHEM"
+
+[data]
+wps_geog = "/home/thgeorgiou/data/Modelling/WPS_GEOG"
+meteorology = "/home/thgeorgiou/data/Modelling/AIRSENSE/ERA5"
+meteorology_vtable = "Vtable.ERA-interim.pl"
+manage_chem_ic = true
+chemistry = { path = '/home/thgeorgiou/data/Modelling/AIRSENSE/CAMS_FC', model_name = 'cams_global_forecasts' }
+
+[perturbations]
+apply_perturbations_every_cycle = false
+# Perturbation to dust emission weights. Default value is 1 so we are aiming for the whole 0-2 range, bias towards the center
+[perturbations.variables.DUST_1]
+operation = 'multiply'
+mean = 1
+sd = 0.3
+rounds = 20
+[perturbations.variables.DUST_2]
+operation = 'multiply'
+mean = 1
+sd = 0.3
+rounds = 20
+[perturbations.variables.DUST_3]
+operation = 'multiply'
+mean = 1
+sd = 0.3
+rounds = 20
+[perturbations.variables.DUST_4]
+operation = 'multiply'
+mean = 1
+sd = 0.3
+rounds = 20
+[perturbations.variables.DUST_5]
+operation = 'multiply'
+mean = 1
+sd = 0.3
+rounds = 20
+
+[assimilation]
+n_members = 8
+# Which variables to carry forward from the previous cycle
+cycled_variables = [
+  'U',
+  'V',
+  'P',
+  'PH',
+  'THM',
+  'MU',
+  'QVAPOR',
+  'QCLOUD',
+  'QRAIN',
+  'QICE',
+  'QSNOW',
+  'QGRAUP',
+  'QNICE',
+  'QNRAIN',
+  'U10',
+  'V10',
+  'T2',
+  'Q2',
+  'PSFC',
+  'DUST_1',
+  'DUST_2',
+  'DUST_3',
+  'DUST_4',
+  'DUST_5',
+  'SEAS_1',
+  'SEAS_2',
+  'SEAS_3',
+  'SEAS_4'
+]
+# Which variables to use in the state vector
+# Should probably match the DART namelist!
+state_variables = ['U', 'V', 'W', 'PH', 'THM', 'MU', 'QVAPOR', 'PSFC', 'DUST_1', 'DUST_2', 'DUST_3', 'DUST_4', 'DUST_5', 'SEAS_1', 'SEAS_2', 'SEAS_3', 'SEAS_4']
+filter_mpi_tasks = 24
+
+[observations]
+boundary_width = 2.0
+boundary_error_factor = 2.5
+boundary_error_width = 1.0
+
+[slurm]
+# command_prefix = "micromamba run -n wrf "
+# env_modules = []
+pre_commands = []
+mpirun_command = "mpirun -iface lo"
+
+[slurm.directives_large]
+partition = "iridium"
+nodes = 1
+ntasks-per-node = 12
+cpus-per-task = 1
+mem = '20G'
+
+[slurm.directives_small]
+partition = "iridium"
+nodes = 1
+ntasks-per-node = 8
+cpus-per-task = 1
+mem = '16G'
+
+[slurm.directives_statistics]
+partition = "iridium"
+nodes = 1
+ntasks-per-node = 8
+ntasks = 1
+cpus-per-task = 1
+mem = '16G'
+
+[slurm.directives_postprocess]
+partition = "iridium"
+nodes = 1
+ntasks = 24
+cpus-per-task = 1
+mem = '12G'
+
+[postprocess]
+# Only keep dust-related variables for debugging
+variables_to_keep = [
+  'DUST_\d',
+  'SEAS_\d',
+  'EDUST\d',
+  'U',
+  'V',
+  'wind_.*',
+  'air_pressure',
+  'air_density',
+  'geopotential_height',
+  'RHO',
+  'X.*',
+  'Z.*',
+]
+# Standard shuffle + deflate filters
+compression_filters = "shf|dfl"
+# GBR w/ 3 significant digits, 6 for coordinates
+ppc_filter = "default=3#Z.*=6#X.*=6"
+keep_per_member = false
+compute_ensemble_statistics_in_job = true
+
+processor_cores = 1
+statistics_cores = 24
+concatenate_cores = 24
+
+[[postprocess.processors]]
+processor = "/home/thgeorgiou/work/AIRSENSE/aod_python_operator/postproc_wrfout.py:ExtinctionOperatorProcessor"
+params = { optical_properties_file = "/home/thgeorgiou/work/L2Aplus/extinction_operator/parse_optical_prop_tables/qext/hex_mixtures/hexmix_optical_props.csv" }
+
+# -- WRF NAMELIST OPTIONS --
+[wrf_namelist]
+
+[wrf_namelist.time_control]
+input_from_file = true
+history_interval = 60
+frames_per_outfile = 1
+restart = false
+restart_interval = 3600
+io_form_history = 2
+io_form_restart = 2
+io_form_input = 2
+io_form_boundary = 2
+io_form_auxhist2 = 2
+debug_level = 0
+diag_print = 0
+
+[wrf_namelist.domains]
+time_step = 180               # 6*dx in km https://esrl.noaa.gov/gsd/wrfportal/namelist_input_options.html
+use_adaptive_time_step = true
+max_time_step = 600
+min_time_step = 30
+time_step_fract_num = 0
+time_step_fract_den = 1
+max_dom = 1
+e_vert = 45
+num_metgrid_levels = 38
+num_metgrid_soil_levels = 4
+grid_id = 1
+parent_id = 0
+i_parent_start = 1
+j_parent_start = 1
+parent_grid_ratio = 1
+parent_time_step_ratio = 1
+feedback = 1
+smooth_option = 0
+p_top_requested = 5000
+smooth_cg_topo = true
+dzstretch_s = 1.1
+
+
+[wrf_namelist.physics]
+sst_update = 0
+mp_physics = 10
+progn = 1
+do_radar_ref = 1
+ra_lw_physics = 4
+ra_sw_physics = 4
+radt = 20
+sf_sfclay_physics = 2
+sf_surface_physics = 2
+bl_pbl_physics = 2
+bldt = 0
+cu_physics = 5
+cu_diag = 1
+cudt = 0
+ishallow = 0
+isfflx = 1
+ifsnow = 1
+icloud = 1
+surface_input_source = 1
+num_soil_layers = 4
+sf_urban_physics = 0
+mp_zero_out = 2
+mp_zero_out_thresh = 1e-12
+maxiens = 1
+maxens = 3
+maxens2 = 3
+maxens3 = 16
+ensdim = 144
+cu_rad_feedback = true
+
+
+[wrf_namelist.dynamics]
+hybrid_opt = 2
+w_damping = 1
+epssm = 0.5
+diff_opt = 2
+km_opt = 4             # eddy coefficient, recommended value for real runs
+khdif = 0
+kvdif = 0
+non_hydrostatic = true
+gwd_opt = 1            # Add gravity wave drag & blocking
+
+# Recommended advection settings for WRF-CHEM, 2 = monotonic
+chem_adv_opt = 2
+moist_adv_opt = 2
+scalar_adv_opt = 2
+tke_adv_opt = 2
+diff_6th_opt = 0   # No 6th order diffusion
+
+[wrf_namelist.namelist_quilt]
+nio_tasks_per_group = 0
+nio_groups = 1
+
+[wrf_namelist.bdy_control]
+spec_bdy_width = 5
+specified = true
+
+[wrf_namelist.chem]
+kemit = 1              # Emission levels
+chem_opt = 300         # GOCART aerosols without chemistry
+bioemdt = 0            # Update interval for biogenic emissions
+photdt = 0             # Update interval for photolysis
+chemdt = 0             # Chemistry timestep (minutes), zero to match WRF timestep
+io_style_emissions = 0 # 0 = No emission data
+emiss_opt = 0          # No anthropogenic emissions
+emiss_opt_vol = 0      # No volcanic emissions
+emiss_ash_hgt = 20000  # ?
+chem_in_opt = 0        # Do not read ic/bc from a wrfchemi file, either read from wrfinput or use idealized profiles
+phot_opt = 0           # No photolysis
+gas_drydep_opt = 1     # Dry deposition of gas species
+aer_drydep_opt = 1     # Dry deposition of aerosols
+bio_emiss_opt = 0      # No biogenic emissions
+dust_opt = 3           # GOCART dust emission scheme
+dust_alpha = 0.55      # ?
+dmsemis_opt = 0        # no GOCART dms emissions from sea surface
+seas_opt = 1           # Enable sea salt
+depo_fact = 0.25
+gas_bc_opt = 0         # ICBC from wrfinput
+gas_ic_opt = 0         # ...
+aer_bc_opt = 0         # ...
+aer_ic_opt = 0         # ...
+gaschem_onoff = 0      # No gas phase chemistry
+aerchem_onoff = 1      # Aerosol chemistry
+wetscav_onoff = 0      # No wet scavenging
+cldchem_onoff = 0      # NO cloud chemistry
+vertmix_onoff = 1      # Enable vertical turbulent mixing
+chem_conv_tr = 0       # No subgrid convertive transport
+conv_tr_wetscav = 0    # No subgrid wet scavenging
+conv_tr_aqchem = 0     # No subgrid aqueous chemistry
+biomass_burn_opt = 0   # No biomass burning
+plumerisefire_frq = 30 # Unused, for biomass burning
+have_bcs_chem = true   # Use boundary from wrfbdy
+aer_ra_feedback = 0    # No radiative feedback
+aer_op_opt = 0         # No aerosol optical properties in output, we calculate our own in post
+opt_pars_out = 0       # No optical properties in output
+diagnostic_chem = 0    # No debug
