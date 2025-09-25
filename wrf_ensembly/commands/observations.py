@@ -114,7 +114,25 @@ def add(experiment_path: Path, files: list[Path], jobs: int):
 @observations_cli.command()
 @pass_experiment_path
 def show(experiment_path: Path):
+    """
+    Prints two tables, one with every combination of instrument, quantity and how many observations,
+    and one with all used files, their time range and instrument.
+    """
+
     exp = experiment.Experiment(experiment_path)
+
+    # Show summary table of instrument/quantity/count
+    quantities = exp.obs.get_available_quantities()
+
+    table = Table(title="Available Observation Quantities")
+    table.add_column("Instrument", style="cyan", no_wrap=True)
+    table.add_column("Quantity", style="cyan", no_wrap=True)
+    table.add_column("Count", style="green")
+    for info in quantities:
+        table.add_row(info["instrument"], info["quantity"], str(info["count"]))
+    Console().print(table)
+
+    # Show summary table of instrument/quantity/count
     obs_files = exp.obs.get_available_observations_overview()
 
     table = Table(title="Available Observation Files")

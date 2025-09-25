@@ -48,6 +48,18 @@ class ExperimentObservations:
         )
         return con
 
+    def get_available_quantities(self) -> list[dict]:
+        """Returns all combinations of instrument and quantity available in the database."""
+
+        with self._get_duckdb(read_only=True) as con:
+            result = con.execute("""
+                SELECT instrument, quantity, COUNT(*) as count
+                FROM observations
+                GROUP BY instrument, quantity
+                ORDER BY count DESC
+            """).fetch_df()
+        return result.to_dict(orient="records")
+
     def get_available_observations_overview(
         self,
     ) -> list[dict]:
