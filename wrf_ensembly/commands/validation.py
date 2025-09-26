@@ -37,7 +37,7 @@ def interpolate_model(experiment_path: Path):
 
     obs = (
         exp.obs._get_duckdb(read_only=True)
-        .execute("SELECT * FROM observations")
+        .execute("SELECT * FROM observations WHERE downsampling_info IS NULL")
         .fetchdf()
     )
 
