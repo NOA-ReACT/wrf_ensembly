@@ -309,8 +309,8 @@ class GeogridConfig:
 
 @dataclass
 class PerturbationVariableConfig:
-    operation: Literal["add", "multiply"]
-    """Whether to add or multiply the perturbation field"""
+    operation: Literal["add", "multiply", "assign"]
+    """Whether to add or multiply the perturbation field to the variable, or to directly assign it (overwritting the variable)"""
 
     mean: float = 1.0
     """Mean of the perturbation field"""

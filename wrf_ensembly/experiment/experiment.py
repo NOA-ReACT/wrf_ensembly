@@ -215,6 +215,8 @@ class Experiment:
                     member_icbc[var][:] += field
                 elif pert_config.operation == "multiply":
                     member_icbc[var][:] *= field
+                elif pert_config.operation == "assign":
+                    member_icbc[var][:] = field
                 else:
                     raise ValueError(
                         f"Unknown perturbation operation: {pert_config.operation}"
