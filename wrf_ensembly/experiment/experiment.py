@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import os
 from pathlib import Path
 
@@ -20,8 +21,8 @@ from wrf_ensembly.console import logger
 
 from .database import ExperimentDatabase
 from .dataclasses import MemberStatus, RuntimeStatistics
-from .paths import ExperimentPaths
 from .observations import ExperimentObservations
+from .paths import ExperimentPaths
 
 
 class Experiment:
@@ -141,6 +142,34 @@ class Experiment:
         # First, generate the perturbation field for each variable and member, and put them in a dataset
         perts = xr.Dataset()
         for var, pert_config in self.cfg.perturbations.variables.items():
+            if cycle_i > 0:
+                if not pert_config.perturb_every_cycle:
+                    logger.info(
+                        f"Skipping perturbation for {var} at cycle {cycle_i} (only perturbed at first cycle)"
+                    )
+                    continue
+                if not pert_config.different_field_every_cycle:
+                    logger.info(
+                        f"Using same perturbation field as first cycle for {var}"
+                    )
+
+                    # Copy perturbation field from first cycle
+                    first_cycle_pert_file = (
+                        self.paths.data_diag / "perturbations" / "perts_cycle_0.nc"
+                    )
+                    if not first_cycle_pert_file.exists():
+                        raise FileNotFoundError(
+                            f"Perturbation file for first cycle not found at {first_cycle_pert_file}"
+                        )
+                    with xr.open_dataset(first_cycle_pert_file) as first_cycle_perts:
+                        if var not in first_cycle_perts:
+                            raise ValueError(
+                                f"Variable {var} not found in perturbation file for first cycle"
+                            )
+                        perts[var] = first_cycle_perts[var]
+                        perts[var].attrs = first_cycle_perts[var].attrs
+                    continue
+
             arr = np.stack(
                 [
                     perturbations.generate_perturbation_field(
@@ -160,6 +189,7 @@ class Experiment:
                 arr,
                 dims=("member", *wrfinput[var].dims),
                 coords={"member": range(self.cfg.assimilation.n_members)},
+                attrs={"cfg": json.dumps(pert_config.__dict__)},
             )
 
         # Write the dataset to a netCDF file
@@ -183,6 +213,10 @@ class Experiment:
         Must be generated with `generate_perturbations` first.
         You should call this function once for every member, after the initial conditions
         are copied in the member directory (either during `ensemble setup` or `ensemble cycle`).
+
+        This function will not check the configuration, rather it will assume that the
+        contents of the perturbation files are correct. This allows you to modify them
+        outside of this program if needed.
         """
 
         if member_i >= self.cfg.assimilation.n_members:
@@ -199,24 +233,35 @@ class Experiment:
             raise FileNotFoundError(
                 f"Perturbation file for cycle {self.current_cycle_i} not found at {pert_file}"
             )
+        wrfinput_path = self.paths.member_path(member_i) / "wrfinput_d01"
+        if not wrfinput_path.exists():
+            raise FileNotFoundError(
+                f"Initial conditions file for member {member_i} not found at {wrfinput_path}"
+            )
 
         perts = xr.open_dataset(pert_file).sel(member=member_i)
 
-        with netCDF4.Dataset(
-            self.paths.member_path(member_i) / "wrfinput_d01", "r+"
-        ) as member_icbc:  # type: ignore
-            for var, pert_config in self.cfg.perturbations.variables.items():
-                logger.debug(f"Applying perturbation to {var} for member {member_i}")
-                if var not in member_icbc.variables:
-                    raise ValueError(f"Variable {var} not found in member IC/BC file.")
+        with netCDF4.Dataset(wrfinput_path, "r+") as member_icbc:  # type: ignore
+            for name, var in perts.data_vars.items():
+                pert_config = json.loads(var.attrs["cfg"])
+                if "operation" not in pert_config:
+                    raise ValueError(
+                        f"Perturbation config for {name} does not contain 'operation', parsed from netCDF attribute `cfg`"
+                    )
+                operation = pert_config["operation"]
 
-                field = perts[var].values
-                if pert_config.operation == "add":
-                    member_icbc[var][:] += field
-                elif pert_config.operation == "multiply":
-                    member_icbc[var][:] *= field
-                elif pert_config.operation == "assign":
-                    member_icbc[var][:] = field
+                logger.debug(f"Applying perturbation to {name} for member {member_i}")
+                logger.debug(f"Perturbation config: {pert_config}")
+                if name not in member_icbc.variables:
+                    raise ValueError(f"Variable {name} not found in member IC/BC file.")
+
+                field = var.to_numpy()
+                if operation == "add":
+                    member_icbc[name][:] += field
+                elif operation == "multiply":
+                    member_icbc[name][:] *= field
+                elif operation == "assign":
+                    member_icbc[name][:] = field
                 else:
                     raise ValueError(
                         f"Unknown perturbation operation: {pert_config.operation}"

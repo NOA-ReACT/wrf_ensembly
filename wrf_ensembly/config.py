@@ -309,8 +309,16 @@ class GeogridConfig:
 
 @dataclass
 class PerturbationVariableConfig:
+    """Configuration about how to perturb a specific variable"""
+
     operation: Literal["add", "multiply", "assign"]
     """Whether to add or multiply the perturbation field to the variable, or to directly assign it (overwritting the variable)"""
+
+    perturb_every_cycle: bool = False
+    """Whether to generate a perturbation field for this variable at every cycle. If false, it will be perturbed only at the first cycle."""
+
+    different_field_every_cycle: bool = True
+    """If `perturb_every_cycle` is true, whether to generate a different perturbation field at every cycle, or to use the same field."""
 
     mean: float = 1.0
     """Mean of the perturbation field"""
@@ -343,9 +351,6 @@ class PerturbationsConfig:
 
     seed: Optional[int] = None
     """RNG seed to use when generating perturbation fields. If none, it will be randomly generated."""
-
-    apply_perturbations_every_cycle: bool = False
-    """Whether to apply the perturbations at the start of every cycle when using `slurm run-experiment`"""
 
 
 @dataclass
