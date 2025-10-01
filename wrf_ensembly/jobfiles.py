@@ -193,14 +193,9 @@ def generate_make_analysis_jobfile(
         "else",
         _build_command(base_cmd, "cycle", use_forecast=True),
         "fi",
-    ]
-    if exp.cfg.perturbations.apply_perturbations_every_cycle:
-        commands += [
-            f"if [ -f {pert_file} ]; then",
-            _build_command(base_cmd, "apply-perturbations"),
-            "fi",
-        ]
-    commands += [
+        f"if [ -f {pert_file} ]; then",
+        _build_command(base_cmd, "apply-perturbations"),
+        "fi",
         _build_command(base_cmd, "update-bc"),
     ]
 
