@@ -1,6 +1,6 @@
 [project]
 name = "wrf-ensembly"
-version = "1.1.0"
+version = "1.2.0"
 description = "Support scripts for using DART w/ WRF"
 authors = [{ name = "Thanasis Georgiou", email = "ageorgiou@noa.gr" }]
 readme = "README.md"
