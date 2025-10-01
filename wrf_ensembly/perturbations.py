@@ -63,3 +63,38 @@ def generate_perturbation_field(
     if max_value is not None:
         x = np.minimum(x, max_value)
     return x
+
+
+def edge_taper(ny: int, nx: int, border_width: int):
+    """
+    Tapers the center of a 2D array to zero, leaving a border of specified width unchanged.
+    The transition from the border to the center is smooth, following a linear decay of length
+    equal to the border width.
+
+    So a perturbation field with `edge_taper(10)` will have a 10-pixel wide border
+    that is non-zero.
+
+    Args:
+        ny: Number of rows in the array
+        nx: Number of columns in the array
+        border_width: Width of the border to remain unchanged
+    Returns:
+        The tapered array mask as a numpy array.
+    """
+
+    # Compute distance of each point from the nearest edge
+    y_indices = np.indices([ny])
+    x_indices = np.indices([nx])
+    dist_left = x_indices
+    dist_right = nx - 1 - x_indices
+    dist_top = y_indices
+    dist_bottom = ny - 1 - y_indices
+
+    dist_x = np.minimum(dist_left, dist_right)
+    dist_y = np.minimum(dist_top, dist_bottom)
+    xx, yy = np.meshgrid(dist_x, dist_y)
+    dist = np.minimum(xx, yy)
+
+    taper = 1.0 - np.clip(dist / border_width, 0, 1)
+
+    return taper

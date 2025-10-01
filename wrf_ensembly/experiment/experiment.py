@@ -166,7 +166,26 @@ class Experiment:
                             raise ValueError(
                                 f"Variable {var} not found in perturbation file for first cycle"
                             )
-                        perts[var] = first_cycle_perts[var]
+                        arr = first_cycle_perts[var]
+                        if pert_config.midcycle_taper_width > 0:
+                            logger.info(
+                                f"Applying mid-cycle taper with width {pert_config.midcycle_taper_width} to {var}"
+                            )
+                            taper = perturbations.edge_taper(
+                                wrfinput.sizes["south_north"],
+                                wrfinput.sizes["west_east"],
+                                pert_config.midcycle_taper_width,
+                            )
+                            if pert_config.operation == "add":
+                                arr = arr * taper
+                            elif pert_config.operation == "multiply":
+                                arr = 1 + (arr - 1) * taper
+                            else:
+                                raise ValueError(
+                                    "Cannot use 'assign' operation with midcycle taper"
+                                )
+
+                        perts[var] = arr
                         perts[var].attrs = first_cycle_perts[var].attrs
                     continue
 
@@ -240,32 +259,34 @@ class Experiment:
             )
 
         perts = xr.open_dataset(pert_file).sel(member=member_i)
+        pert_config = {
+            name: json.loads(var.attrs["cfg"]) for name, var in perts.data_vars.items()
+        }
 
         with netCDF4.Dataset(wrfinput_path, "r+") as member_icbc:  # type: ignore
-            for name, var in perts.data_vars.items():
-                pert_config = json.loads(var.attrs["cfg"])
-                if "operation" not in pert_config:
+            for name, cfg in pert_config.items():
+                if "operation" not in cfg:
                     raise ValueError(
                         f"Perturbation config for {name} does not contain 'operation', parsed from netCDF attribute `cfg`"
                     )
-                operation = pert_config["operation"]
+                operation = cfg["operation"]
 
                 logger.debug(f"Applying perturbation to {name} for member {member_i}")
                 logger.debug(f"Perturbation config: {pert_config}")
                 if name not in member_icbc.variables:
                     raise ValueError(f"Variable {name} not found in member IC/BC file.")
 
-                field = var.to_numpy()
-                if operation == "add":
-                    member_icbc[name][:] += field
-                elif operation == "multiply":
-                    member_icbc[name][:] *= field
-                elif operation == "assign":
-                    member_icbc[name][:] = field
-                else:
-                    raise ValueError(
-                        f"Unknown perturbation operation: {pert_config.operation}"
-                    )
+                field = perts[name].to_numpy()
+
+                match operation:
+                    case "add":
+                        member_icbc[name][:] += field
+                    case "multiply":
+                        member_icbc[name][:] *= field
+                    case "assign":
+                        member_icbc[name][:] = field
+                    case _:
+                        raise ValueError(f"Unknown perturbation operation: {operation}")
 
         logger.info(f"Applied perturbations to member {member_i}")
 

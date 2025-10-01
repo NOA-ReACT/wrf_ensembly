@@ -320,6 +320,16 @@ class PerturbationVariableConfig:
     different_field_every_cycle: bool = True
     """If `perturb_every_cycle` is true, whether to generate a different perturbation field at every cycle, or to use the same field."""
 
+    midcycle_taper_width: int = 0
+    """
+    Width of the tapering region applied to the perturbation field during midcycles.
+    This only applies if `perturb_every_cycle` is true. If > 0, an area of size
+    `midcycle_taper_width` grid points at the edges of the domain will be perturbed with
+    weight equal to 1, and the perturbation will be tapered to 0 in the next
+    `midcycle_taper_width` grid points. This is useful to avoid discontinuities at
+    the boundaries when perturbing every cycle. Doesn't work if `operation` is `assign`.
+    """
+
     mean: float = 1.0
     """Mean of the perturbation field"""
 
