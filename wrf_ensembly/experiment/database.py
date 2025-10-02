@@ -4,6 +4,7 @@ Database operations for experiment status tracking. This module provides SQLite-
 
 import datetime as dt
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Optional
@@ -78,22 +79,109 @@ class ExperimentDatabase:
             conn.commit()
 
     @contextmanager
-    def _get_connection(self):
-        """Get a database connection"""
+    def _get_connection(self, max_retries=10, base_wait=0.5):
+        """
+        Get a database connection.
+        Includes a retry mechanism with exponential backoff for handling transient lock
+        issues on the HPC with Lustre filesystems.
+        """
+
+        traceback.print_stack(limit=4)
 
         conn = None
-        try:
-            conn = sqlite3.connect(self.db_path, timeout=30.0)
-            conn.execute("PRAGMA foreign_keys = ON")
-            yield conn
-        except Exception as e:
-            if conn:
-                conn.rollback()
-            logger.error(f"Database error: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                # For any extra attempts, add a jitter to avoid thundering herd
+                if attempt > 0:
+                    import random
+
+                    jitter = random.uniform(0, 0.1 * attempt)
+                    wait_time = min(base_wait * (2**attempt) + jitter, 30.0)
+                    logger.debug(
+                        f"DB retry {attempt}/{max_retries}, waiting {wait_time:.2f}s"
+                    )
+                    time.sleep(wait_time)
+
+                conn = sqlite3.connect(
+                    self.db_path,
+                    timeout=60.0,  # Increased timeout
+                    isolation_level="DEFERRED",  # Less aggressive locking
+                )
+
+                # Trying our best to make the database easier on the FS
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute("PRAGMA busy_timeout=60000")
+                conn.execute("PRAGMA temp_store=MEMORY")  # Avoid temp file I/O
+                conn.execute("PRAGMA foreign_keys = ON")
+
+                # Verify connection actually works
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute("SELECT 1")
+                conn.commit()
+
+                if attempt > 0:
+                    logger.info(f"DB connection succeeded after {attempt} retries")
+                else:
+                    logger.debug("DB connection succeeded with no retries")
+
+                yield conn
+                break
+
+            # Retry circus
+            except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
+                last_error = e
+                error_str = str(e).lower()
+
+                # Retryable errors
+                if any(
+                    err in error_str
+                    for err in [
+                        "disk i/o error",
+                        "database is locked",
+                        "unable to open",
+                    ]
+                ):
+                    if conn:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                        conn = None
+
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            f"Retryable DB error (attempt {attempt + 1}/{max_retries}): {e}"
+                        )
+                        continue
+
+                # Non-retryable or exhausted retries
+                if conn:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                logger.error(f"Database error after {attempt + 1} attempts: {e}")
+                raise
+
+            except Exception as e:
+                if conn:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                logger.error(f"Unexpected database error: {e}")
+                raise
+
+            finally:
+                # Only close if we're done (success or final failure)
+                if conn and (attempt == max_retries - 1 or last_error is None):
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
 
     def get_experiment_state(self) -> tuple[int, bool, bool]:
         """
