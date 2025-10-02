@@ -142,7 +142,12 @@ class Experiment:
             np.random.seed(self.cfg.perturbations.seed)
 
         # Open the first wrfinput file to get the shape of each variable
-        wrfinput = xr.open_dataset(self.paths.data_icbc / "wrfinput_d01_cycle_0")
+        if self.cfg.data.per_member_meteorology:
+            wrfinput = xr.open_dataset(
+                self.paths.data_icbc / "member_00" / "wrfinput_d01_member_00_cycle_0"
+            )
+        else:
+            wrfinput = xr.open_dataset(self.paths.data_icbc / "wrfinput_d01_cycle_0")
 
         pert_file = self.paths.data_diag / "perturbations" / f"perts_cycle_{cycle_i}.nc"
         pert_file.parent.mkdir(parents=True, exist_ok=True)
