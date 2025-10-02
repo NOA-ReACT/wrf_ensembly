@@ -342,8 +342,8 @@ class ExperimentObservations:
 
             if superorbed_available:
                 logger.info("Using super-orbed observations for assimilation.")
-                observations = observations = con.execute(
-                    f"SELECT * FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}' WHERE downsampling_info IS NOT NULL"
+                observations = con.execute(
+                    f"SELECT * FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}' AND downsampling_info IS NOT NULL"
                 ).fetchdf()
             else:
                 logger.info(
