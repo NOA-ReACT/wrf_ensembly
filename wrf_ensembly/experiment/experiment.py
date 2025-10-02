@@ -49,8 +49,9 @@ class Experiment:
         db_path = experiment_path / "status.db"
         self.db = ExperimentDatabase(db_path)
 
-        # Initialize members in database
-        self.db.initialize_members(self.cfg.assimilation.n_members)
+        # Initialize members in database and load status
+        with self.db as db_conn:
+            db_conn.initialize_members(self.cfg.assimilation.n_members)
 
         # Read experiment status from database
         self.load_status_from_db()
@@ -60,24 +61,26 @@ class Experiment:
 
     def load_status_from_db(self):
         """Load the status of the experiment from the database"""
-        # Get experiment state
-        self.current_cycle_i, self.filter_run, self.analysis_run = (
-            self.db.get_experiment_state()
-        )
 
-        # Get member status
-        members_data = self.db.get_all_members_status()
-        self.members = []
-
-        for member_i, advanced in members_data:
-            # Get runtime statistics for this member
-            runtime_stats = self.db.get_member_runtime_statistics(member_i)
-
-            self.members.append(
-                MemberStatus(
-                    i=member_i, advanced=advanced, runtime_statistics=runtime_stats
-                )
+        with self.db as db_conn:
+            # Get experiment state
+            self.current_cycle_i, self.filter_run, self.analysis_run = (
+                db_conn.get_experiment_state()
             )
+
+            # Get member status
+            members_data = db_conn.get_all_members_status()
+            self.members = []
+
+            for member_i, advanced in members_data:
+                # Get runtime statistics for this member
+                runtime_stats = db_conn.get_member_runtime_statistics(member_i)
+
+                self.members.append(
+                    MemberStatus(
+                        i=member_i, advanced=advanced, runtime_statistics=runtime_stats
+                    )
+                )
 
         # Ensure we have the right number of members
         while len(self.members) < self.cfg.assimilation.n_members:
@@ -90,34 +93,40 @@ class Experiment:
 
     def save_status_to_db(self):
         """Save the current status of the experiment to the database"""
-        # Save experiment state
-        self.db.set_experiment_state(
-            self.current_cycle_i, self.filter_run, self.analysis_run
-        )
 
-        # Save member status
-        for member in self.members:
-            self.db.set_member_advanced(member.i, member.advanced)
+        with self.db as db_conn:
+            # Save experiment state
+            db_conn.set_experiment_state(
+                self.current_cycle_i, self.filter_run, self.analysis_run
+            )
+
+            # Save member status in batch
+            member_statuses = [(member.i, member.advanced) for member in self.members]
+            db_conn.set_members_advanced_batch(member_statuses)
 
     def set_next_cycle(self):
         """
         Update status to the next cycle
         """
+
         self.current_cycle_i += 1
         if self.current_cycle_i >= len(self.cycles):
             raise ValueError("No more cycles to run")
         self.filter_run = False
         self.analysis_run = False
 
-        # Reset all members' advanced status in database
-        self.db.reset_members_advanced()
+        with self.db as db_conn:
+            # Reset all members' advanced status in database
+            db_conn.reset_members_advanced()
 
-        # Update local member status
-        for member in self.members:
-            member.advanced = False
+            # Update local member status
+            for member in self.members:
+                member.advanced = False
 
-        # Save to database
-        self.save_status_to_db()
+            # Save experiment state to database
+            db_conn.set_experiment_state(
+                self.current_cycle_i, self.filter_run, self.analysis_run
+            )
 
     def generate_perturbations(self, cycle_i: int):
         """
@@ -142,6 +151,7 @@ class Experiment:
         # First, generate the perturbation field for each variable and member, and put them in a dataset
         perts = xr.Dataset()
         for var, pert_config in self.cfg.perturbations.variables.items():
+            logger.debug(f"Generating perturbations for {var} at cycle {cycle_i}")
             if cycle_i > 0:
                 if not pert_config.perturb_every_cycle:
                     logger.info(
@@ -172,8 +182,8 @@ class Experiment:
                                 f"Applying mid-cycle taper with width {pert_config.midcycle_taper_width} to {var}"
                             )
                             taper = perturbations.edge_taper(
-                                wrfinput.sizes["south_north"],
-                                wrfinput.sizes["west_east"],
+                                arr.shape[-2],
+                                arr.shape[-1],
                                 pert_config.midcycle_taper_width,
                             )
                             if pert_config.operation == "add":
@@ -406,21 +416,21 @@ class Experiment:
             logger.info(f"Removing first output file {first_output}")
             first_output.unlink()
 
-        # Update member status using database instead of file locking
+        # Update member status using database context manager
         # The database handles concurrency internally
         self.members[member_idx].advanced = True
 
-        # Add runtime statistics to database
-        self.db.add_runtime_statistics(
-            member_idx,
-            self.current_cycle_i,
-            start_time,
-            end_time,
-            int((end_time - start_time).total_seconds()),
-        )
+        # Add runtime statistics and update member status in single transaction
+        with self.db as db_conn:
+            db_conn.add_runtime_statistics(
+                member_idx,
+                self.current_cycle_i,
+                start_time,
+                end_time,
+                int((end_time - start_time).total_seconds()),
+            )
 
-        # Update member status in database
-        self.db.set_member_advanced(member_idx, True)
+            db_conn.set_member_advanced(member_idx, True)
 
         # Update local runtime statistics
         self.members[member_idx].runtime_statistics.append(
