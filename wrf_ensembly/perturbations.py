@@ -1,7 +1,7 @@
 from typing import Tuple
 
 import numpy as np
-from scipy.ndimage import uniform_filter
+from scipy.ndimage import gaussian_filter
 
 
 def set_boundaries(arr: np.ndarray, boundary_size: int, value: float) -> np.ndarray:
@@ -24,7 +24,7 @@ def generate_perturbation_field(
     shape: Tuple[int, ...],
     mean: float,
     sd: float,
-    rounds=10,
+    sigma=2.5,
     boundary=0,
     min_value: float | None = None,
     max_value: float | None = None,
@@ -41,7 +41,7 @@ def generate_perturbation_field(
         shape: The shape of the random field to create
         mean: Desired mean value of the field, after normalization
         sd: Desired standard deviation of the field, after normalization
-        rounds: Number of rounds of gaussian smoothing to apply
+        sigma: Standard deviation for the Gaussian filter
         min_value: Optional minimum value for the field. If provided, values below this will be set to this value.
         max_value: Optional maximum value for the field. If provided, values above this will be set to this value.
 
@@ -53,8 +53,7 @@ def generate_perturbation_field(
     if boundary > 0:
         x = set_boundaries(x, boundary, 1)
 
-    for _ in range(rounds):
-        x = uniform_filter(x, size=3)
+    x = gaussian_filter(x, sigma=sigma)
     x = (x - x.mean()) / x.std()
     x = x * sd + mean
 

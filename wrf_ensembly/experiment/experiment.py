@@ -176,7 +176,7 @@ class Experiment:
                         shape=wrfinput[var].shape,
                         mean=pert_config.mean,
                         sd=pert_config.sd,
-                        rounds=pert_config.rounds,
+                        sigma=pert_config.gaussian_sigma,
                         boundary=pert_config.boundary,
                         min_value=pert_config.min_value,
                         max_value=pert_config.max_value,

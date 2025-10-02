@@ -336,8 +336,8 @@ class PerturbationVariableConfig:
     sd: float = 1.0
     """Standard deviation of the perturbation field"""
 
-    rounds: int = 10
-    """Number of rounds of smoothing to apply to the perturbation field"""
+    gaussian_sigma: float = 2.5
+    """Standard deviation for the Gaussian filter applied to the perturbation field"""
 
     boundary: int = 0
     """Size of the perturbation boundary, in grid points. If > 0, the given amount of rows/columns at the edges will not be pertubated (with a smoothing filter)."""
@@ -349,7 +349,7 @@ class PerturbationVariableConfig:
     """Maximum value of the perturbation field. If None, no maximum is applied."""
 
     def __str__(self) -> str:
-        return f"operation={self.operation}, mean={self.mean:.2f}, sd={self.sd:.2f}, rounds={self.rounds}, boundary={self.boundary}"
+        return f"operation={self.operation}, mean={self.mean:.2f}, sd={self.sd:.2f}, gaussian_sigma={self.gaussian_sigma}, boundary={self.boundary}"
 
 
 @dataclass
