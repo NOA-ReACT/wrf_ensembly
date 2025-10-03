@@ -140,6 +140,11 @@ class DatabaseConnection:
 
         return stats
 
+    def clear_runtime_statistics(self):
+        """Clear all runtime statistics from the database."""
+
+        self.cursor.execute("DELETE FROM RuntimeStatistics")
+
     def initialize_members(self, n_members: int):
         """Initialize member status for the given number of members."""
 

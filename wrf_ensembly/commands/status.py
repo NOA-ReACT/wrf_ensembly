@@ -114,11 +114,8 @@ def clear_runtime_stats(experiment_path: Path):
     logger.setup("status-clear-runtime-stats", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    exp.db.clear_runtime_statistics()
-
-    # Also clear from local member objects
-    for member in exp.members:
-        member.runtime_statistics.clear()
+    with exp.db as db_conn:
+        db_conn.clear_runtime_statistics()
 
     logger.info("Cleared all runtime statistics")
 
@@ -150,9 +147,8 @@ def reset(experiment_path: Path, confirm: bool):
         member.runtime_statistics.clear()
 
     # Clear database
-    exp.db.clear_runtime_statistics()
-    exp.db.reset_members_advanced()
-    exp.save_status_to_db()
+    with exp.db as db_conn:
+        db_conn.reset_experiment()
 
     logger.info("Reset experiment state to cycle 0")
 
@@ -174,7 +170,8 @@ def set_member(experiment_path: Path, member_index: int, advanced: bool):
         return
 
     # Update in database
-    exp.db.set_member_advanced(member_index, advanced)
+    with exp.db as db_conn:
+        db_conn.set_member_advanced(member_index, advanced)
 
     # Update local object
     exp.members[member_index].advanced = advanced
@@ -193,9 +190,10 @@ def set_all_members(experiment_path: Path, advanced: bool):
     exp = experiment.Experiment(experiment_path)
 
     # Update all members in database
-    for member in exp.members:
-        exp.db.set_member_advanced(member.i, advanced)
-        member.advanced = advanced
+    with exp.db as db_conn:
+        for member in exp.members:
+            db_conn.set_member_advanced(member.i, advanced)
+            member.advanced = advanced
 
     status_str = "advanced" if advanced else "not advanced"
     logger.info(f"Set all {len(exp.members)} members to: {status_str}")
@@ -225,7 +223,8 @@ def set_experiment(
     current_analysis = analysis_run if analysis_run is not None else exp.analysis_run
 
     # Update database
-    exp.db.set_experiment_state(current_cycle, current_filter, current_analysis)
+    with exp.db as db_conn:
+        db_conn.set_experiment_state(current_cycle, current_filter, current_analysis)
 
     # Update local object
     exp.current_cycle_i = current_cycle
