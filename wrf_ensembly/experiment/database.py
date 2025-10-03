@@ -335,6 +335,7 @@ class ExperimentDatabase:
                         "disk i/o error",
                         "database is locked",
                         "unable to open",
+                        "locking protocol",
                     ]
                 ):
                     if conn:
