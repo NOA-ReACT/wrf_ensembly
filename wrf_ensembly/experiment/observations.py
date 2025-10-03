@@ -312,6 +312,14 @@ class ExperimentObservations:
                     f"Superorbing complete for {instrument}.{quantity}, reduced from {len(df)} to {len(df_superobed)} observations."
                 )
 
+    def delete_superobs(self):
+        """
+        Deletes all super-orbed observations from the database.
+        """
+
+        with self._get_duckdb(read_only=False) as con:
+            con.execute("DELETE FROM observations WHERE downsampling_info IS NOT NULL")
+
     def get_observations_for_cycle(
         self, cycle: CycleInformation
     ) -> pd.DataFrame | None:

@@ -190,6 +190,20 @@ def superorbing(experiment_path: Path):
 
 
 @observations_cli.command()
+@pass_experiment_path
+def delete_superobs(experiment_path: Path):
+    """
+    Delete all superorbed observations from the experiment's observation database.
+    """
+
+    exp = experiment.Experiment(experiment_path)
+    logger.setup("observations-delete-superobs", experiment_path)
+
+    exp.obs.delete_superobs()
+    logger.info("Deleted superorbed observations from the database.")
+
+
+@observations_cli.command()
 @click.option(
     "--cycle",
     type=int,
