@@ -163,7 +163,7 @@ def generate_make_analysis_jobfile(
 
     exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
 
-    obs_file = exp.paths.obs / f"cycle_{cycle}.obs_seq"
+    obs_file = exp.paths.obs / f"cycle_{cycle:03}.obs_seq"
     obs_file = obs_file.resolve()
     if not obs_file.exists():
         logger.warning(
