@@ -20,7 +20,7 @@ dependencies = [
   "setuptools>=80.7.1",
   "dataclass-binder>=0.3.4",
   "mashumaro[toml]>=3.15",
-  "interpolator-for-wrfchem>=1.5.1",
+  "interpolator-for-wrfchem==1.5.3",
   "xwrf==0.0.5",
   "pyarrow>=21.0.0",
   "pyproj>=3.7.1",

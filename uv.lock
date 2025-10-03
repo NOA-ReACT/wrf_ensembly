@@ -504,7 +504,7 @@ wheels = [
 
 [[package]]
 name = "interpolator-for-wrfchem"
-version = "1.5.1"
+version = "1.5.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cftime" },
@@ -516,9 +516,9 @@ dependencies = [
     { name = "tomli" },
     { name = "xarray" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/74/77/f8fa57a31b649c774ae7f7bc53031ea0c89310885ec167c371b92dad5517/interpolator_for_wrfchem-1.5.1.tar.gz", hash = "sha256:c4da88bc9080436041fec1a940751d23849b08bc28fc9b1ced396da3050c88bf", size = 21857, upload-time = "2025-08-06T14:11:04.161Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cf/ec/0dc41895fc4a35dbec92bb48ac8ec445c7d834246d35b75fd59d0e86e35c/interpolator_for_wrfchem-1.5.3.tar.gz", hash = "sha256:054aeebfa3a1ca46567563a4e73d69007ff6200da573f5d6e4f43c5698607197", size = 22203, upload-time = "2025-10-03T07:42:23.738Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6f/f6/ac8bd0c35430cd79e9046b13a98aa72ad684972bd8a5a2047d83c938e330/interpolator_for_wrfchem-1.5.1-py3-none-any.whl", hash = "sha256:edfda2108f0d2ff1e308e826ea5654d5e0faebf20f64aa43f80be8250cf989c4", size = 23746, upload-time = "2025-08-06T14:11:02.727Z" },
+    { url = "https://files.pythonhosted.org/packages/87/a5/63640e04ed382b52eb77762ea143e05411fadffde77bbdb63aece2b0e489/interpolator_for_wrfchem-1.5.3-py3-none-any.whl", hash = "sha256:dd2429fb5dd987f74c1eecfd6bc2b2f7f7287a72ea5cdb607ab6ae08d7fb6b82", size = 24138, upload-time = "2025-10-03T07:42:22.57Z" },
 ]
 
 [[package]]
@@ -1914,7 +1914,7 @@ wheels = [
 
 [[package]]
 name = "wrf-ensembly"
-version = "1.0.0"
+version = "1.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "cartopy" },
@@ -1960,7 +1960,7 @@ requires-dist = [
     { name = "dask", specifier = ">=2025.9.1" },
     { name = "dataclass-binder", specifier = ">=0.3.4" },
     { name = "duckdb", specifier = ">=1.4.0" },
-    { name = "interpolator-for-wrfchem", specifier = ">=1.5.1" },
+    { name = "interpolator-for-wrfchem", specifier = "==1.5.3" },
     { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=6.29.5" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "mashumaro", extras = ["toml"], specifier = ">=3.15" },
