@@ -328,6 +328,11 @@ class ExperimentObservations:
     ) -> pd.DataFrame | None:
         """
         Retrieves observation data for a specific cycle and set of instruments.
+        Only returns observations that match a cycle's assimilation window and are from
+        instruments in the `cfg.observations.instruments_to_assimilate` list.
+
+        The error inflation factor from `cfg.observations.error_inflation_factor` is applied
+        to the observation uncertainties.
 
         Args:
             cycle: The cycle information to filter observations. The assimilation window from `cfg.assimilation.half_window_length_minutes` is applied.
@@ -366,6 +371,18 @@ class ExperimentObservations:
 
         if instruments is not None:
             observations = observations[observations["instrument"].isin(instruments)]
+
+        # Apply error inflation if configured
+        if not observations.empty and self.cfg.observations.error_inflation_factor:
+
+            def inflate_error(row):
+                key = f"{row['instrument']}.{row['quantity']}"
+                factor = self.cfg.observations.error_inflation_factor.get(key, 1.0)
+                return row["value_uncertainty"] * factor
+
+            observations["value_uncertainty"] = observations.apply(
+                inflate_error, axis=1
+            )
 
         return observations if not observations.empty else None
 

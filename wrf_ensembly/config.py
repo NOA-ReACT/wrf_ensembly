@@ -290,6 +290,15 @@ class ObservationsConfig:
     superobbing: Dict[str, SuperobbingConfig] = field(default_factory=dict)
     """Configuration of how to superobb specific instruments. Key is the instrument name."""
 
+    error_inflation_factor: Dict[str, float] = field(default_factory=dict)
+    """
+    Error inflation factor per instrument and quantity.
+    The key is the `instrument.quantity` string, e.g. `sonde.U`.
+    The value is the factor by which to multiply the observation error.
+    The factor is applied when determining which observations are used in each cycle
+    (`observations prepare-cycles` command).
+    """
+
     boundary_width: float = 0
     """By how many grid points to reduce the domain by when removing obs. from outside the domain"""
 
