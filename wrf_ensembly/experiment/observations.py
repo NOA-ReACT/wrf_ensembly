@@ -253,17 +253,17 @@ class ExperimentObservations:
 
         return len(df.index)
 
-    def apply_superorbing(self) -> None:
+    def apply_superobbing(self) -> None:
         """
         Applies the configured downsampling (super-orbing) methods to all observations in the database.
 
         It will clear any old downsampled observations and replace them with the new ones.
 
-        The `observations.superorbing` configuration dictionary controls how to downsample each instrument. The keys are the `instrument.quantity` pairs, e.g. `radiosonde.temperature`, and the values are how to downsample, check the `SuperorbingConfig` dataclass in `config.py` for details.
+        The `observations.superobbing` configuration dictionary controls how to downsample each instrument. The keys are the `instrument.quantity` pairs, e.g. `radiosonde.temperature`, and the values are how to downsample, check the `SuperobbingConfig` dataclass in `config.py` for details.
         """
 
-        if not self.cfg.observations.superorbing:
-            logger.info("No superorbing configuration found, skipping downsampling.")
+        if not self.cfg.observations.superobbing:
+            logger.info("No superobbing configuration found, skipping downsampling.")
             return
 
         with self._get_duckdb(read_only=False) as con:
@@ -274,32 +274,32 @@ class ExperimentObservations:
             if res.rowcount > 0:
                 logger.info(f"Removed {res.rowcount} old downsampled observations.")
 
-            for key, superorb_config in self.cfg.observations.superorbing.items():
+            for key, superobb_config in self.cfg.observations.superobbing.items():
                 try:
                     instrument, quantity = key.split(".")
                 except ValueError:
                     raise ValueError(
-                        f"Invalid superorbing key '{key}', must be in the format 'instrument.quantity'"
+                        f"Invalid superobbing key '{key}', must be in the format 'instrument.quantity'"
                     )
 
-                logger.info(f"Applying superorbing for {instrument}.{quantity}'")
+                logger.info(f"Applying superobbing for {instrument}.{quantity}'")
 
                 df = con.execute(
                     f"SELECT * FROM observations WHERE instrument = '{instrument}' AND quantity = '{quantity}'"
                 ).fetchdf()
                 if df.empty:
                     logger.warning(
-                        f"No observations found for {instrument}.{quantity}, skipping superorbing."
+                        f"No observations found for {instrument}.{quantity}, skipping superobbing."
                     )
                     continue
 
-                # df_superobed = obs.superorbing.superorb_dbscan(df, superorb_config)
-                df_superobed = obs.superorbing.superorb_grid_binning(
-                    df, superorb_config, self.cfg.domain_control
+                # df_superobed = obs.superobbing.superobdbscan(df, superobb_config)
+                df_superobbed = obs.superobbing.superobb_grid_binning(
+                    df, superobb_config, self.cfg.domain_control
                 )
 
                 # Insert the new superobed observations
-                con.register("df_superobed_view", df_superobed)
+                con.register("df_superobed_view", df_superobbed)
                 con.execute("""
                     INSERT INTO observations (
                         instrument, quantity, time, longitude, latitude, x, y, z, z_type,
@@ -312,7 +312,7 @@ class ExperimentObservations:
                 """)
 
                 logger.info(
-                    f"Superorbing complete for {instrument}.{quantity}, reduced from {len(df)} to {len(df_superobed)} observations."
+                    f"Superobbing complete for {instrument}.{quantity}, reduced from {len(df)} to {len(df_superobbed)} observations."
                 )
 
     def delete_superobs(self):
@@ -345,14 +345,14 @@ class ExperimentObservations:
         # Query the observations with duck db, find only files that overlap with the time window and instrument list
         with self._get_duckdb(read_only=True) as con:
             # If there are no super-orbed observations, we will use the original ones.
-            superorbed_count = con.execute("""
+            superobbed_count = con.execute("""
                 SELECT COUNT(*) FROM observations WHERE downsampling_info IS NOT NULL
             """).fetchone()
-            superorbed_count = superorbed_count[0] if superorbed_count else 0
-            superorbed_available = superorbed_count > 0
+            superobbed_count = superobbed_count[0] if superobbed_count else 0
+            superobbed_available = superobbed_count > 0
 
-            if superorbed_available:
-                logger.info("Using super-orbed observations for assimilation.")
+            if superobbed_available:
+                logger.info("Using superobbs for assimilation.")
                 observations = con.execute(
                     f"SELECT * FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}' AND downsampling_info IS NOT NULL"
                 ).fetchdf()

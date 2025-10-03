@@ -5,11 +5,11 @@ import pandas as pd
 from sklearn.cluster import DBSCAN
 
 from wrf_ensembly import wrf
-from wrf_ensembly.config import DomainControlConfig, SuperorbingConfig
+from wrf_ensembly.config import DomainControlConfig, SuperobbingConfig
 
 
-def superorb_dbscan(
-    df: pd.DataFrame, config: SuperorbingConfig, domain: DomainControlConfig
+def superobb_dbscan(
+    df: pd.DataFrame, config: SuperobbingConfig, domain: DomainControlConfig
 ) -> pd.DataFrame:
     """
     Does spatio-temporal clustering and uncertainty-weighted averaging to create superobservations.
@@ -159,8 +159,8 @@ def superorb_dbscan(
     return result_df
 
 
-def superorb_grid_binning(
-    df: pd.DataFrame, config: SuperorbingConfig, domain: DomainControlConfig
+def superobb_grid_binning(
+    df: pd.DataFrame, config: SuperobbingConfig, domain: DomainControlConfig
 ) -> pd.DataFrame:
     """
     Does spatio-temporal binning to create superobservations.

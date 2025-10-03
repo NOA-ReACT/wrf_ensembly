@@ -168,39 +168,39 @@ def delete(experiment_path: Path, filename: str):
 
 @observations_cli.command()
 @pass_experiment_path
-def superorbing(experiment_path: Path):
+def superobbing(experiment_path: Path):
     """
-    Downsample observations using superorbing, according to the experiment configuration.
+    Downsample observations using superobbing, according to the experiment configuration.
 
-    Superorbing groups observations that are close in space and time, and combines them into
+    Superobbing groups observations that are close in space and time, and combines them into
     a single "superobservation". This can help reduce the number of observations, improving
     performance and avoiding biases from over-represented areas.
 
-    The configuration for superorbing should be specified in the experiment's config file
-    under `observations.superorbing`. See the documentation for details on the configuration
+    The configuration for superobbing should be specified in the experiment's config file
+    under `observations.superobbing`. See the documentation for details on the configuration
     options.
 
     Note: This will remove any previously downsampled observations from the database before
-    applying superorbing again.
+    applying superobbing again.
     """
 
-    logger.setup("observations-superorbing", experiment_path)
+    logger.setup("observations-superobbing", experiment_path)
     exp = experiment.Experiment(experiment_path)
-    exp.obs.apply_superorbing()
+    exp.obs.apply_superobbing()
 
 
 @observations_cli.command()
 @pass_experiment_path
 def delete_superobs(experiment_path: Path):
     """
-    Delete all superorbed observations from the experiment's observation database.
+    Delete all superobbing observations from the experiment's observation database.
     """
 
     exp = experiment.Experiment(experiment_path)
     logger.setup("observations-delete-superobs", experiment_path)
 
     exp.obs.delete_superobs()
-    logger.info("Deleted superorbed observations from the database.")
+    logger.info("Deleted superobs from the database.")
 
 
 @observations_cli.command()

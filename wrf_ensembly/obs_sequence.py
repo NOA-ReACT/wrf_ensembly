@@ -336,7 +336,7 @@ def preprocess_for_wrf(
                 # Radiosonde stuff, not used
                 "include_sig_data": True,
                 "tc_sonde_radii": -1.0,
-                # Superorbing, not used
+                # Superobbing, not used
                 "superob_aircraft": False,
                 "aircraft_horiz_int": 800.0,
                 "aircraft_pres_int": 25000.0,

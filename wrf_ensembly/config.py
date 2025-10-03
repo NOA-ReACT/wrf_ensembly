@@ -259,8 +259,8 @@ class AssimilationConfig:
 
 
 @dataclass
-class SuperorbingConfig:
-    """Configuration of how to superorb a specific instrument's observations"""
+class SuperobbingConfig:
+    """Configuration of how to superobb a specific instrument's observations"""
 
     spatial_radius_x_meters: float
     """Spatial radius in the x direction, meters"""
@@ -287,8 +287,8 @@ class ObservationsConfig:
     instruments_to_assimilate: Optional[list[str]] = None
     """Which instruments to assimilate. If None, all available instruments are used."""
 
-    superorbing: Dict[str, SuperorbingConfig] = field(default_factory=dict)
-    """Configuration of how to superorb specific instruments. Key is the instrument name."""
+    superobbing: Dict[str, SuperobbingConfig] = field(default_factory=dict)
+    """Configuration of how to superobb specific instruments. Key is the instrument name."""
 
     boundary_width: float = 0
     """By how many grid points to reduce the domain by when removing obs. from outside the domain"""
