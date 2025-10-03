@@ -479,7 +479,7 @@ class Experiment:
         obs_seq = dart_dir / "obs_seq.out"
         obs_seq.unlink(missing_ok=True)
 
-        obs_file = self.paths.obs / f"cycle_{self.current_cycle_i}.obs_seq"
+        obs_file = self.paths.obs / f"cycle_{self.current_cycle_i:03}.obs_seq"
         if not obs_file.exists():
             logger.error(f"Observation file for current cycle not found at {obs_file}")
             return False

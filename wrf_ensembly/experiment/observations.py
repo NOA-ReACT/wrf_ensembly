@@ -293,7 +293,10 @@ class ExperimentObservations:
                     )
                     continue
 
-                df_superobed = obs.superorbing.superorb_dbscan(df, superorb_config)
+                # df_superobed = obs.superorbing.superorb_dbscan(df, superorb_config)
+                df_superobed = obs.superorbing.superorb_grid_binning(
+                    df, superorb_config, self.cfg.domain_control
+                )
 
                 # Insert the new superobed observations
                 con.register("df_superobed_view", df_superobed)

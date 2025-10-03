@@ -248,23 +248,16 @@ def generate_wrf_namelist(
     logger.info(f"Wrote namelist to {path}")
 
 
-def get_wrf_proj_transformer(domain: DomainControlConfig):
-    """
-    Returns a pyproj transformer for the given WRF domain. Source projection is always
-    WGS84 (EPSG:4326).
-
-    You can use this transformer to convert lat/lon coordinates to the WRF domain's (x, y) projection,
-    where grid points are regularly spaced. The returned transformer uses (lon, lat) ordering.
-
-    Only works for Lambert Conformal Conic projections!
-    """
-
+def _create_proj_crs(domain: DomainControlConfig):
     if domain.projection.lower() != "lambert":
         raise NotImplementedError(
-            f"Projection {domain.projection} not supported yet in get_wrf_proj_transformer()"
+            f"Projection {domain.projection} not supported yet in _create_proj_crs()"
         )
 
-    wrf_crs = pyproj.CRS(
+    if domain.stand_lon is None or domain.ref_lat is None:
+        raise ValueError("stand_lon and ref_lat must be set in the domain config")
+
+    return pyproj.CRS(
         {
             "x_0": 0,
             "y_0": 0,
@@ -278,7 +271,35 @@ def get_wrf_proj_transformer(domain: DomainControlConfig):
         }
     )
 
+
+def get_wrf_proj_transformer(domain: DomainControlConfig):
+    """
+    Returns a pyproj transformer for the given WRF domain. Source projection is always
+    WGS84 (EPSG:4326).
+
+    You can use this transformer to convert lat/lon coordinates to the WRF domain's (x, y) projection,
+    where grid points are regularly spaced. The returned transformer uses (lon, lat) ordering.
+
+    Only works for Lambert Conformal Conic projections!
+    """
+
+    wrf_crs = _create_proj_crs(domain)
     return pyproj.Transformer.from_crs(pyproj.CRS("EPSG:4326"), wrf_crs, always_xy=True)
+
+
+def get_wrf_reverse_proj_transformer(domain: DomainControlConfig):
+    """
+    Returns a pyproj transformer for the given WRF domain. Target projection is always
+    WGS84 (EPSG:4326).
+
+    You can use this transformer to convert (x, y) coordinates in the WRF domain's projection
+    to lat/lon coordinates. The returned transformer uses (x, y) ordering.
+
+    Only works for Lambert Conformal Conic projections!
+    """
+
+    wrf_crs = _create_proj_crs(domain)
+    return pyproj.Transformer.from_crs(wrf_crs, pyproj.CRS("EPSG:4326"), always_xy=True)
 
 
 def get_wrf_cartopy_crs(domain: DomainControlConfig):
