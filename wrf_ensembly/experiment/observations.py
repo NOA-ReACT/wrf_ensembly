@@ -340,7 +340,7 @@ class ExperimentObservations:
 
         instruments = self.cfg.observations.instruments_to_assimilate
 
-        start_time = cycle.start - pd.Timedelta(
+        start_time = cycle.end - pd.Timedelta(
             minutes=self.cfg.assimilation.half_window_length_minutes
         )
         end_time = cycle.end + pd.Timedelta(
@@ -371,6 +371,11 @@ class ExperimentObservations:
 
         if instruments is not None:
             observations = observations[observations["instrument"].isin(instruments)]
+
+        # Sometimes superobs might be a bit outside the time window, so filter again
+        observations = observations[
+            (observations["time"] >= start_time) & (observations["time"] <= end_time)
+        ]
 
         # Apply error inflation if configured
         if not observations.empty and self.cfg.observations.error_inflation_factor:
