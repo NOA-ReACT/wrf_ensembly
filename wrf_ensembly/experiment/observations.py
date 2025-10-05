@@ -371,6 +371,12 @@ class ExperimentObservations:
 
         if instruments is not None:
             observations = observations[observations["instrument"].isin(instruments)]
+        if observations.empty:
+            return None
+
+        # Ensure observations time is timezone-aware in UTC
+        if observations["time"].dt.tz is None:
+            observations["time"] = observations["time"].dt.tz_localize("UTC")
 
         # Sometimes superobs might be a bit outside the time window, so filter again
         observations = observations[
