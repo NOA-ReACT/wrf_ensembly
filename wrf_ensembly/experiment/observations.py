@@ -383,6 +383,12 @@ class ExperimentObservations:
             (observations["time"] >= start_time) & (observations["time"] <= end_time)
         ]
 
+        # Drop anything that has zero variance, as that will break DART
+        observations = observations[
+            (observations["value_uncertainty"].notna())
+            & (observations["value_uncertainty"] > 0)
+        ]
+
         # Apply error inflation if configured
         if not observations.empty and self.cfg.observations.error_inflation_factor:
 
