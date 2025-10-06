@@ -28,10 +28,6 @@ def get_index_tuples(arr):
 def convert_earthcare_ebd(input_path: Path) -> pd.DataFrame:
     """Convert EarthCARE ATLID EBD file to WRF-Ensembly Observation format.
 
-    ! TODO Written with the assumption we are using Thanasis' downsampling script
-           which causes the bad bins to be NaN. We should add downsampling to this
-           script I think.
-
     Args:
         input_path: Path to the EarthCARE ATLID EBD netCDF file.
     Returns:
@@ -42,12 +38,17 @@ def convert_earthcare_ebd(input_path: Path) -> pd.DataFrame:
     ec = ec.set_coords(["time", "latitude", "longitude", "height"])
 
     # Flatten the data arrays
-    particle_extinction = ec["particle_extinction_coefficient_355nm"].to_numpy()
+    particle_extinction = ec[
+        "particle_extinction_coefficient_355nm_low_resolution"
+    ].to_numpy()
     value = particle_extinction.flatten()
     value_uncertainty = (
-        ec["particle_extinction_coefficient_355nm_error"].to_numpy().flatten()
+        ec["particle_extinction_coefficient_355nm_low_resolution_error"]
+        .to_numpy()
+        .flatten()
     )
     height = ec["height"].to_numpy().flatten()
+    simple_classification = ec["simple_classification"].to_numpy().flatten()
 
     # The coordinates are 1D arrays that need to be broadcast to the shape of the data
     # The data shape is (time, height), so we need to repeat the coordinates accordingly
@@ -72,13 +73,19 @@ def convert_earthcare_ebd(input_path: Path) -> pd.DataFrame:
         .flatten()
     )
 
-    # Any bin with NaN extinction value is invalid
+    # Mark as invalid (qc=0): no extinction, not aerosol and not clear air
     qc_flag = ~np.isnan(value)
+    qc_flag &= (simple_classification == 0) | (simple_classification == 3)
 
     # Preserve the original indices
     indices = get_index_tuples(particle_extinction)
-    coord_names = ec["particle_extinction_coefficient_355nm"].dims
-    coord_shape = ec["particle_extinction_coefficient_355nm"].shape
+    coord_names = ec["particle_extinction_coefficient_355nm_low_resolution"].dims
+    coord_shape = ec["particle_extinction_coefficient_355nm_low_resolution"].shape
+
+    # Uncertainty: 20% when there are aerosols, 5% when there are not
+    # This is a bit arbitrary, but we need something reasonable
+    # TODO Better uncertainty estimation
+    value_uncertainty = np.where(simple_classification == 3, 0.2 * value, 0.05 * value)
 
     # Create dataframe in WRF-Ensembly Observation format
     df = pd.DataFrame(
