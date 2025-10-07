@@ -77,6 +77,9 @@ def convert_earthcare_ebd(input_path: Path) -> pd.DataFrame:
     qc_flag = ~np.isnan(value)
     qc_flag &= (simple_classification == 0) | (simple_classification == 3)
 
+    # Any extinction above 0.0003 is rejected as a possible cloud
+    qc_flag &= value < 0.0003
+
     # Preserve the original indices
     indices = get_index_tuples(particle_extinction)
     coord_names = ec["particle_extinction_coefficient_355nm_low_resolution"].dims
