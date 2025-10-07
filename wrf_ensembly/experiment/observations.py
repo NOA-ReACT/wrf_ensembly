@@ -43,11 +43,12 @@ class ExperimentObservations:
             database=str(self.paths.obs_db),
             read_only=False,
         )
+        con.execute("SET TimeZone='UTC';")
         con.execute("""
                     CREATE TABLE IF NOT EXISTS observations (
                         instrument STRING NOT NULL,
                         quantity STRING NOT NULL,
-                        time TIMESTAMP NOT NULL,
+                        time TIMESTAMPTZ NOT NULL,
                         longitude DOUBLE NOT NULL,
                         latitude DOUBLE NOT NULL,
                         x DOUBLE NOT NULL,
@@ -238,6 +239,10 @@ class ExperimentObservations:
             con.execute(
                 f"DELETE FROM observations WHERE orig_filename = '{input_path.name}'"
             )
+
+            # Ensure time is in UTC
+            if df["time"].dt.tz is None:
+                df["time"] = df["time"].dt.tz_localize("UTC")
 
             con.register("df_view", df)
             con.execute("""
