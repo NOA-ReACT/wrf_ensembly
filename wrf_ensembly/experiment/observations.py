@@ -289,19 +289,16 @@ class ExperimentObservations:
 
                 logger.info(f"Applying superobbing for {instrument}.{quantity}'")
 
-                df = con.execute(
-                    f"SELECT * FROM observations WHERE instrument = '{instrument}' AND quantity = '{quantity}'"
-                ).fetchdf()
-                if df.empty:
+                # Use the memory-efficient DuckDB-based superobbing
+                df_superobbed = obs.superobbing.superobb_grid_binning_duckdb(
+                    con, superobb_config, self.cfg.domain_control, instrument, quantity
+                )
+
+                if df_superobbed.empty:
                     logger.warning(
-                        f"No observations found for {instrument}.{quantity}, skipping superobbing."
+                        f"No superobbed observations generated for {instrument}.{quantity}, skipping."
                     )
                     continue
-
-                # df_superobed = obs.superobbing.superobdbscan(df, superobb_config)
-                df_superobbed = obs.superobbing.superobb_grid_binning(
-                    df, superobb_config, self.cfg.domain_control
-                )
 
                 # Insert the new superobed observations
                 con.register("df_superobed_view", df_superobbed)
@@ -317,7 +314,7 @@ class ExperimentObservations:
                 """)
 
                 logger.info(
-                    f"Superobbing complete for {instrument}.{quantity}, reduced from {len(df)} to {len(df_superobbed)} observations."
+                    f"Superobbing complete for {instrument}.{quantity}, generated {len(df_superobbed)} superobservations."
                 )
 
     def delete_superobs(self):
