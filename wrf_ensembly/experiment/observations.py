@@ -62,7 +62,7 @@ class ExperimentObservations:
                             indices INT[], shape INT[], names STRING[]
                         ) NOT NULL,
                         orig_filename STRING NOT NULL,
-                        metadata STRING,
+                        metadata JSON,
                         downsampling_info STRUCT(
                             method STRING,
                             obs_count INT,
