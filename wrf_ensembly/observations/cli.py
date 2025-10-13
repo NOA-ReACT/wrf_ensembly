@@ -29,6 +29,8 @@ from wrf_ensembly.observations.converters import (
     aeronet_cli,
     earthcare_ebd_cli,
     remotap_spexone_cli,
+    aeolus_l2b_cli,
+    aeolus_l2a_cli,
 )
 from wrf_ensembly.observations.operations import (
     dump_info,
@@ -57,6 +59,8 @@ def convert_group():
 convert_group.add_command(aeronet_cli)
 convert_group.add_command(remotap_spexone_cli)
 convert_group.add_command(earthcare_ebd_cli)
+convert_group.add_command(aeolus_l2b_cli)
+convert_group.add_command(aeolus_l2a_cli)
 
 
 @cli.group()
