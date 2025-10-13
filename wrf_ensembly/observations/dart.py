@@ -46,6 +46,9 @@ def convert_to_dart_obs_seq(
     # convert the dataframe to a CSV string. The column order is:
     # obs_type, longitude, latitude, vert, year, month, day, hour, minute, second, obs_value, obs_error, obs_meta
     observations = observations.copy()
+    observations["time"] = observations["time"].dt.tz_convert(
+        "UTC"
+    )  # Ensure time we get is in UTC
     observations["obs_type"] = (
         observations["quantity"].map(OBS_TYPE_TABLE).fillna(observations["quantity"])
     )

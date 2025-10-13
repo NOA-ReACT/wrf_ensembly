@@ -94,8 +94,8 @@ class ExperimentObservations:
                 SELECT
                     orig_filename as filename,
                     instrument as instrument,
-                    MIN(time) as start_time,
-                    MAX(time) as end_time,
+                    MIN(time AT TIME ZONE 'UTC') as start_time,
+                    MAX(time AT TIME ZONE 'UTC') as end_time,
                     COUNT(*) as count
                 FROM observations
                 GROUP BY orig_filename, instrument
@@ -361,14 +361,14 @@ class ExperimentObservations:
             if superobbed_available:
                 logger.info("Using superobbs for assimilation.")
                 observations = con.execute(
-                    f"SELECT * FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}' AND downsampling_info IS NOT NULL"
+                    f"SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}' AND downsampling_info IS NOT NULL"
                 ).fetchdf()
             else:
                 logger.info(
                     "No super-orbed observations found, using original observations."
                 )
                 observations = con.execute(
-                    f"SELECT * FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}' AND downsampling_info IS NULL"
+                    f"SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}' AND downsampling_info IS NULL"
                 ).fetchdf()
 
         if instruments is not None:
