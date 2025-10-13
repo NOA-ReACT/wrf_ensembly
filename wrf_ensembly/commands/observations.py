@@ -248,6 +248,13 @@ def prepare_cycles(
     logger.setup("observations-prepare-cycles", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
+    if not exp.cfg.observations.instruments_to_assimilate:
+        logger.info("Assimilating all available instruments")
+    else:
+        logger.info(
+            f"Instruments to assimilate: {', '.join(exp.cfg.observations.instruments_to_assimilate)}"
+        )
+
     if cycle is not None:
         cycles = [exp.cycles[cycle]]
     else:
