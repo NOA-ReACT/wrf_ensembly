@@ -1,5 +1,6 @@
 """Functions about converting from and to DART obs_seq files"""
 
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -57,7 +58,9 @@ def convert_to_dart_obs_seq(
     observations["vert"] = observations["z"]
     observations["obs_value"] = observations["value"]
     observations["obs_error"] = observations["value_uncertainty"]
-    observations["obs_meta"] = observations["metadata"].apply(lambda x: str(x))
+    observations["obs_meta"] = observations["metadata"].apply(
+        lambda x: "|".join(f"{k}={v}" for k, v in json.loads(x).items())
+    )
     observations = observations[
         [
             "obs_type",

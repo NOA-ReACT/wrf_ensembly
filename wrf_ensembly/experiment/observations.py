@@ -391,6 +391,8 @@ class ExperimentObservations:
             & (observations["value_uncertainty"] > 0)
         ]
 
+        logger.info(f"Got {len(observations)} observations for cycle {cycle.index}")
+
         # Apply error inflation if configured
         if not observations.empty and self.cfg.observations.error_inflation_factor:
 
