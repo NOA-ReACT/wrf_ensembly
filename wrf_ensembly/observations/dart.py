@@ -13,6 +13,15 @@ OBS_TYPE_TABLE = {
 }
 
 
+def parse_metadata_json_string(metadata_str: str) -> dict:
+    """Parse a metadata JSON string into a dictionary."""
+    try:
+        metadata = json.loads(metadata_str)
+    except json.JSONDecodeError:
+        metadata = {}
+    return metadata
+
+
 def convert_to_dart_obs_seq(
     dart_path: Path, observations: pd.DataFrame, output_location: Path
 ) -> ExternalProcess:
@@ -62,7 +71,7 @@ def convert_to_dart_obs_seq(
     observations["obs_value"] = observations["value"]
     observations["obs_error"] = observations["value_uncertainty"]
     observations["obs_meta"] = observations["metadata"].apply(
-        lambda x: "|".join(f"{k}={v}" for k, v in json.loads(x).items())
+        lambda x: "|".join(f"{k}={v}" for k, v in parse_metadata_json_string(x).items())
     )
     observations = observations[
         [
