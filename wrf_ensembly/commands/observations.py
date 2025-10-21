@@ -58,7 +58,11 @@ def add(experiment_path: Path, files: list[Path], jobs: int):
     # Process the files in different processes, using a rich Progress to display a bar
     jobs = determine_jobs(jobs)
     counts = {}
-    with ProcessPoolExecutor(max_workers=jobs) as executor, Progress() as progress:
+    # Use maxtasksperchild to recycle worker processes and prevent memory accumulation
+    with (
+        ProcessPoolExecutor(max_workers=jobs, max_tasks_per_child=1) as executor,
+        Progress() as progress,
+    ):
         task = progress.add_task(
             "[cyan]Trimming observation files...", total=len(files_to_process)
         )
