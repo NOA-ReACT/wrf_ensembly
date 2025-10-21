@@ -94,7 +94,7 @@ def convert_earthcare_ebd(input_path: Path) -> pd.DataFrame:
     df = pd.DataFrame(
         {
             "instrument": "EarthCARE_ATLID_EBD",
-            "quantity": "EC_ATL_EXT355",
+            "quantity": "LIDAR_EXTINCTION_355nm",
             "time": time,
             "latitude": latitude,
             "longitude": longitude,
