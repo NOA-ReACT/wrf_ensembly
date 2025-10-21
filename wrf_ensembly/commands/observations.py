@@ -277,7 +277,9 @@ def prepare_cycles(
         commands.append(
             observations.dart.convert_to_dart_obs_seq(
                 dart_path=exp.cfg.directories.dart_root,
-                observations=cycle_obs,
+                observations=cycle_obs.loc[
+                    cycle_obs["qc_flag"] == 0
+                ].copy(),  # Only use good quality obs
                 output_location=output_path,
             )
         )

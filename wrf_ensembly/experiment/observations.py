@@ -386,10 +386,14 @@ class ExperimentObservations:
         ]
 
         # Drop anything that has zero variance, as that will break DART
-        observations = observations[
-            (observations["value_uncertainty"].notna())
-            & (observations["value_uncertainty"] > 0)
-        ]
+        zero_variance = (observations["value_uncertainty"] <= 0) | (
+            observations["value_uncertainty"].isna()
+        )
+        observations.loc[zero_variance, "qc_flag"] = 99  # Mark as bad quality
+
+        # Ensure observation error is never negative
+        negative_error = observations["value_uncertainty"] < 0
+        observations.loc[negative_error, "value_uncertainty"] = 0
 
         logger.info(f"Got {len(observations)} observations for cycle {cycle.index}")
 
