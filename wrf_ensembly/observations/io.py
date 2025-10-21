@@ -85,6 +85,10 @@ def read_obs(path: Path | str) -> pd.DataFrame:
     """Read a WRF-Ensembly Observation data file into a pandas DataFrame."""
 
     df = pd.read_parquet(path)
+
+    # Any empty metadata fields should be converted to pd.NA
+    df["metadata"] = df["metadata"].apply(lambda x: pd.NA if x == "" else x)
+
     validate_schema(df)
     return df
 
