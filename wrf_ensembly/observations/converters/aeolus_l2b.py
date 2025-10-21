@@ -173,6 +173,11 @@ def convert_aeolus_l2b(path: Path) -> pd.DataFrame | None:
     obs_df["instrument"] = "AEOLUS_L2B"
     obs_df["quantity"] = "HLOS_WIND"  # Horizontal Line of Sight wind
 
+    # Set rayleight error to 4.5 m/s and mie error to 2.5 m/s
+    # https://doi.org/10.5194/amt-16-2691-2023
+    obs_df.loc[df["retrieval_type"] == "rayleigh", "value_uncertainty"] = 4.5
+    obs_df.loc[df["retrieval_type"] == "mie", "value_uncertainty"] = 2.5
+
     # Create orig_coords for traceability
     obs_df["orig_coords"] = obs_df.apply(
         lambda row: {
