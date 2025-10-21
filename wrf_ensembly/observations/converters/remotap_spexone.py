@@ -88,7 +88,7 @@ def convert_remotap_spexone(path: Path) -> None | pd.DataFrame:
             "qc_flag": 0,
             # "orig_coords": ...,
             "orig_filename": path.name,
-            "metadata": "",
+            "metadata": pd.NA,
         }
     )
     df["orig_coords"] = [

@@ -105,7 +105,7 @@ def convert_earthcare_ebd(input_path: Path) -> pd.DataFrame:
             "qc_flag": qc_flag.astype(int),
             # "orig_coords": ...,
             "orig_filename": input_path.name,
-            "metadata": "",
+            "metadata": pd.NA,
         }
     )
     df["orig_coords"] = [
