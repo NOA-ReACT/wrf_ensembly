@@ -166,19 +166,23 @@ def convert_aeolus_l2a(path: Path) -> pd.DataFrame | None:
             "z": altitude_flat,
             "z_type": "height",  # Altitude is in meters above geoid
             "value": extinction_flat,
-            "value_uncertainty": extinction_variance_flat,
+            # "value_uncertainty": extinction_variance_flat,
+            "value_uncertainty": extinction_flat * 0.2,  # Assume 20% uncertainty
             "qc_flag": qc_flags,
-            "instrument": "AEOLUS",
-            "quantity": "LIDAR_EXTINCTION_355NM",  # LIDAR extinction at 355nm
+            "instrument": "AEOLUS_L2A",
+            "quantity": "LIDAR_EXTINCTION_355nm",  # LIDAR extinction at 355nm
         }
     )
 
     # Create orig_coords for traceability
+    # Convert flattened index to 2D indices (mle_count, height_bin_count)
     obs_df["orig_coords"] = obs_df.apply(
         lambda row: {
-            "indices": np.array((row.name,), dtype=int),
-            "shape": np.array((len(obs_df),), dtype=int),
-            "names": np.array(("measurement",), dtype=object),
+            "indices": np.array(
+                (row.name // height_bin_count, row.name % height_bin_count), dtype=int
+            ),
+            "shape": np.array((mle_count, height_bin_count), dtype=int),
+            "names": np.array(("profile", "height_bin"), dtype=object),
         },
         axis=1,
     )
