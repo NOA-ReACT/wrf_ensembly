@@ -183,7 +183,7 @@ def generate_perturbations(experiment_path: Path, jobs: Optional[int]):
         [var.perturb_every_cycle for var in exp.cfg.perturbations.variables.values()]
     ):
         logger.info("Generating perturbations for all cycles...")
-        with ProcessPoolExecutor(max_workers=jobs) as executor:
+        with ProcessPoolExecutor(max_workers=jobs, max_tasks_per_child=1) as executor:
             res = executor.map(exp.generate_perturbations, range(1, len(exp.cycles)))
             for _ in res:
                 pass

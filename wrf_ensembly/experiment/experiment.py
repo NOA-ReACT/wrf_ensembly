@@ -250,6 +250,8 @@ class Experiment:
         logger.info(f"Writing perturbations for {cycle_i} to {pert_file}")
         perts.to_netcdf(pert_file, encoding=encoding)
 
+        wrfinput.close()
+
     def apply_perturbations(self, member_i: int):
         """
         Apply perturbations to the initial conditions of a member.
