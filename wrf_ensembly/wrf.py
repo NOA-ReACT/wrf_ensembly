@@ -105,7 +105,7 @@ def generate_wps_namelist(cfg: Config, path: Path):
             "j_parent_start": 1,
             "e_we": cfg.domain_control.xy_size[0],
             "e_sn": cfg.domain_control.xy_size[1],
-            "geog_data_res": "default",
+            "geog_data_res": "30s",
             "dx": cfg.domain_control.xy_resolution[0] * 1000,
             "dy": cfg.domain_control.xy_resolution[1] * 1000,
             "map_proj": cfg.domain_control.projection,
@@ -195,9 +195,9 @@ def generate_wrf_namelist(
     if member is not None and paths is not None:
         wrfout_dest = paths.scratch_forecasts_path(cycle.index, member)
         wrfout_dest.mkdir(parents=True, exist_ok=True)
-        wrf_namelist["time_control"]["history_outname"] = (
-            f"{wrfout_dest}/wrfout_d<domain>_<date>"
-        )
+        wrf_namelist["time_control"][
+            "history_outname"
+        ] = f"{wrfout_dest}/wrfout_d<domain>_<date>"
 
     # Add iofields
     if (
