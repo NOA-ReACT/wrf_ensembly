@@ -15,6 +15,8 @@ OBS_TYPE_TABLE = {
 
 def parse_metadata_json_string(metadata_str: str) -> dict:
     """Parse a metadata JSON string into a dictionary."""
+    if not metadata_str:
+        return {}
     try:
         metadata = json.loads(metadata_str)
     except json.JSONDecodeError:
