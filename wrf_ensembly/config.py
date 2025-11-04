@@ -273,11 +273,14 @@ class SuperobbingConfig:
     Spatial radius in the z direction, in whatever units the observation's z_type is in
     (e.g., meters for height, hPa for pressure).
 
-    If missing, no superobing in the z direction is done.
+    If missing, no clustering in the z direction is done.
     """
 
-    temporal_radius_seconds: int = 60
-    """Temporal radius in seconds"""
+    temporal_radius_seconds: Optional[int] = None
+    """
+    Temporal radius in seconds
+    If missing, no clustering in the time dimension is done.
+    """
 
 
 @dataclass

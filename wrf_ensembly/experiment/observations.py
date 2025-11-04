@@ -44,7 +44,8 @@ class ExperimentObservations:
             read_only=False,
         )
         con.execute("SET TimeZone='UTC';")
-        con.execute("""
+        con.execute(
+            """
                     CREATE TABLE IF NOT EXISTS observations (
                         instrument STRING NOT NULL,
                         quantity STRING NOT NULL,
@@ -63,25 +64,29 @@ class ExperimentObservations:
                         ) NOT NULL,
                         orig_filename STRING NOT NULL,
                         metadata JSON,
+                        cluster_id STRING,
                         downsampling_info STRUCT(
                             method STRING,
                             obs_count INT,
                             time_spread_seconds DOUBLE,
                             spatial_spread_meters DOUBLE
                         )
-            )""")
+            )"""
+        )
         return con
 
     def get_available_quantities(self) -> list[dict]:
         """Returns all combinations of instrument and quantity available in the database."""
 
         with self._get_duckdb(read_only=True) as con:
-            result = con.execute("""
+            result = con.execute(
+                """
                 SELECT instrument, quantity, COUNT(*) as count
                 FROM observations
                 GROUP BY instrument, quantity
                 ORDER BY count DESC
-            """).fetch_df()
+            """
+            ).fetch_df()
         return result.to_dict(orient="records")
 
     def get_available_observations_overview(
@@ -90,7 +95,8 @@ class ExperimentObservations:
         """Returns a dataframe with observation filenames and their row counts, min time and max time."""
 
         with self._get_duckdb(read_only=True) as con:
-            result = con.execute("""
+            result = con.execute(
+                """
                 SELECT
                     orig_filename as filename,
                     instrument as instrument,
@@ -100,7 +106,8 @@ class ExperimentObservations:
                 FROM observations
                 GROUP BY orig_filename, instrument
                 ORDER BY instrument, start_time
-            """).fetch_df()
+            """
+            ).fetch_df()
         return result.to_dict(orient="records")
 
     def delete_observation_file(self, filename: str) -> int:
@@ -245,7 +252,8 @@ class ExperimentObservations:
                 df["time"] = df["time"].dt.tz_localize("UTC")
 
             con.register("df_view", df)
-            con.execute("""
+            con.execute(
+                """
                 INSERT INTO observations (
                     instrument, quantity, time, longitude, latitude, x, y, z, z_type,
                     value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata
@@ -254,7 +262,8 @@ class ExperimentObservations:
                     instrument, quantity, time, longitude, latitude, x, y, z, z_type,
                     value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata
                 FROM df_view
-            """)
+            """
+            )
 
         return len(df.index)
 
@@ -262,9 +271,15 @@ class ExperimentObservations:
         """
         Applies the configured downsampling (super-orbing) methods to all observations in the database.
 
-        It will clear any old downsampled observations and replace them with the new ones.
+        This uses a two-step process:
+        1. Assign cluster IDs to observations based on spatio-temporal bins
+        2. Compute superobs by aggregating observations within each cluster
 
-        The `observations.superobbing` configuration dictionary controls how to downsample each instrument. The keys are the `instrument.quantity` pairs, e.g. `radiosonde.temperature`, and the values are how to downsample, check the `SuperobbingConfig` dataclass in `config.py` for details.
+        It will clear any old cluster IDs and downsampled observations first, then replace them with new ones.
+
+        The `observations.superobbing` configuration dictionary controls how to downsample each instrument.
+        The keys are the `instrument.quantity` pairs, e.g. `radiosonde.temperature`, and the values are
+        how to downsample, check the `SuperobbingConfig` dataclass in `config.py` for details.
         """
 
         if not self.cfg.observations.superobbing:
@@ -272,12 +287,15 @@ class ExperimentObservations:
             return
 
         with self._get_duckdb(read_only=False) as con:
-            # Clean up any old downsampled observations
+            # Clean up any old downsampled observations and cluster IDs
             res = con.execute(
                 "DELETE FROM observations WHERE downsampling_info IS NOT NULL"
             )
             if res.rowcount > 0:
                 logger.info(f"Removed {res.rowcount} old downsampled observations.")
+
+            # Clear old cluster IDs
+            con.execute("UPDATE observations SET cluster_id = NULL")
 
             for key, superobb_config in self.cfg.observations.superobbing.items():
                 try:
@@ -287,10 +305,14 @@ class ExperimentObservations:
                         f"Invalid superobbing key '{key}', must be in the format 'instrument.quantity'"
                     )
 
-                logger.info(f"Applying superobbing for {instrument}.{quantity}'")
+                logger.info(f"Applying superobbing for {instrument}.{quantity}")
+                logger.info("  Step 1: Assigning cluster IDs...")
+                obs.superobbing.assign_cluster_ids_duckdb_minmax(
+                    con, superobb_config, instrument, quantity
+                )
 
-                # Use the memory-efficient DuckDB-based superobbing
-                df_superobbed = obs.superobbing.superobb_grid_binning_duckdb(
+                logger.info("  Step 2: Computing superobs from clusters...")
+                df_superobbed = obs.superobbing.compute_superobs_from_clusters(
                     con, superobb_config, self.cfg.domain_control, instrument, quantity
                 )
 
@@ -302,16 +324,20 @@ class ExperimentObservations:
 
                 # Insert the new superobed observations
                 con.register("df_superobed_view", df_superobbed)
-                con.execute("""
+                con.execute(
+                    """
                     INSERT INTO observations (
                         instrument, quantity, time, longitude, latitude, x, y, z, z_type,
-                        value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata, downsampling_info
+                        value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata,
+                        cluster_id, downsampling_info
                     )
                     SELECT
                         instrument, quantity, time, longitude, latitude, x, y, z, z_type,
-                        value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata, downsampling_info
+                        value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata,
+                        cluster_id, downsampling_info
                     FROM df_superobed_view
-                """)
+                """
+                )
 
                 logger.info(
                     f"Superobbing complete for {instrument}.{quantity}, generated {len(df_superobbed)} superobservations."
@@ -352,9 +378,11 @@ class ExperimentObservations:
         # Query the observations with duck db, find only files that overlap with the time window and instrument list
         with self._get_duckdb(read_only=True) as con:
             # If there are no super-orbed observations, we will use the original ones.
-            superobbed_count = con.execute("""
+            superobbed_count = con.execute(
+                """
                 SELECT COUNT(*) FROM observations WHERE downsampling_info IS NOT NULL
-            """).fetchone()
+            """
+            ).fetchone()
             superobbed_count = superobbed_count[0] if superobbed_count else 0
             superobbed_available = superobbed_count > 0
 
