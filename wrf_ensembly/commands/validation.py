@@ -85,6 +85,15 @@ def interpolate_model(experiment_path: Path):
     needed_vars = list(needed_vars)
     logger.info(f"Need to interpolate WRF variables: {needed_vars}")
 
+    # Convert observations to xarray Dataset for interpolation, easier to handle with `interp()`
+    obs_ds = xr.Dataset.from_dataframe(obs).set_coords(["time", "x", "y"])
+    # Convert Timestamps to DateTimeIndex without timezone info, as xarray does not support tz-aware times
+    obs_ds["time"] = (
+        ("index",),
+        pd.DatetimeIndex(obs_ds["time"].values).tz_localize(None),
+    )
+    print(obs_ds)
+
     # Open all model output forecast mean files as a single xarray dataset
     # TODO Allow mean/member selection
     forecast_mean = xr.open_mfdataset(
@@ -95,10 +104,6 @@ def interpolate_model(experiment_path: Path):
     )[needed_vars]
 
     # Interpolate the model data to the observation locations and times, convert back to dataframe
-    obs_ds = xr.Dataset.from_dataframe(obs).set_coords(["time", "x", "y"])
-    # Convert Timestamps to DateTimeIndex without timezone info, as xarray does not support tz-aware times
-    obs_ds["time"] = pd.DatetimeIndex(obs_ds["time"].values).tz_localize(None)
-    print(obs_ds)
     model_obs = forecast_mean.interp(
         t=obs_ds["time"], x=obs_ds["x"], y=obs_ds["y"]
     ).compute()
