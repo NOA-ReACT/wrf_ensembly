@@ -10,11 +10,11 @@ from wrf_ensembly.observations import io as obs_io
 
 try:
     import coda
-except ImportError:
-    raise ImportError(
-        "The 'coda' library is required for reading AEOLUS L2A files. "
-        "Please install it using: pip install coda"
-    )
+
+    HAS_CODA = True
+except (ImportError, OSError):
+    HAS_CODA = False
+    coda = None
 
 
 def convert_aeolus_l2a(path: Path) -> pd.DataFrame | None:
@@ -25,10 +25,18 @@ def convert_aeolus_l2a(path: Path) -> pd.DataFrame | None:
 
     Returns:
         A pandas DataFrame in WRF-Ensembly Observation format, or None if no valid data.
+
+    Raises:
+        ImportError: If the coda library is not installed.
     """
+    if not HAS_CODA:
+        raise ImportError(
+            "The 'coda' library is required for reading AEOLUS L2A files. "
+            "Please install it using: pip install coda"
+        )
 
     # Open the CODA file
-    cf = coda.open(str(path))
+    cf = coda.open(str(path))  # type: ignore[union-attr]
     if cf.product_type != "ALD_U_N_2A":
         cf.close()
         raise ValueError("Input file is not an AEOLUS DBL L2A file.")
@@ -216,6 +224,11 @@ def aeolus_l2a(input_path: Path, output_path: Path):
     INPUT_PATH: Path to the AEOLUS L2A file
     OUTPUT_PATH: Path where to save the converted observations (will be saved as parquet)
     """
+    if not HAS_CODA:
+        raise click.ClickException(
+            "The 'coda' library is required for reading AEOLUS L2A files. "
+            "Please install it using: pip install coda"
+        )
 
     print(f"Converting AEOLUS L2A file: {input_path}")
     print(f"Output path: {output_path}")
