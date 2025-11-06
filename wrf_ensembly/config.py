@@ -313,6 +313,14 @@ class ObservationsConfig:
 
 
 @dataclass
+class ValidationConfig:
+    """Configuration related to validation of the experiment"""
+
+    instruments: list[str] = field(default_factory=lambda: [])
+    """List of instruments to use for validation, if missing it will use all available instruments."""
+
+
+@dataclass
 class GeogridConfig:
     """Configuration related to geogrid (geographical data preprocessing)."""
 
@@ -522,6 +530,9 @@ class Config(DataClassTOMLMixin):
 
     observations: ObservationsConfig
     """Configuration related to observations."""
+
+    validation: ValidationConfig
+    """Configuration related to validation of the experiment"""
 
     geogrid: GeogridConfig
     """Configuration related to geogrid (geographical data preprocessing)."""

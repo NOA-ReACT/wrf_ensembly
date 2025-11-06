@@ -35,9 +35,19 @@ def interpolate_model(experiment_path: Path):
     logger.setup("validation-interpolate-model", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
+    where_conditions = ["downsampling_info IS NULL"]
+    if exp.cfg.validation.instruments:
+        instruments_to_use = exp.cfg.validation.instruments
+        logger.info(
+            f"Filtering observations to only use instruments: {instruments_to_use}"
+        )
+        instruments_list = ", ".join(f"'{inst}'" for inst in instruments_to_use)
+        where_conditions.append(f"instrument IN ({instruments_list})")
+
+    where_clause = " AND ".join(where_conditions)
     obs = (
         exp.obs._get_duckdb(read_only=True)
-        .execute("SELECT * FROM observations WHERE downsampling_info IS NULL")
+        .execute(f"SELECT * FROM observations WHERE {where_clause}")
         .fetchdf()
     )
 
@@ -78,9 +88,9 @@ def interpolate_model(experiment_path: Path):
     logger.info(f"Need to interpolate WRF variables: {needed_vars}")
 
     # Open all model output forecast mean files as a single xarray dataset
-    # TODO use mean?
+    # TODO Allow mean/member selection
     forecast_mean = xr.open_mfdataset(
-        f"{exp.paths.data_forecasts}/cycle_**/forecast_member_00_cycle_*.nc",
+        f"{exp.paths.data_forecasts}/cycle_**/forecast_mean_cycle_*.nc",
         combine="by_coords",
         chunks={"time": 1},
         coords="minimal",
