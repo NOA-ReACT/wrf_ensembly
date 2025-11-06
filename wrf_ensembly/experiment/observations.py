@@ -33,10 +33,12 @@ class ExperimentObservations:
 
     def _get_duckdb(self, read_only: bool) -> duckdb.DuckDBPyConnection:
         if read_only:
-            return duckdb.connect(
+            con = duckdb.connect(
                 database=str(self.paths.obs_db),
                 read_only=True,
             )
+            con.execute("SET TimeZone='UTC';")
+            return con
 
         # When also writing, ensure the observation table exists
         con = duckdb.connect(

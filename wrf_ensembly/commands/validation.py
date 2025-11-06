@@ -64,9 +64,7 @@ def interpolate_model(experiment_path: Path):
         start_time = pd.to_datetime(cycle.end) - pd.Timedelta(minutes=half_window)
         end_time = pd.to_datetime(cycle.end) + pd.Timedelta(minutes=half_window)
 
-        in_window = (obs["time"] >= start_time.to_numpy()) & (
-            obs["time"] <= end_time.to_numpy()
-        )
+        in_window = (obs["time"] >= start_time) & (obs["time"] <= end_time)
         if da_instruments is not None:
             is_da_instrument = obs["instrument"].isin(da_instruments)
             obs.loc[in_window & is_da_instrument, "used_in_da"] = True
@@ -98,6 +96,8 @@ def interpolate_model(experiment_path: Path):
 
     # Interpolate the model data to the observation locations and times, convert back to dataframe
     obs_ds = xr.Dataset.from_dataframe(obs).set_coords(["time", "x", "y"])
+    # Convert Timestamps to DateTimeIndex without timezone info, as xarray does not support tz-aware times
+    obs_ds["time"] = pd.DatetimeIndex(obs_ds["time"].values).tz_localize(None)
     print(obs_ds)
     model_obs = forecast_mean.interp(
         t=obs_ds["time"], x=obs_ds["x"], y=obs_ds["y"]
