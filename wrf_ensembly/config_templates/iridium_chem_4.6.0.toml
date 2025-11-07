@@ -163,6 +163,8 @@ concatenate_cores = 24
 processor = "/home/thgeorgiou/work/AIRSENSE/aod_python_operator/postproc_wrfout.py:ExtinctionOperatorProcessor"
 params = { optical_properties_file = "/home/thgeorgiou/work/L2Aplus/extinction_operator/parse_optical_prop_tables/qext/hex_mixtures/hexmix_optical_props.csv" }
 
+[validation]
+
 # -- WRF NAMELIST OPTIONS --
 [wrf_namelist]
 
