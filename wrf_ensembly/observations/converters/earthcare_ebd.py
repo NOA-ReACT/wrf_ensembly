@@ -52,15 +52,16 @@ def convert_earthcare_ebd(
             "simple_classification",
         ]
     ]
-    # Prepare qc flag, 1 = valid, 0 = invalid:
+    # Prepare qc flag, 0 = valid, 1 = invalid:
     # 1) No NaN extinction
     # 2) Only aerosol (3) or clear air (0)
     # 3) Extinction in [0, 0.0003]
-    qc_flag = ~ec["particle_extinction_coefficient_355nm_low_resolution"].isnull()
-    qc_flag &= (ec["simple_classification"] == 0) | (ec["simple_classification"] == 3)
-    qc_flag &= (ec["particle_extinction_coefficient_355nm_low_resolution"] >= 0) & (
-        ec["particle_extinction_coefficient_355nm_low_resolution"] < 0.0003
+    qc_flag = ec["particle_extinction_coefficient_355nm_low_resolution"].isnull()
+    qc_flag |= ~(
+        (ec["simple_classification"] == 0) | (ec["simple_classification"] == 3)
     )
+    qc_flag |= ec["particle_extinction_coefficient_355nm_low_resolution"] <= 0
+    qc_flag |= ec["particle_extinction_coefficient_355nm_low_resolution"] > 0.0003
 
     # Filter data before binning if requested
     if filter_before_binning:
