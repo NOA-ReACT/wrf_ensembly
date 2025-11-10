@@ -55,18 +55,22 @@ def convert_earthcare_ebd(
     # Prepare qc flag, 0 = valid, 1 = invalid:
     # 1) No NaN extinction
     # 2) Only aerosol (3) or clear air (0)
-    # 3) Extinction in [0, 0.0003]
+    # 3) Extinction in larger than 0.0003
     qc_flag = ec["particle_extinction_coefficient_355nm_low_resolution"].isnull()
     qc_flag |= ~(
         (ec["simple_classification"] == 0) | (ec["simple_classification"] == 3)
     )
-    qc_flag |= ec["particle_extinction_coefficient_355nm_low_resolution"] <= 0
     qc_flag |= ec["particle_extinction_coefficient_355nm_low_resolution"] > 0.0003
+
+    # Clamp extinction to zero
+    ec["particle_extinction_coefficient_355nm_low_resolution"] = ec[
+        "particle_extinction_coefficient_355nm_low_resolution"
+    ].where(ec["particle_extinction_coefficient_355nm_low_resolution"] >= 0, 0.0)
 
     # Filter data before binning if requested
     if filter_before_binning:
         print("Applying QC filtering before binning.")
-        ec = ec.where(qc_flag, drop=False)
+        ec = ec.where(~qc_flag, drop=False)
 
     # Assign qc_flag back to dataset so it takes up the correct shape after possible binning
     ec["qc_flag"] = qc_flag
@@ -111,6 +115,7 @@ def convert_earthcare_ebd(
         .to_numpy()
         .flatten()
     )
+    uncertainty_is_zero = value_uncertainty == 0
     height = ec["height"].to_numpy().flatten()
     simple_classification = ec["simple_classification"].to_numpy().flatten()
     qc_flag = ec["qc_flag"].to_numpy().flatten()
@@ -143,10 +148,19 @@ def convert_earthcare_ebd(
     coord_names = ec["particle_extinction_coefficient_355nm_low_resolution"].dims
     coord_shape = ec["particle_extinction_coefficient_355nm_low_resolution"].shape
 
-    # Uncertainty: 20% when there are aerosols, 5% when there are not
-    # This is a bit arbitrary, but we need something reasonable
-    # TODO Better uncertainty estimation
-    value_uncertainty = np.where(simple_classification == 3, 0.2 * value, 0.05 * value)
+    # Uncertainty:
+    # - 0.0025 1/km for clear air fixed
+    # - 20% of extinction value for aerosol, with a minimum value of 0.0025 1/km
+    # Remember that everything needs to be in 1/m
+    value_uncertainty = np.full_like(value_uncertainty, 0.0025)
+    clear_mask = simple_classification != 3
+    value_uncertainty[clear_mask] = 0.0015
+    aerosol_mask = simple_classification == 3
+    value_uncertainty[aerosol_mask] = np.maximum(
+        0.20 * value[aerosol_mask],  # 20% relative error
+        0.005,  # Higher floor for aerosol regions
+    )
+    value_uncertainty = value_uncertainty / 1000.0  # Convert to 1/m
 
     # Shapes of everything
     shapes = {
