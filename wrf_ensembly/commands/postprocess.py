@@ -158,7 +158,7 @@ def process_pipeline(
 
     if len(files_to_process) == 0:
         logger.warning("No files found to process")
-        return
+        sys.exit(1)
 
     # Create processor arguments for each file
     process_args = []
