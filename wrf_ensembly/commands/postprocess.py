@@ -85,8 +85,19 @@ def print_variables_to_keep(experiment_path: Path):
     type=click.IntRange(min=0, max=None),
     help="How many files to process in parallel",
 )
+@click.option(
+    "--only-last-timestep",
+    is_flag=True,
+    default=False,
+    help="If set, only process the last timestep of each cycle. A time-saving measure if you are only interested in the end-of-cycle data.",
+)
 @pass_experiment_path
-def process_pipeline(experiment_path: Path, cycle: Optional[int], jobs: Optional[int]):
+def process_pipeline(
+    experiment_path: Path,
+    cycle: Optional[int],
+    jobs: Optional[int],
+    only_last_timestep: bool,
+):
     """
     Apply the configured data processor pipeline to output files.
 
@@ -127,11 +138,21 @@ def process_pipeline(experiment_path: Path, cycle: Optional[int], jobs: Optional
         logger.debug(f"Removing old file {f}")
         f.unlink()
 
-    files_to_process = list(scratch_analysis_dir.rglob("member_*/wrfout*")) + list(
-        scratch_forecast_dir.rglob("member_*/wrfout*")
-    )
-    # Filter out any _post files that might still exist, just in case?
-    files_to_process = [f for f in files_to_process if not f.name.endswith("_post")]
+    if not only_last_timestep:
+        files_to_process = list(scratch_analysis_dir.rglob("member_*/wrfout*")) + list(
+            scratch_forecast_dir.rglob("member_*/wrfout*")
+        )
+        # Filter out any _post files that might still exist, just in case?
+        files_to_process = [f for f in files_to_process if not f.name.endswith("_post")]
+    else:
+        cycle_end = exp.cycles[cycle].end
+        wrfout_filename = f"wrfout_d01_{cycle_end.strftime('%Y-%m-%d_%H:%M:%S')}"
+        files_to_process = []
+        for d in [scratch_analysis_dir, scratch_forecast_dir]:
+            for member_dir in d.glob("member_*"):
+                file_path = member_dir / wrfout_filename
+                if file_path.exists():
+                    files_to_process.append(file_path)
 
     logger.info(f"Found {len(files_to_process)} files to process")
 
