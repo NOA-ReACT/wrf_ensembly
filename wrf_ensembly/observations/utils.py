@@ -30,7 +30,7 @@ def project_locations_to_wrf(
 
 def reconstruct_array(
     df: pd.DataFrame, fill_value=np.nan, trim_all_nan_slices=True
-) -> xr.DataArray:
+) -> xr.Dataset:
     """
     The WRF-Ensembly observation dataframes have an 'orig_coords' column which contains
     the original shape and indices of the observation in the original file. This function
@@ -45,7 +45,7 @@ def reconstruct_array(
             entire rows/columns.
 
     Returns:
-        An xarray DataArray with the reconstructed data. The latitude, longitude, z and time coordinates will be included.
+        An xarray Dataset with the reconstructed data (as `obs_value` and `obs_uncertainty`). The latitude, longitude, z and time coordinates will be included.
     """
 
     if "orig_coords" not in df.columns:
@@ -78,34 +78,45 @@ def reconstruct_array(
             "'indices' and 'names' in 'orig_coords' must have the same length"
         )
 
-    array = np.full(shape, fill_value)
+    obs_value = np.full(shape, fill_value)
+    obs_uncertainty = np.full(shape, np.nan)
     latitude = np.full(shape, np.nan)
     longitude = np.full(shape, np.nan)
     z = np.full(shape, np.nan)
     time = np.full(shape, np.nan, dtype="datetime64[ns]")
+    qc_flag = np.full(shape, np.nan)
 
     for i, row in df.iterrows():
         idx = tuple(row["orig_coords"]["indices"])
-        array[idx] = row["value"]
+        obs_value[idx] = row["value"]
+        obs_uncertainty[idx] = row["value_uncertainty"]
         latitude[idx] = row["latitude"]
         longitude[idx] = row["longitude"]
         z[idx] = row["z"]
         time[idx] = pd.to_datetime(row["time"])
+        qc_flag[idx] = row["qc_flag"]
 
     coords = {
         "time": (names, time),
         "latitude": (names, latitude),
         "longitude": (names, longitude),
         "z": (names, z),
+        "qc_flag": (names, qc_flag),
     }
     for i, name in enumerate(names):
         coords[name] = np.arange(shape[i])
 
-    data_array = xr.DataArray(array, dims=names, coords=coords)
+    dataset = xr.Dataset(
+        {
+            "obs_value": (names, obs_value),
+            "obs_uncertainty": (names, obs_uncertainty),
+        },
+        coords=coords,
+    )
 
     if trim_all_nan_slices:
         # Drop slices along any dimension where all values are NaN
         for dim in names:
-            data_array = data_array.dropna(dim=dim, how="all")
+            dataset = dataset.dropna(dim=dim, how="all")
 
-    return data_array
+    return dataset
