@@ -507,6 +507,19 @@ class PostprocessConfig:
 
 
 @dataclass
+class CopyFileConfig:
+    """
+    Configuration about a file to copy into the DART directory before running assimilation
+    """
+
+    source: Path
+    """Path to the source file to copy"""
+
+    destination_name: Optional[str] = None
+    """Path to the destination file inside the DART directory. If None, will use the same name as the source file."""
+
+
+@dataclass
 class Config(DataClassTOMLMixin):
     class Config(BaseConfig):
         serialization_strategy = {datetime: UTCDatetimeStrategy()}
@@ -557,6 +570,9 @@ class Config(DataClassTOMLMixin):
 
     dart_namelist: dict[str, dict[str, Any]] = field(default_factory=dict)
     """Overrides for the DART namelist (input.nml)"""
+
+    extra_dart_files: list[CopyFileConfig] = field(default_factory=list)
+    """List of extra files to copy into the DART directory before running assimilation"""
 
     environment: EnvironmentConfig = field(default_factory=EnvironmentConfig)
     """Environment variables to set when running the experiment"""

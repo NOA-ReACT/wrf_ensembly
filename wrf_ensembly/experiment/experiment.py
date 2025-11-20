@@ -483,6 +483,19 @@ class Experiment:
         logger.info(f"Writing DART filter namelist to {filter_namelist_path}")
         write_namelist(self.cfg.dart_namelist, filter_namelist_path)
 
+        # Copy files if defined in config
+        for file_cfg in self.cfg.extra_dart_files:
+            source_path = Path(file_cfg.source).resolve()
+            if file_cfg.destination_name is None:
+                target_path = dart_dir / source_path.name
+            else:
+                target_path = dart_dir / file_cfg.destination_name
+            if not source_path.exists():
+                logger.error(f"Extra DART file not found at {source_path}")
+                return False
+            utils.copy(source_path, target_path)
+            logger.info(f"Copied extra DART file from {source_path} to {target_path}")
+
         # Grab observations
         obs_seq = dart_dir / "obs_seq.out"
         obs_seq.unlink(missing_ok=True)
