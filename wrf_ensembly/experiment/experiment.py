@@ -129,6 +129,29 @@ class Experiment:
                 self.current_cycle_i, self.filter_run, self.analysis_run
             )
 
+    def setup_dart(self):
+        """Prepare DART working directory by writing namelist and linking files"""
+
+        dart_dir = self.cfg.directories.dart_root / "models" / "wrf" / "work"
+
+        # Write namelist
+        filter_namelist_path = dart_dir / "input.nml"
+        logger.info(f"Writing DART filter namelist to {filter_namelist_path}")
+        write_namelist(self.cfg.dart_namelist, filter_namelist_path)
+
+        # Copy files if defined in config
+        for file_cfg in self.cfg.extra_dart_files:
+            source_path = Path(file_cfg.source).resolve()
+            if file_cfg.destination_name is None:
+                target_path = dart_dir / source_path.name
+            else:
+                target_path = dart_dir / file_cfg.destination_name
+            if not source_path.exists():
+                logger.error(f"Extra DART file not found at {source_path}")
+                return False
+            utils.copy(source_path, target_path)
+            logger.info(f"Copied extra DART file from {source_path} to {target_path}")
+
     def generate_perturbations(self, cycle_i: int):
         """
         Generates perturbations for a given cycle and stores them in `data/diag/perturbations`.
@@ -476,27 +499,10 @@ class Experiment:
             logger.error("Not all members have been advanced")
             return False
 
-        dart_dir = self.cfg.directories.dart_root / "models" / "wrf" / "work"
-
-        # Write namelist
-        filter_namelist_path = dart_dir / "input.nml"
-        logger.info(f"Writing DART filter namelist to {filter_namelist_path}")
-        write_namelist(self.cfg.dart_namelist, filter_namelist_path)
-
-        # Copy files if defined in config
-        for file_cfg in self.cfg.extra_dart_files:
-            source_path = Path(file_cfg.source).resolve()
-            if file_cfg.destination_name is None:
-                target_path = dart_dir / source_path.name
-            else:
-                target_path = dart_dir / file_cfg.destination_name
-            if not source_path.exists():
-                logger.error(f"Extra DART file not found at {source_path}")
-                return False
-            utils.copy(source_path, target_path)
-            logger.info(f"Copied extra DART file from {source_path} to {target_path}")
+        self.setup_dart()
 
         # Grab observations
+        dart_dir = self.cfg.directories.dart_root / "models" / "wrf" / "work"
         obs_seq = dart_dir / "obs_seq.out"
         obs_seq.unlink(missing_ok=True)
 

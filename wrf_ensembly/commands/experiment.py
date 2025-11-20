@@ -163,3 +163,16 @@ def cycle_info(experiment_path: Path, to_csv: Optional[Path]):
                         int((c.end - c.start).total_seconds() // 60 // 60),
                     ]
                 )
+
+
+@experiment_cli.command()
+@pass_experiment_path
+def setup_dart(experiment_path: Path):
+    """
+    Setup DART by writing the namelist and copying any files specified in the config
+    """
+
+    logger.setup("experiment-setup-dart", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    exp.setup_dart()
