@@ -578,6 +578,23 @@ class Config(DataClassTOMLMixin):
     """Environment variables to set when running the experiment"""
 
 
+def _convert_datetimes_to_iso(obj: Any) -> Any:
+    """
+    Recursively convert datetime objects to ISO format strings.
+    This is needed because tomli.loads() returns datetime objects, but mashumaro's
+    from_dict() expects strings that it can deserialize using the SerializationStrategy.
+    """
+
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {k: _convert_datetimes_to_iso(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_datetimes_to_iso(item) for item in obj]
+    else:
+        return obj
+
+
 def _deep_merge_dicts(base: dict, override: dict) -> dict:
     """
     Recursively merge two dictionaries, with values from override taking precedence.
@@ -627,17 +644,23 @@ def read_config(path: Path, inject_environment=True) -> Config:
         inject_environment: Whether to inject variables from the [environment] group into the environment, defaults to True
     """
     # Read base config
-    base_dict = tomli.loads(path.read_text())
+    base_text = path.read_text()
 
     # Check for env_config.toml in the same directory
     env_config_path = path.parent / "env_config.toml"
     if env_config_path.exists():
-        env_dict = tomli.loads(env_config_path.read_text())
+        env_text = env_config_path.read_text()
+        # Parse both as raw dicts (tomli handles datetime parsing)
+        base_dict = tomli.loads(base_text)
+        env_dict = tomli.loads(env_text)
         # Merge with env_config taking precedence
         merged_dict = _deep_merge_dicts(base_dict, env_dict)
+        # Convert datetime objects to ISO strings for mashumaro deserialization
+        merged_dict = _convert_datetimes_to_iso(merged_dict)
+        # Deserialize the merged dict
         cfg = Config.from_dict(merged_dict)
     else:
-        cfg = Config.from_dict(base_dict)
+        cfg = Config.from_toml(base_text)
 
     if inject_environment:
         for k, v in cfg.environment.universal.items():
