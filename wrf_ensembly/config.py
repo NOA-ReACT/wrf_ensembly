@@ -555,6 +555,9 @@ class Config(DataClassTOMLMixin):
     )
     """Overrides for the WRF namelist per ensemble member"""
 
+    dart_namelist: dict[str, dict[str, Any]] = field(default_factory=dict)
+    """Overrides for the DART namelist (input.nml)"""
+
     environment: EnvironmentConfig = field(default_factory=EnvironmentConfig)
     """Environment variables to set when running the experiment"""
 

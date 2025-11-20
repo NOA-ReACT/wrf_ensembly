@@ -18,6 +18,7 @@ from wrf_ensembly import (
     wrf,
 )
 from wrf_ensembly.console import logger
+from wrf_ensembly.fortran_namelists import write_namelist
 
 from .database import ExperimentDatabase
 from .dataclasses import MemberStatus, RuntimeStatistics
@@ -476,6 +477,11 @@ class Experiment:
             return False
 
         dart_dir = self.cfg.directories.dart_root / "models" / "wrf" / "work"
+
+        # Write namelist
+        filter_namelist_path = dart_dir / "input.nml"
+        logger.info(f"Writing DART filter namelist to {filter_namelist_path}")
+        write_namelist(self.cfg.dart_namelist, filter_namelist_path)
 
         # Grab observations
         obs_seq = dart_dir / "obs_seq.out"
