@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
 import rich
+import tomli
 from mashumaro.mixins.toml import DataClassTOMLMixin
 from mashumaro.config import BaseConfig
 from mashumaro.types import SerializationStrategy
@@ -558,16 +559,66 @@ class Config(DataClassTOMLMixin):
     """Environment variables to set when running the experiment"""
 
 
+def _deep_merge_dicts(base: dict, override: dict) -> dict:
+    """
+    Recursively merge two dictionaries, with values from override taking precedence.
+
+    For nested dictionaries, merges them recursively.
+    For other types (lists, primitives), override completely replaces base.
+
+    Args:
+        base: Base dictionary
+        override: Dictionary with overriding values
+
+    Returns:
+        Merged dictionary
+    """
+    result = base.copy()
+
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            # Recursively merge nested dicts
+            result[key] = _deep_merge_dicts(result[key], value)
+        else:
+            # For everything else (lists, primitives, or new keys), override wins
+            result[key] = value
+
+    return result
+
+
 def read_config(path: Path, inject_environment=True) -> Config:
     """
     Reads a TOML configuration file and returns a Config object.
+
+    If an `env_config.toml` file exists alongside the main config file, it will be
+    loaded and merged with the main config. The env_config values take precedence,
+    allowing you to override environment-specific settings (like SLURM directives,
+    paths, etc.) while keeping the main config focused on experiment settings.
+
+    This is useful for managing multiple HPC environments using symlinks:
+    ```
+    config.toml          # Main experiment config
+    env_config.toml -> env_aris.toml      # Symlink to environment-specific config
+    env_aris.toml        # ARIS cluster settings
+    env_iridium.toml     # Iridium cluster settings
+    ```
 
     Args:
         path: Path to the TOML configuration file
         inject_environment: Whether to inject variables from the [environment] group into the environment, defaults to True
     """
+    # Read base config
+    base_dict = tomli.loads(path.read_text())
 
-    cfg = Config.from_toml(path.read_text())
+    # Check for env_config.toml in the same directory
+    env_config_path = path.parent / "env_config.toml"
+    if env_config_path.exists():
+        env_dict = tomli.loads(env_config_path.read_text())
+        # Merge with env_config taking precedence
+        merged_dict = _deep_merge_dicts(base_dict, env_dict)
+        cfg = Config.from_dict(merged_dict)
+    else:
+        cfg = Config.from_dict(base_dict)
 
     if inject_environment:
         for k, v in cfg.environment.universal.items():
