@@ -3,6 +3,8 @@
 from .aeronet import aeronet as aeronet_cli
 from .remotap_spexone import remotap_spexone as remotap_spexone_cli
 from .earthcare_ebd import earthcare_atl_ebd as earthcare_ebd_cli
+from .viirs import viirs as viirs_cli
+from .modis import modis as modis_cli
 
 # Try to import AEOLUS converters (requires optional 'coda' dependency)
 # We need to check if the module can be imported without triggering the coda import
@@ -28,6 +30,8 @@ __all__ = [
     "aeronet_cli",
     "remotap_spexone_cli",
     "earthcare_ebd_cli",
+    "viirs_cli",
+    "modis_cli",
     "aeolus_l2b_cli",
     "aeolus_l2a_cli",
     "HAS_AEOLUS_CONVERTERS",

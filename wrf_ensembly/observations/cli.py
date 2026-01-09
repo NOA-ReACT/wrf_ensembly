@@ -29,6 +29,8 @@ from wrf_ensembly.observations.converters import (
     aeronet_cli,
     earthcare_ebd_cli,
     remotap_spexone_cli,
+    viirs_cli,
+    modis_cli,
     aeolus_l2b_cli,
     aeolus_l2a_cli,
     HAS_AEOLUS_CONVERTERS,
@@ -60,6 +62,8 @@ def convert_group():
 convert_group.add_command(aeronet_cli)
 convert_group.add_command(remotap_spexone_cli)
 convert_group.add_command(earthcare_ebd_cli)
+convert_group.add_command(viirs_cli)
+convert_group.add_command(modis_cli)
 
 # Only add AEOLUS converters if the 'coda' library is available
 if HAS_AEOLUS_CONVERTERS:
