@@ -1,10 +1,10 @@
+import datetime as dt
 import os
 import shutil
 import sys
 from itertools import chain
 from pathlib import Path
 from typing import Optional
-import datetime as dt
 
 import click
 from interpolator_for_wrfchem.global_models import (
@@ -210,7 +210,7 @@ def metgrid(experiment_path: Path):
     res = external.runc([metgrid_path], wps_dir, "metgrid.log")
     if res.returncode != 0 or "Successful completion of metgrid" not in res.output:
         logger.error("Metgrid could not finish successfully")
-        logger.error("Check the `metgrid.log` file for more info.")
+        logger.error(res.output)
         sys.exit(1)
 
     logger.info("Metgrid finished successfully!")
