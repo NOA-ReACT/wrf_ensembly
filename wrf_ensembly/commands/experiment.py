@@ -94,14 +94,65 @@ def copy_model(experiment_path: Path, force: bool):
             sys.exit(1)
 
     # Copy WRF/WPS in the work directory
+    # Depending on whether WRF was built using the traditional buildscripts or CMake, the binaries will be either in
+    # `run/` with the exe suffix (old scripts) or inside `install/bin` without the suffix. We need all other files
+    # from `run/` regardless. Let's try to handle all cases!
+    wrf_required_binaries = ["wrf", "real", "tc", "ndown"]
+
     shutil.copytree(
         exp.cfg.directories.wrf_root / "run",
         exp.paths.work_wrf,
         symlinks=False,  # Maybe fix symlinks so that they are valid after getting copied?
     )
+    cmake_bin_dir = exp.cfg.directories.wrf_root / "install" / "bin"
+
+    # Look for binaries
+    for binary_name in wrf_required_binaries:
+        binary_path = exp.paths.work_wrf / f"{binary_name}.exe"
+        if not binary_path.exists():
+            # Try grabbing from CMake
+            cmake_bin = cmake_bin_dir / binary_name
+            if cmake_bin.exists:
+                utils.copy(cmake_bin, binary_path)
+
+        msg = "Yes" if binary_path.exists() else "[warning]No[/warning]"
+        logger.info(f"- {binary_name}: {msg}")
+
     logger.info(f"Copied WRF to {exp.paths.work_wrf}")
 
-    shutil.copytree(exp.cfg.directories.wps_root, exp.paths.work_wps, symlinks=True)
+    # For WPS the situation is similar, the binaries are either places at the root directory
+    # or at `install/bin`. In this case we only need the binaries, geogrid's tables and
+    # ungrib variable tables.
+    exp.paths.work_wps.mkdir(parents=True, exist_ok=True)
+    geogrid_source = exp.cfg.directories.wps_root / "geogrid"
+    geogrid_target = exp.paths.work_wps / "geogrid"
+    geogrid_target.mkdir(exist_ok=True)
+    for table in geogrid_source.glob("*TBL*"):
+        utils.copy(table, geogrid_target / table.name)
+
+    ungrib_vtable_source = exp.cfg.directories.wps_root / "ungrib" / "Variable_Tables"
+    ungrib_vtable_target = exp.paths.work_wps / "ungrib" / "Variable_Tables"
+    shutil.copytree(ungrib_vtable_source, ungrib_vtable_target)
+
+    metgrid_table_source = exp.cfg.directories.wps_root / "metgrid" / "METGRID.TBL.ARW"
+    metgrid_table_target = exp.paths.work_wps / "metgrid" / "METGRID.TBL.ARW"
+    metgrid_table_target.parent.mkdir(exist_ok=True)
+    utils.copy(metgrid_table_source, metgrid_table_target)
+
+    wps_required_binaries = ["geogrid", "ungrib", "metgrid"]
+    for binary_name in wps_required_binaries:
+        target_path = exp.paths.work_wps / f"{binary_name}.exe"
+        classic_source_path = exp.cfg.directories.wps_root / "{binary_name}.exe"
+        cmake_source_path = (
+            exp.cfg.directories.wps_root / "install" / "bin" / binary_name
+        )
+        if classic_source_path.exists():
+            utils.copy(classic_source_path, target_path)
+        elif cmake_source_path.exists():
+            utils.copy(cmake_source_path, target_path)
+        else:
+            logger.error(f"WPS Binary {binary_name} not found")
+
     logger.info(f"Copied WPS to {exp.paths.work_wps}")
 
     for j in range(exp.cfg.assimilation.n_members):
