@@ -5,6 +5,7 @@ from typing import Optional
 import cartopy.crs as ccrs
 import pyproj
 import xarray as xr
+import xwrf  # noqa: F401
 
 from wrf_ensembly import fortran_namelists
 from wrf_ensembly.config import Config, DomainControlConfig
@@ -195,9 +196,9 @@ def generate_wrf_namelist(
     if member is not None and paths is not None:
         wrfout_dest = paths.scratch_forecasts_path(cycle.index, member)
         wrfout_dest.mkdir(parents=True, exist_ok=True)
-        wrf_namelist["time_control"][
-            "history_outname"
-        ] = f"{wrfout_dest}/wrfout_d<domain>_<date>"
+        wrf_namelist["time_control"]["history_outname"] = (
+            f"{wrfout_dest}/wrfout_d<domain>_<date>"
+        )
 
     # Add iofields
     if (
