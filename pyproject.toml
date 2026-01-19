@@ -27,6 +27,7 @@ dependencies = [
   "duckdb>=1.4.0",
   "dask>=2025.9.1",
   "scikit-learn>=1.7.2",
+  "numpy>=2.3.2",
 ]
 
 [project.scripts]
