@@ -7,9 +7,6 @@ from pathlib import Path
 from typing import Optional
 
 import click
-from interpolator_for_wrfchem.global_models import (
-    GLOBAL_MODELS as INTERPOLATOR_GLOBAL_MODELS,
-)
 
 from wrf_ensembly import config, experiment, external, utils, wrf
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
@@ -382,6 +379,9 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optiona
     Args:
         jobs: How many processes to use when interpolating the chemistry fields.
     """
+    from interpolator_for_wrfchem.global_models import (
+        GLOBAL_MODELS as INTERPOLATOR_GLOBAL_MODELS,
+    )
 
     logger.setup("preprocess-interpolate-chem", experiment_path)
     exp = experiment.Experiment(experiment_path)
