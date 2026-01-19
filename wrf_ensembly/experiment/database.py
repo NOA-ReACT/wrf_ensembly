@@ -23,31 +23,97 @@ class DatabaseConnection:
         self.conn = conn
         self.cursor = conn.cursor()
 
-    def get_experiment_state(self) -> tuple[int, bool, bool]:
+    def get_experiment_state(self) -> tuple[int, bool, bool, str]:
         """Get the current experiment state."""
 
         self.cursor.execute("""
-            SELECT current_cycle, filter_run, analysis_run
+            SELECT current_cycle, filter_run, analysis_run, cycle_state
             FROM ExperimentState WHERE id = 1
         """)
         result = self.cursor.fetchone()
         if result is None:
-            return (0, False, False)
+            return (0, False, False, "initialized")
         return result
 
     def set_experiment_state(
-        self, current_cycle: int, filter_run: bool, analysis_run: bool
+        self,
+        current_cycle: int,
+        filter_run: bool,
+        analysis_run: bool,
+        cycle_state: str = "initialized",
     ):
         """Update the experiment state."""
 
         self.cursor.execute(
             """
             UPDATE ExperimentState
-            SET current_cycle = ?, filter_run = ?, analysis_run = ?
+            SET current_cycle = ?, filter_run = ?, analysis_run = ?, cycle_state = ?
             WHERE id = 1
         """,
-            (current_cycle, filter_run, analysis_run),
+            (current_cycle, filter_run, analysis_run, cycle_state),
         )
+
+    def get_cycle_state(self) -> str:
+        """Get the current cycle state."""
+
+        self.cursor.execute("""
+            SELECT cycle_state FROM ExperimentState WHERE id = 1
+        """)
+        result = self.cursor.fetchone()
+        if result is None:
+            return "initialized"
+        return result[0]
+
+    def set_cycle_state(self, cycle_state: str):
+        """Update just the cycle state."""
+
+        self.cursor.execute(
+            """
+            UPDATE ExperimentState
+            SET cycle_state = ?
+            WHERE id = 1
+        """,
+            (cycle_state,),
+        )
+
+    def mark_optional_operation_complete(
+        self, cycle: int, operation_name: str, completed: bool = True
+    ):
+        """Mark an optional operation as completed for a cycle."""
+
+        self.cursor.execute(
+            """
+            INSERT OR REPLACE INTO OptionalOperations (cycle, operation_name, completed)
+            VALUES (?, ?, ?)
+        """,
+            (cycle, operation_name, completed),
+        )
+
+    def is_optional_operation_complete(self, cycle: int, operation_name: str) -> bool:
+        """Check if an optional operation has been completed for a cycle."""
+
+        self.cursor.execute(
+            """
+            SELECT completed FROM OptionalOperations
+            WHERE cycle = ? AND operation_name = ?
+        """,
+            (cycle, operation_name),
+        )
+        result = self.cursor.fetchone()
+        return result[0] if result else False
+
+    def get_all_optional_operations(self, cycle: int) -> List[tuple[str, bool]]:
+        """Get all optional operations for a cycle."""
+
+        self.cursor.execute(
+            """
+            SELECT operation_name, completed FROM OptionalOperations
+            WHERE cycle = ?
+            ORDER BY operation_name
+        """,
+            (cycle,),
+        )
+        return self.cursor.fetchall()
 
     def get_all_members_status(self) -> List[tuple[int, bool]]:
         """Get the status of all members."""
@@ -184,11 +250,12 @@ class DatabaseConnection:
 
         self.cursor.execute("""
             UPDATE ExperimentState
-            SET current_cycle = 0, filter_run = FALSE, analysis_run = FALSE
+            SET current_cycle = 0, filter_run = FALSE, analysis_run = FALSE, cycle_state = 'initialized'
             WHERE id = 1
         """)
         self.cursor.execute("UPDATE MemberStatus SET advanced = FALSE")
         self.cursor.execute("DELETE FROM RuntimeStatistics")
+        self.cursor.execute("DELETE FROM OptionalOperations")
 
     def commit(self):
         """Commit the current transaction."""
@@ -249,7 +316,8 @@ class ExperimentDatabase:
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 current_cycle INTEGER NOT NULL DEFAULT 0,
                 filter_run BOOLEAN NOT NULL DEFAULT FALSE,
-                analysis_run BOOLEAN NOT NULL DEFAULT FALSE
+                analysis_run BOOLEAN NOT NULL DEFAULT FALSE,
+                cycle_state TEXT NOT NULL DEFAULT 'initialized'
             )
         """)
         cursor.execute("""
@@ -273,12 +341,33 @@ class ExperimentDatabase:
             CREATE INDEX IF NOT EXISTS idx_runtime_member_cycle
             ON RuntimeStatistics (member_i, cycle)
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS OptionalOperations (
+                cycle INTEGER NOT NULL,
+                operation_name TEXT NOT NULL,
+                completed BOOLEAN NOT NULL DEFAULT TRUE,
+                PRIMARY KEY (cycle, operation_name)
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_optional_ops_cycle
+            ON OptionalOperations (cycle)
+        """)
 
         # Default initial state (cycle 0, no runs)
         cursor.execute("""
-            INSERT OR IGNORE INTO ExperimentState (id, current_cycle, filter_run, analysis_run)
-            VALUES (1, 0, FALSE, FALSE)
+            INSERT OR IGNORE INTO ExperimentState (id, current_cycle, filter_run, analysis_run, cycle_state)
+            VALUES (1, 0, FALSE, FALSE, 'initialized')
         """)
+
+        # Migration: Add cycle_state column if it doesn't exist (for existing databases)
+        cursor.execute("PRAGMA table_info(ExperimentState)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "cycle_state" not in columns:
+            cursor.execute("""
+                ALTER TABLE ExperimentState
+                ADD COLUMN cycle_state TEXT NOT NULL DEFAULT 'initialized'
+            """)
 
         self._conn.commit()
 

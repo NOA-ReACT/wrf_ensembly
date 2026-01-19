@@ -24,6 +24,7 @@ from .database import ExperimentDatabase
 from .dataclasses import MemberStatus, RuntimeStatistics
 from .observations import ExperimentObservations
 from .paths import ExperimentPaths
+from .state_machine import CycleState, ExperimentStateMachine, StateTransition
 
 
 class Experiment:
@@ -34,13 +35,12 @@ class Experiment:
     cfg: config.Config
     cycles: list[cycling.CycleInformation]
     current_cycle_i: int
-    filter_run: bool
-    analysis_run: bool
     paths: ExperimentPaths
     members: list[MemberStatus] = []
 
     db: ExperimentDatabase
     obs: ExperimentObservations
+    state_machine: ExperimentStateMachine
 
     def __init__(self, experiment_path: Path):
         self.cfg = config.read_config(experiment_path / "config.toml")
@@ -64,10 +64,8 @@ class Experiment:
         """Load the status of the experiment from the database"""
 
         with self.db as db_conn:
-            # Get experiment state
-            self.current_cycle_i, self.filter_run, self.analysis_run = (
-                db_conn.get_experiment_state()
-            )
+            # Get experiment state (ignore legacy filter_run/analysis_run)
+            self.current_cycle_i, _, _, cycle_state_str = db_conn.get_experiment_state()
 
             # Get member status
             members_data = db_conn.get_all_members_status()
@@ -92,13 +90,51 @@ class Experiment:
 
         self.members.sort(key=lambda m: m.i)
 
+        # Initialize state machine
+        self.state_machine = ExperimentStateMachine(
+            n_cycles=len(self.cycles), current_cycle_idx=self.current_cycle_i
+        )
+
+        # Load the current cycle state
+        try:
+            cycle_state = CycleState(cycle_state_str)
+        except ValueError:
+            logger.warning(
+                f"Invalid cycle state '{cycle_state_str}' in database, using INITIALIZED"
+            )
+            cycle_state = CycleState.INITIALIZED
+
+        self.state_machine.current_cycle.current_state = cycle_state
+
+    @property
+    def filter_run(self) -> bool:
+        """Check if filter has been run for the current cycle (derived from state machine)."""
+        state = self.state_machine.current_cycle.current_state
+        return state in (
+            CycleState.FILTER_COMPLETE,
+            CycleState.ANALYSIS_COMPLETE,
+            CycleState.CYCLE_COMPLETE,
+        )
+
+    @property
+    def analysis_run(self) -> bool:
+        """Check if analysis has been run for the current cycle (derived from state machine)."""
+        state = self.state_machine.current_cycle.current_state
+        return state in (CycleState.ANALYSIS_COMPLETE, CycleState.CYCLE_COMPLETE)
+
     def save_status_to_db(self):
         """Save the current status of the experiment to the database"""
 
         with self.db as db_conn:
-            # Save experiment state
+            # Get current cycle state from state machine
+            cycle_state_str = self.state_machine.current_cycle.current_state.value
+
+            # Save experiment state (filter_run/analysis_run derived from state machine)
             db_conn.set_experiment_state(
-                self.current_cycle_i, self.filter_run, self.analysis_run
+                self.current_cycle_i,
+                self.filter_run,  # Property, derived from state
+                self.analysis_run,  # Property, derived from state
+                cycle_state_str,
             )
 
             # Save member status in batch
@@ -113,8 +149,10 @@ class Experiment:
         self.current_cycle_i += 1
         if self.current_cycle_i >= len(self.cycles):
             raise ValueError("No more cycles to run")
-        self.filter_run = False
-        self.analysis_run = False
+
+        # Advance state machine to next cycle and reset to INITIALIZED
+        self.state_machine.advance_to_next_cycle()
+        self.state_machine.current_cycle.current_state = CycleState.INITIALIZED
 
         with self.db as db_conn:
             # Reset all members' advanced status in database
@@ -124,9 +162,9 @@ class Experiment:
             for member in self.members:
                 member.advanced = False
 
-            # Save experiment state to database
+            # Save experiment state to database (filter_run/analysis_run derived from state)
             db_conn.set_experiment_state(
-                self.current_cycle_i, self.filter_run, self.analysis_run
+                self.current_cycle_i, False, False, "initialized"
             )
 
     def setup_dart(self):
@@ -492,9 +530,6 @@ class Experiment:
             True if the filter was run successfully
         """
 
-        if self.filter_run:
-            logger.error("Filter already run for current cycle")
-            return False
         if not self.all_members_advanced:
             logger.error("Not all members have been advanced")
             return False
@@ -583,8 +618,6 @@ class Experiment:
             self.cfg.directories.dart_root, obs_seq_final, obs_seq_final_nc
         )
 
-        self.filter_run = True
-        self.save_status_to_db()
         return True
 
     def cycle_member(self, member_i: int, use_forecast: bool):

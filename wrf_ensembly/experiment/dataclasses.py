@@ -30,20 +30,3 @@ class MemberStatus:
     """Has WRF been run for the current cycle?"""
 
     runtime_statistics: list[RuntimeStatistics]
-
-
-@dataclass
-class ExperimentStatus:
-    """Status of the entire experiment - now handled by database"""
-
-    current_cycle: int
-    """The experiment's current cycle"""
-
-    filter_run: bool
-    """True is the filter has been run for the current cycle"""
-
-    analysis_run: bool
-    """True if the analysis has been run for the current cycle"""
-
-    members: list[MemberStatus]
-    """Status for each ensemble member individually"""

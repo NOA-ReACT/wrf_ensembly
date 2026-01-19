@@ -36,6 +36,9 @@ def show(experiment_path: Path):
 
     exp_table.add_row("Current Cycle", str(exp.current_cycle_i))
     exp_table.add_row("Total Cycles", str(len(exp.cycles)))
+    exp_table.add_row(
+        "Cycle State", exp.state_machine.current_cycle.current_state.value
+    )
     exp_table.add_row("Filter Run", "✓" if exp.filter_run else "✗")
     exp_table.add_row("Analysis Run", "✓" if exp.analysis_run else "✗")
     exp_table.add_row("All Members Advanced", "✓" if exp.all_members_advanced else "✗")
@@ -138,8 +141,12 @@ def reset(experiment_path: Path, confirm: bool):
 
     # Reset experiment state
     exp.current_cycle_i = 0
-    exp.filter_run = False
-    exp.analysis_run = False
+
+    # Reset state machine to initial state
+    from wrf_ensembly.experiment import CycleState
+
+    exp.state_machine.current_cycle_idx = 0
+    exp.state_machine.current_cycle.current_state = CycleState.INITIALIZED
 
     # Reset all members
     for member in exp.members:
@@ -201,16 +208,28 @@ def set_all_members(experiment_path: Path, advanced: bool):
 
 @status_cli.command()
 @click.option("--cycle", type=int, help="Set current cycle number")
-@click.option("--filter-run", type=bool, help="Set filter run status")
-@click.option("--analysis-run", type=bool, help="Set analysis run status")
+@click.option(
+    "--state",
+    type=click.Choice(
+        [
+            "initialized",
+            "advancing_members",
+            "members_advanced",
+            "filter_complete",
+            "analysis_complete",
+            "cycle_complete",
+        ]
+    ),
+    help="Set the cycle state",
+)
 @pass_experiment_path
-def set_experiment(
-    experiment_path: Path, cycle: int, filter_run: bool, analysis_run: bool
-):
-    """Set the experiment state (cycle, filter run, analysis run)"""
+def set_experiment(experiment_path: Path, cycle: int, state: str):
+    """Set the experiment state (cycle number and/or cycle state)"""
 
     logger.setup("status-set-experiment", experiment_path)
     exp = experiment.Experiment(experiment_path)
+
+    from wrf_ensembly.experiment import CycleState
 
     # Validate cycle number
     if cycle is not None and (cycle < 0 or cycle >= len(exp.cycles)):
@@ -219,18 +238,21 @@ def set_experiment(
 
     # Use current values if not specified
     current_cycle = cycle if cycle is not None else exp.current_cycle_i
-    current_filter = filter_run if filter_run is not None else exp.filter_run
-    current_analysis = analysis_run if analysis_run is not None else exp.analysis_run
 
-    # Update database
-    with exp.db as db_conn:
-        db_conn.set_experiment_state(current_cycle, current_filter, current_analysis)
+    # Update cycle if changed
+    if cycle is not None:
+        exp.current_cycle_i = current_cycle
+        exp.state_machine.current_cycle_idx = current_cycle
 
-    # Update local object
-    exp.current_cycle_i = current_cycle
-    exp.filter_run = current_filter
-    exp.analysis_run = current_analysis
+    # Update state if specified
+    if state is not None:
+        cycle_state = CycleState(state)
+        exp.state_machine.current_cycle.current_state = cycle_state
+        logger.info(f"Set cycle {current_cycle} state to: {state}")
+
+    # Save to database
+    exp.save_status_to_db()
 
     logger.info(
-        f"Set experiment state - Cycle: {current_cycle}, Filter: {current_filter}, Analysis: {current_analysis}"
+        f"Set experiment state - Cycle: {current_cycle}, State: {exp.state_machine.current_cycle.current_state.value}"
     )
