@@ -3,20 +3,21 @@ Commands about handling observations in the context of an experiment (adding, re
 """
 
 import concurrent
-from concurrent.futures import ProcessPoolExecutor
 import concurrent.futures
 import json
-from pathlib import Path
 import sys
+import traceback
+from concurrent.futures import ProcessPoolExecutor
+from pathlib import Path
 
 import click
 from rich.console import Console
-from rich.table import Table
 from rich.progress import Progress, track
+from rich.table import Table
 
 from wrf_ensembly import experiment, external, observations, wrf
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
-from wrf_ensembly.console import logger, console
+from wrf_ensembly.console import console, logger
 from wrf_ensembly.utils import determine_jobs
 
 
@@ -85,6 +86,10 @@ def add(experiment_path: Path, files: list[Path], jobs: int):
                 )
             except Exception as e:
                 progress.console.print(f"[red]Error processing file: {e}[/red]")
+                progress.console.print("[red]Traceback:[/red]")
+                progress.console.print(traceback.format_exc())
+                logger.error(f"Error processing file: {e}")
+                logger.error(traceback.format_exc())
                 sys.exit(1)
 
     # Add the trimmed files to the duckDB
