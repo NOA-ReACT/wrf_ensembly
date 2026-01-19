@@ -52,3 +52,9 @@ build-backend = "hatchling.build"
 profile = "black"
 src_paths = ["wrf_ensembly"]
 float_to_top = true
+
+[dependency-groups]
+dev = [
+    "black>=25.12.0",
+    "ruff>=0.14.13",
+]
