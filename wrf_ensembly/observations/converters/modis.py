@@ -70,7 +70,7 @@ def convert_modis(
     if not HAS_PYHDF:
         raise ImportError(
             "pyhdf is required to read MODIS HDF4 files. "
-            "Install it with: pip install python-hdf4"
+            "Install it with: pip install pyhdf"
         )
 
     # Open the HDF4 file
@@ -96,6 +96,7 @@ def convert_modis(
     aod_attrs = aod_ds.attributes()
     aod_scale = aod_attrs["scale_factor"]
     aod_fill = aod_attrs["_FillValue"]
+    coord_names = tuple(aod_ds.dimensions().keys())
     aod_ds.endaccess()
 
     # Read QA flag
