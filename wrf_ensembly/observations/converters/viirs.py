@@ -158,7 +158,7 @@ def convert_viirs(
     df = pd.DataFrame(
         {
             "instrument": "VIIRS",
-            "quantity": "AOD_550",
+            "quantity": "AOD_550nm",
             "time": timestamp,
             "latitude": latitude,
             "longitude": longitude,
