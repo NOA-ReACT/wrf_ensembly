@@ -185,7 +185,7 @@ def convert_modis(
     df = pd.DataFrame(
         {
             "instrument": "MODIS",
-            "quantity": "AOD_550",
+            "quantity": "AOD_550nm",
             "time": timestamp,
             "latitude": latitude,
             "longitude": longitude,
