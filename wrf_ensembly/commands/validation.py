@@ -6,8 +6,8 @@ import pandas as pd
 import xarray as xr
 
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
-from wrf_ensembly.experiment import experiment
 from wrf_ensembly.console import logger
+from wrf_ensembly.experiment import experiment
 from wrf_ensembly.observations.mapping import QUANTITY_TO_WRF_VAR
 
 
@@ -84,6 +84,10 @@ def interpolate_model(experiment_path: Path):
             )
     needed_vars = list(needed_vars)
     logger.info(f"Need to interpolate WRF variables: {needed_vars}")
+
+    if not needed_vars:
+        logger.info("No WRF variables needed for interpolation, cannot proceed!")
+        return
 
     # Convert observations to xarray Dataset for interpolation, easier to handle with `interp()`
     obs_ds = xr.Dataset.from_dataframe(obs).set_coords(["time", "x", "y"])
