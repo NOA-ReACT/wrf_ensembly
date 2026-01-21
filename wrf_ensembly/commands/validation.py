@@ -1,14 +1,11 @@
 from pathlib import Path
 
 import click
-import duckdb
-import pandas as pd
-import xarray as xr
 
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import experiment
-from wrf_ensembly.observations.mapping import QUANTITY_TO_WRF_VAR
+from wrf_ensembly.validation import ModelInterpolation
 
 
 @click.group(name="validation", cls=GroupWithStartEndPrint)
@@ -31,106 +28,8 @@ def interpolate_model(experiment_path: Path):
     - used_in_da: A boolean indicating if the observation was used in data assimilation
     - cycle: The index of the assimilation cycle the observation was used in (if any)
     """
-
     logger.setup("validation-interpolate-model", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    where_conditions = ["downsampling_info IS NULL"]
-    if exp.cfg.validation.instruments:
-        instruments_to_use = exp.cfg.validation.instruments
-        logger.info(
-            f"Filtering observations to only use instruments: {instruments_to_use}"
-        )
-        instruments_list = ", ".join(f"'{inst}'" for inst in instruments_to_use)
-        where_conditions.append(f"instrument IN ({instruments_list})")
-
-    where_clause = " AND ".join(where_conditions)
-    obs = (
-        exp.obs._get_duckdb(read_only=True)
-        .execute(f"SELECT * FROM observations WHERE {where_clause}")
-        .fetchdf()
-    )
-
-    # Mark observations used in DA:
-    # - They must be within the DA window of a cycle (`assimilation::half_window_length_minutes`)
-    # - They must be of an instrument that is assimilated (`observations::instruments_to_assimilate`)
-    da_instruments = exp.cfg.observations.instruments_to_assimilate
-    half_window = exp.cfg.assimilation.half_window_length_minutes
-
-    obs["used_in_da"] = False
-    obs["cycle"] = pd.NA
-
-    for cycle in exp.cycles:
-        start_time = pd.to_datetime(cycle.end) - pd.Timedelta(minutes=half_window)
-        end_time = pd.to_datetime(cycle.end) + pd.Timedelta(minutes=half_window)
-
-        in_window = (obs["time"] >= start_time) & (obs["time"] <= end_time)
-        if da_instruments is not None:
-            is_da_instrument = obs["instrument"].isin(da_instruments)
-            obs.loc[in_window & is_da_instrument, "used_in_da"] = True
-            obs.loc[in_window & is_da_instrument, "cycle"] = cycle.index
-        else:
-            obs.loc[in_window, "used_in_da"] = True
-            obs.loc[in_window, "cycle"] = cycle.index
-
-    # Gather which WRF variables are needed for the observations
-    needed_vars = set()
-    for quantity in obs["quantity"].unique():
-        if quantity in QUANTITY_TO_WRF_VAR:
-            needed_vars.add(QUANTITY_TO_WRF_VAR[quantity])
-        else:
-            logger.warning(
-                f"Quantity {quantity} not found in observation mappings, cannot determine WRF variable"
-            )
-    needed_vars = list(needed_vars)
-    logger.info(f"Need to interpolate WRF variables: {needed_vars}")
-
-    if not needed_vars:
-        logger.info("No WRF variables needed for interpolation, cannot proceed!")
-        return
-
-    # Convert observations to xarray Dataset for interpolation, easier to handle with `interp()`
-    obs_ds = xr.Dataset.from_dataframe(obs).set_coords(["time", "x", "y"])
-    # Convert Timestamps to DateTimeIndex without timezone info, as xarray does not support tz-aware times
-    obs_ds["time"] = (
-        ("index",),
-        pd.DatetimeIndex(obs_ds["time"].values).tz_localize(None),
-    )
-    print(obs_ds)
-
-    # Open all model output forecast mean files as a single xarray dataset
-    # TODO Allow mean/member selection
-    forecast_mean = xr.open_mfdataset(
-        f"{exp.paths.data_forecasts}/cycle_**/forecast_mean_cycle_*.nc",
-        combine="by_coords",
-        chunks={"time": 1},
-        coords="minimal",
-    )[needed_vars]
-
-    # Interpolate the model data to the observation locations and times, convert back to dataframe
-    model_obs = forecast_mean.interp(
-        t=obs_ds["time"], x=obs_ds["x"], y=obs_ds["y"]
-    ).compute()
-
-    model_obs_df = model_obs.to_dataframe().reset_index()
-
-    # At this point, the dataframe contains one column per WRF variable, we want to keep
-    # only the original quantity for each variable
-    def get_column_that_matches_quantity(row):
-        # We have to grab the quantity from the original obs dataframe
-        quantity = str(obs.loc[row["index"], "quantity"])
-        var_name = QUANTITY_TO_WRF_VAR.get(quantity, None)
-        if var_name is not None and var_name in row:
-            return row[var_name]
-        else:
-            return pd.NA
-
-    model_obs_df["model_value"] = model_obs_df.apply(
-        get_column_that_matches_quantity, axis=1
-    )
-
-    # Put the model_value in the original dataframe
-    obs["model_value"] = model_obs_df["model_value"]
-
-    output_path = exp.paths.data / "model_interpolated.parquet"
-    obs.to_parquet(output_path)
+    interpolation = ModelInterpolation(exp)
+    interpolation.run()
