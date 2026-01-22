@@ -6,8 +6,8 @@ from typing import Any, Dict, Literal, Optional
 
 import rich
 import tomli
-from mashumaro.mixins.toml import DataClassTOMLMixin
 from mashumaro.config import BaseConfig
+from mashumaro.mixins.toml import DataClassTOMLMixin
 from mashumaro.types import SerializationStrategy
 
 from wrf_ensembly.console import console
@@ -331,36 +331,14 @@ class FirstDeparturesRegimeConfig:
 
 
 @dataclass
-class FirstDeparturesOutputConfig:
-    """Configuration for first departures analysis output."""
-
-    generate_plots: bool = True
-    """Whether to generate plots."""
-
-    save_statistics: bool = True
-    """Whether to save statistics tables."""
-
-    plot_format: str = "png"
-    """Format for saved plots (png, pdf, svg, etc.)."""
-
-
-@dataclass
 class FirstDeparturesConfig:
     """Configuration for first departures analysis."""
-
-    enabled: bool = False
-    """Whether first departures analysis is enabled."""
 
     quantities: list[str] = field(default_factory=list)
     """List of quantities to analyze. If empty, will analyze all available quantities."""
 
     regimes: list[FirstDeparturesRegimeConfig] = field(default_factory=list)
     """Regime configurations for different observation types."""
-
-    output: FirstDeparturesOutputConfig = field(
-        default_factory=FirstDeparturesOutputConfig
-    )
-    """Output configuration for plots and statistics."""
 
 
 @dataclass
