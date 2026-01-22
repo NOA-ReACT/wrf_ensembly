@@ -182,7 +182,9 @@ class FirstDeparturesAnalysis:
 
         ax.set_xlabel("First Departure (O - B)")
         ax.set_ylabel("Density")
-        ax.set_title(f"Histogram of First Departures for {self.quantity}")
+        ax.set_title(
+            f"{self.exp.cfg.metadata.name} - Histogram of First Departures for {self.quantity}"
+        )
         ax.axvline(0, color="red", linestyle="--", alpha=0.5, label="Zero bias")
         ax.legend()
         ax.grid(True, alpha=0.3)
@@ -225,7 +227,9 @@ class FirstDeparturesAnalysis:
         )
         axes[0].axhline(0, color="red", linestyle="--", alpha=0.5)
         axes[0].set_ylabel("First Departure (O-B)")
-        axes[0].set_title(f"Time Series of First Departures for {self.quantity}")
+        axes[0].set_title(
+            f"{self.exp.cfg.metadata.name} - Time Series of First Departures for {self.quantity}"
+        )
         axes[0].legend()
         axes[0].grid(True, alpha=0.3)
 
@@ -313,7 +317,7 @@ class FirstDeparturesAnalysis:
                 vmax=vmax,
                 transform=ccrs.PlateCarree(),
             )
-            ax.set_title(f"{title} - {self.quantity}")
+            ax.set_title(f"{self.exp.cfg.metadata.name} - {title} - {self.quantity}")
             fig.colorbar(pcm, ax=ax, orientation="horizontal", pad=0.05, shrink=0.8)
 
         plt.tight_layout()
@@ -372,7 +376,9 @@ class FirstDeparturesAnalysis:
 
         # Box plot
         df.boxplot(column="departure", by="regime", ax=axes[0], showfliers=False)
-        axes[0].set_title(f"First Departure Distribution by Regime - {self.quantity}")
+        axes[0].set_title(
+            f"{self.exp.cfg.metadata.name} - First Departure Distribution by Regime - {self.quantity}"
+        )
         axes[0].set_xlabel("Regime")
         axes[0].set_ylabel("First Departure (O - B)")
         axes[0].axhline(0, color="red", linestyle="--", alpha=0.5)
@@ -381,7 +387,9 @@ class FirstDeparturesAnalysis:
 
         # Std by regime
         regime_stats["std"].plot(kind="bar", ax=axes[1], color="steelblue")
-        axes[1].set_title(f"Standard Deviation by Regime - {self.quantity}")
+        axes[1].set_title(
+            f"{self.exp.cfg.metadata.name} - Standard Deviation by Regime - {self.quantity}"
+        )
         axes[1].set_ylabel("Std(First Departure)")
         axes[1].set_xlabel("Regime")
         axes[1].tick_params(axis="x", rotation=45)
