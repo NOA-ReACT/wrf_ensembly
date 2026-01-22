@@ -317,6 +317,9 @@ class ObservationsConfig:
 class FirstDeparturesRegimeConfig:
     """Configuration for regime-based first departures analysis."""
 
+    instrument: str
+    """The instrument name (e.g., 'MODIS', 'VIIRS', 'AERONET')."""
+
     quantity: str
     """The observation quantity to analyze (e.g., 'AOD_550nm', 'PM2_5_DRY')."""
 
@@ -334,11 +337,11 @@ class FirstDeparturesRegimeConfig:
 class FirstDeparturesConfig:
     """Configuration for first departures analysis."""
 
-    quantities: list[str] = field(default_factory=list)
-    """List of quantities to analyze. If empty, will analyze all available quantities."""
+    instrument_quantity_pairs: list[str] = field(default_factory=list)
+    """List of instrument.quantity pairs to analyze (e.g., ['MODIS.AOD_550nm', 'VIIRS.AOD_550nm']). If empty, will analyze all available pairs."""
 
     regimes: list[FirstDeparturesRegimeConfig] = field(default_factory=list)
-    """Regime configurations for different observation types."""
+    """Regime configurations for different instrument-quantity pairs."""
 
 
 @dataclass

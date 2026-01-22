@@ -38,17 +38,23 @@ class FirstDeparturesAnalysis:
     and uncertainty across different regimes, spatial regions, and time periods.
     """
 
-    def __init__(self, experiment: Experiment, quantity: str):
-        """Initialize first departures analysis for a specific quantity.
+    def __init__(self, experiment: Experiment, instrument: str, quantity: str):
+        """Initialize first departures analysis for a specific instrument-quantity pair.
 
         Args:
             experiment: The experiment to analyze
+            instrument: The instrument name (e.g., 'MODIS', 'VIIRS')
             quantity: The observation quantity to analyze (e.g., 'AOD_550nm')
         """
         self.exp = experiment
+        self.instrument = instrument
         self.quantity = quantity
         self.output_dir = (
-            experiment.paths.data / "validation" / "first_departures" / quantity
+            experiment.paths.data
+            / "validation"
+            / "first_departures"
+            / instrument
+            / quantity
         )
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -56,9 +62,12 @@ class FirstDeparturesAnalysis:
         self.regime_config = self._get_regime_config()
 
     def _get_regime_config(self) -> Optional[FirstDeparturesRegimeConfig]:
-        """Get regime configuration for this quantity if it exists."""
+        """Get regime configuration for this instrument-quantity pair if it exists."""
         for regime in self.exp.cfg.validation.first_departures.regimes:
-            if regime.quantity == self.quantity:
+            if (
+                regime.instrument == self.instrument
+                and regime.quantity == self.quantity
+            ):
                 return regime
         return None
 
@@ -71,13 +80,16 @@ class FirstDeparturesAnalysis:
         Returns:
             Dictionary containing paths to generated outputs and computed statistics
         """
-        logger.info(f"Running first departures analysis for {self.quantity}")
+        logger.info(
+            f"Running first departures analysis for {self.instrument}.{self.quantity}"
+        )
 
         # Compute O-B if not already present
         if "departure" not in df.columns:
             df["departure"] = df["value"] - df["model_value"]
 
         results = {
+            "instrument": self.instrument,
             "quantity": self.quantity,
             "output_dir": self.output_dir,
         }
@@ -129,7 +141,7 @@ class FirstDeparturesAnalysis:
             q75=float(departure.quantile(0.75)),
         )
 
-        logger.info(f"Statistics for {self.quantity}:")
+        logger.info(f"Statistics for {self.instrument}.{self.quantity}:")
         logger.info(f"  Count: {stats.count}")
         logger.info(f"  Bias: {stats.bias:.6f}")
         logger.info(f"  Std: {stats.std:.6f}")
@@ -147,7 +159,12 @@ class FirstDeparturesAnalysis:
             Path to the saved file
         """
         stats_file = self.output_dir / "statistics.csv"
-        df = pd.DataFrame([vars(stats)])
+        stats_dict = {
+            "instrument": self.instrument,
+            "quantity": self.quantity,
+            **vars(stats),
+        }
+        df = pd.DataFrame([stats_dict])
         df.to_csv(stats_file, index=False)
         logger.info(f"Saved statistics to {stats_file}")
         return stats_file
@@ -183,7 +200,7 @@ class FirstDeparturesAnalysis:
         ax.set_xlabel("First Departure (O - B)")
         ax.set_ylabel("Density")
         ax.set_title(
-            f"{self.exp.cfg.metadata.name} - Histogram of First Departures for {self.quantity}"
+            f"{self.exp.cfg.metadata.name} - Histogram of First Departures for {self.instrument}.{self.quantity}"
         )
         ax.axvline(0, color="red", linestyle="--", alpha=0.5, label="Zero bias")
         ax.legend()
@@ -228,7 +245,7 @@ class FirstDeparturesAnalysis:
         axes[0].axhline(0, color="red", linestyle="--", alpha=0.5)
         axes[0].set_ylabel("First Departure (O-B)")
         axes[0].set_title(
-            f"{self.exp.cfg.metadata.name} - Time Series of First Departures for {self.quantity}"
+            f"{self.exp.cfg.metadata.name} - Time Series of First Departures for {self.instrument}.{self.quantity}"
         )
         axes[0].legend()
         axes[0].grid(True, alpha=0.3)
@@ -317,7 +334,9 @@ class FirstDeparturesAnalysis:
                 vmax=vmax,
                 transform=ccrs.PlateCarree(),
             )
-            ax.set_title(f"{self.exp.cfg.metadata.name} - {title} - {self.quantity}")
+            ax.set_title(
+                f"{self.exp.cfg.metadata.name} - {title} - {self.instrument}.{self.quantity}"
+            )
             fig.colorbar(pcm, ax=ax, orientation="horizontal", pad=0.05, shrink=0.8)
 
         plt.tight_layout()
@@ -342,11 +361,11 @@ class FirstDeparturesAnalysis:
         """
         if self.regime_config is None:
             logger.warning(
-                f"No regime configuration for {self.quantity}, skipping regime analysis"
+                f"No regime configuration for {self.instrument}.{self.quantity}, skipping regime analysis"
             )
             return None, None
 
-        logger.info(f"Analyzing by regime for {self.quantity}")
+        logger.info(f"Analyzing by regime for {self.instrument}.{self.quantity}")
 
         # Create regime bins
         df = df.copy()
@@ -377,7 +396,7 @@ class FirstDeparturesAnalysis:
         # Box plot
         df.boxplot(column="departure", by="regime", ax=axes[0], showfliers=False)
         axes[0].set_title(
-            f"{self.exp.cfg.metadata.name} - First Departure Distribution by Regime - {self.quantity}"
+            f"{self.exp.cfg.metadata.name} - First Departure Distribution by Regime - {self.instrument}.{self.quantity}"
         )
         axes[0].set_xlabel("Regime")
         axes[0].set_ylabel("First Departure (O - B)")
@@ -388,7 +407,7 @@ class FirstDeparturesAnalysis:
         # Std by regime
         regime_stats["std"].plot(kind="bar", ax=axes[1], color="steelblue")
         axes[1].set_title(
-            f"{self.exp.cfg.metadata.name} - Standard Deviation by Regime - {self.quantity}"
+            f"{self.exp.cfg.metadata.name} - Standard Deviation by Regime - {self.instrument}.{self.quantity}"
         )
         axes[1].set_ylabel("Std(First Departure)")
         axes[1].set_xlabel("Regime")

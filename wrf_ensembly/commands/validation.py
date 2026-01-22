@@ -6,7 +6,7 @@ import pandas as pd
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import experiment
-from wrf_ensembly.validation import ModelInterpolation, FirstDeparturesAnalysis
+from wrf_ensembly.validation import FirstDeparturesAnalysis, ModelInterpolation
 
 
 @click.group(name="validation", cls=GroupWithStartEndPrint)
@@ -38,16 +38,16 @@ def interpolate_model(experiment_path: Path):
 
 @validation_cli.command()
 @click.option(
-    "--quantities",
+    "--instrument-quantity",
     multiple=True,
-    help="Specific quantities to analyze (overrides config). Can be specified multiple times.",
+    help="Specific instrument-quantity pairs to analyze in dot notation (e.g., MODIS.AOD_550nm). Can be specified multiple times. Overrides config.",
 )
 @pass_experiment_path
-def analyze_first_departures(experiment_path: Path, quantities: tuple):
+def analyze_first_departures(experiment_path: Path, instrument_quantity: tuple):
     """
     Analyze first departures (O-B) statistics for validation.
 
-    Generates statistical analysis and plots for each observation type in the
+    Generates statistical analysis and plots for each instrument-quantity pair in the
     model_interpolated.parquet file. This includes:
     - Overall statistics (bias, std, RMSE)
     - Histogram of first departure values
@@ -55,11 +55,12 @@ def analyze_first_departures(experiment_path: Path, quantities: tuple):
     - Spatial maps of bias and std deviation
     - Regime-based analysis (if configured)
 
-    Results are saved to data/validation/first_departures/{quantity}/
+    Results are saved to data/validation/first_departures/{instrument}/{quantity}/
 
-    Quantities to analyze are configured in config.toml under
-    [validation.first_departures]. Use --quantities to override.
+    Pairs to analyze are configured in config.toml under
+    [validation.first_departures.instrument_quantity_pairs]. Use --instrument-quantity to override.
     """
+
     logger.setup("validation-analyze-first-departures", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
@@ -75,46 +76,71 @@ def analyze_first_departures(experiment_path: Path, quantities: tuple):
     logger.info(f"Loading model interpolated data from {model_interpolated_file}")
     df = pd.read_parquet(model_interpolated_file)
 
-    # Determine which quantities to analyze
-    if quantities:
+    # Determine which instrument-quantity pairs to analyze
+    pairs_to_analyze = []
+
+    if instrument_quantity:
         # Override from command line
-        quantities_to_analyze = list(quantities)
-        logger.info(f"Analyzing quantities from command line: {quantities_to_analyze}")
-    elif exp.cfg.validation.first_departures.quantities:
+        for pair_str in instrument_quantity:
+            if "." not in pair_str:
+                logger.error(
+                    f"Invalid pair format: {pair_str}. Expected format: 'instrument.quantity'"
+                )
+                return
+            instrument, quantity = pair_str.split(".", 1)
+            pairs_to_analyze.append((instrument, quantity))
+        logger.info(
+            f"Analyzing pairs from command line: {[f'{i}.{q}' for i, q in pairs_to_analyze]}"
+        )
+    elif exp.cfg.validation.first_departures.instrument_quantity_pairs:
         # Use config
-        quantities_to_analyze = exp.cfg.validation.first_departures.quantities
-        logger.info(f"Analyzing quantities from config: {quantities_to_analyze}")
+        for pair_str in exp.cfg.validation.first_departures.instrument_quantity_pairs:
+            if "." not in pair_str:
+                logger.error(
+                    f"Invalid pair format in config: {pair_str}. Expected format: 'instrument.quantity'"
+                )
+                return
+            instrument, quantity = pair_str.split(".", 1)
+            pairs_to_analyze.append((instrument, quantity))
+        logger.info(
+            f"Analyzing pairs from config: {[f'{i}.{q}' for i, q in pairs_to_analyze]}"
+        )
     else:
-        # Use all available quantities
-        quantities_to_analyze = df["quantity"].unique().tolist()
-        logger.info(f"No quantities specified, analyzing all: {quantities_to_analyze}")
+        # Use all available pairs
+        pairs_to_analyze = df.groupby(["instrument", "quantity"]).size().index.tolist()
+        logger.info(
+            f"No pairs specified, analyzing all available: {[f'{i}.{q}' for i, q in pairs_to_analyze]}"
+        )
 
-    # Filter to quantities that exist in the data
-    available_quantities = df["quantity"].unique()
-    quantities_to_analyze = [q for q in quantities_to_analyze if q in available_quantities]
+    # Filter to pairs that exist in the data
+    available_pairs = set(df.groupby(["instrument", "quantity"]).size().index.tolist())
+    pairs_to_analyze = [
+        (i, q) for i, q in pairs_to_analyze if (i, q) in available_pairs
+    ]
 
-    if not quantities_to_analyze:
-        logger.warning("No quantities to analyze!")
+    if not pairs_to_analyze:
+        logger.warning("No pairs to analyze!")
         return
 
-    # Analyze each quantity
-    for quantity in quantities_to_analyze:
-        logger.info(f"\n{'='*60}")
-        logger.info(f"Analyzing {quantity}")
-        logger.info(f"{'='*60}")
+    # Analyze each instrument-quantity pair
+    for instrument, quantity in pairs_to_analyze:
+        logger.info(f"\n{'-' * 60}")
+        logger.info(f"Analyzing {instrument}.{quantity}")
 
-        # Filter data for this quantity
-        quantity_df = df[df["quantity"] == quantity].copy()
+        # Filter data for this instrument-quantity pair
+        pair_df = df[
+            (df["instrument"] == instrument) & (df["quantity"] == quantity)
+        ].copy()
 
-        if len(quantity_df) == 0:
-            logger.warning(f"No data found for {quantity}, skipping")
+        if len(pair_df) == 0:
+            logger.warning(f"No data found for {instrument}.{quantity}, skipping")
             continue
 
         # Run analysis
-        analysis = FirstDeparturesAnalysis(exp, quantity)
-        results = analysis.run(quantity_df)
+        analysis = FirstDeparturesAnalysis(exp, instrument, quantity)
+        results = analysis.run(pair_df)
 
-        logger.info(f"Results for {quantity}:")
+        logger.info(f"Results for {instrument}.{quantity}:")
         logger.info(f"  Output directory: {results['output_dir']}")
         if "statistics_file" in results:
             logger.info(f"  Statistics: {results['statistics_file']}")
@@ -127,5 +153,5 @@ def analyze_first_departures(experiment_path: Path, quantities: tuple):
         if "regime_plots" in results:
             logger.info(f"  Regime analysis: {results['regime_plots']}")
 
-    logger.info(f"\n{'='*60}")
+    logger.info(f"\n{'=' * 60}")
     logger.info("First departures analysis complete!")
