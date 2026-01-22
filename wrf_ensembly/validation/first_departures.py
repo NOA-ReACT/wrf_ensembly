@@ -4,15 +4,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
+import cartopy.crs as ccrs
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from scipy import stats
-import cartopy.crs as ccrs
 
+from wrf_ensembly.config import FirstDeparturesRegimeConfig
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment.experiment import Experiment
-from wrf_ensembly.config import FirstDeparturesRegimeConfig
 
 
 @dataclass
@@ -47,7 +47,9 @@ class FirstDeparturesAnalysis:
         """
         self.exp = experiment
         self.quantity = quantity
-        self.output_dir = experiment.paths.data / "validation" / "first_departures" / quantity
+        self.output_dir = (
+            experiment.paths.data / "validation" / "first_departures" / quantity
+        )
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Load regime config if available
@@ -84,24 +86,24 @@ class FirstDeparturesAnalysis:
         stats = self.compute_statistics(df)
         results["statistics"] = stats
 
-        # Save statistics if configured
-        if self.exp.cfg.validation.first_departures.output.save_statistics:
-            stats_file = self._save_statistics(stats)
-            results["statistics_file"] = stats_file
+        # Save statistics in a CSV file
+        stats_file = self._save_statistics(stats)
+        results["statistics_file"] = stats_file
 
         # Generate plots if configured
-        if self.exp.cfg.validation.first_departures.output.generate_plots:
-            results["histogram"] = self.plot_histogram(df)
-            results["timeseries"] = self.plot_timeseries(df)
-            results["spatial_maps"] = self.plot_spatial_maps(df)
+        results["histogram"] = self.plot_histogram(df)
+        results["timeseries"] = self.plot_timeseries(df)
+        results["spatial_maps"] = self.plot_spatial_maps(df)
 
-            # Regime analysis if configured
-            if self.regime_config is not None:
-                regime_stats, regime_plots = self.analyze_by_regime(df)
-                results["regime_statistics"] = regime_stats
-                results["regime_plots"] = regime_plots
+        # Regime analysis if configured
+        if self.regime_config is not None:
+            regime_stats, regime_plots = self.analyze_by_regime(df)
+            results["regime_statistics"] = regime_stats
+            results["regime_plots"] = regime_plots
 
-        logger.info(f"First departures analysis complete. Results saved to {self.output_dir}")
+        logger.info(
+            f"First departures analysis complete. Results saved to {self.output_dir}"
+        )
         return results
 
     def compute_statistics(self, df: pd.DataFrame) -> FirstDeparturesStatistics:
@@ -163,13 +165,20 @@ class FirstDeparturesAnalysis:
 
         # Plot histogram
         departure = df["departure"].dropna()
-        n, bins, patches = ax.hist(departure, bins=50, density=True, alpha=0.7,
-                                   color="steelblue", edgecolor="black", linewidth=0.5)
+        n, bins, patches = ax.hist(
+            departure,
+            bins=50,
+            density=True,
+            alpha=0.7,
+            color="steelblue",
+            edgecolor="black",
+            linewidth=0.5,
+        )
 
         # Add KDE
         kde = stats.gaussian_kde(departure)
         x_range = np.linspace(departure.min(), departure.max(), 200)
-        ax.plot(x_range, kde(x_range), 'r-', linewidth=2, label="KDE")
+        ax.plot(x_range, kde(x_range), "r-", linewidth=2, label="KDE")
 
         ax.set_xlabel("First Departure (O - B)")
         ax.set_ylabel("Density")
@@ -178,8 +187,7 @@ class FirstDeparturesAnalysis:
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-        plot_format = self.exp.cfg.validation.first_departures.output.plot_format
-        output_file = self.output_dir / f"histogram.{plot_format}"
+        output_file = self.output_dir / "histogram.png"
         fig.savefig(output_file, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
@@ -222,13 +230,14 @@ class FirstDeparturesAnalysis:
         axes[0].grid(True, alpha=0.3)
 
         # Count
-        axes[1].bar(df_hourly["time"], df_hourly["count"], width=0.04, color="gray", alpha=0.6)
+        axes[1].bar(
+            df_hourly["time"], df_hourly["count"], width=0.04, color="gray", alpha=0.6
+        )
         axes[1].set_xlabel("Time")
         axes[1].set_ylabel("Observation Count")
         axes[1].grid(True, alpha=0.3)
 
-        plot_format = self.exp.cfg.validation.first_departures.output.plot_format
-        output_file = self.output_dir / f"timeseries.{plot_format}"
+        output_file = self.output_dir / "timeseries.png"
         fig.savefig(output_file, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
@@ -245,7 +254,9 @@ class FirstDeparturesAnalysis:
             Path to the saved plot
         """
         # Get spatial resolution from config, default to 1.0
-        resolution = self.regime_config.spatial_resolution if self.regime_config else 1.0
+        resolution = (
+            self.regime_config.spatial_resolution if self.regime_config else 1.0
+        )
 
         # Bin spatially
         df = df.copy()
@@ -260,16 +271,24 @@ class FirstDeparturesAnalysis:
         )
 
         # Create grids
-        mean_grid = spatial_stats.pivot(index="lat_bin", columns="lon_bin", values="mean")
+        mean_grid = spatial_stats.pivot(
+            index="lat_bin", columns="lon_bin", values="mean"
+        )
         std_grid = spatial_stats.pivot(index="lat_bin", columns="lon_bin", values="std")
-        count_grid = spatial_stats.pivot(index="lat_bin", columns="lon_bin", values="count")
+        count_grid = spatial_stats.pivot(
+            index="lat_bin", columns="lon_bin", values="count"
+        )
 
         # Plot
         fig, axes = plt.subplots(
             3, 1, figsize=(12, 10), subplot_kw={"projection": ccrs.PlateCarree()}
         )
 
-        titles = ["Bias (Mean First Departure)", "Standard Deviation", "Observation Count"]
+        titles = [
+            "Bias (Mean First Departure)",
+            "Standard Deviation",
+            "Observation Count",
+        ]
         grids = [mean_grid, std_grid, count_grid]
         cmaps = ["RdBu_r", "viridis", "YlOrRd"]
 
@@ -299,15 +318,16 @@ class FirstDeparturesAnalysis:
 
         plt.tight_layout()
 
-        plot_format = self.exp.cfg.validation.first_departures.output.plot_format
-        output_file = self.output_dir / f"spatial_maps.{plot_format}"
+        output_file = self.output_dir / "spatial_maps.png"
         fig.savefig(output_file, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
         logger.info(f"Saved spatial maps to {output_file}")
         return output_file
 
-    def analyze_by_regime(self, df: pd.DataFrame) -> tuple[pd.DataFrame, Path]:
+    def analyze_by_regime(
+        self, df: pd.DataFrame
+    ) -> tuple[pd.DataFrame, Path] | tuple[None, None]:
         """Analyze first departures by regime.
 
         Args:
@@ -317,7 +337,9 @@ class FirstDeparturesAnalysis:
             Tuple of (statistics DataFrame, path to saved plot)
         """
         if self.regime_config is None:
-            logger.warning(f"No regime configuration for {self.quantity}, skipping regime analysis")
+            logger.warning(
+                f"No regime configuration for {self.quantity}, skipping regime analysis"
+            )
             return None, None
 
         logger.info(f"Analyzing by regime for {self.quantity}")
@@ -341,10 +363,9 @@ class FirstDeparturesAnalysis:
         )
 
         # Save statistics
-        if self.exp.cfg.validation.first_departures.output.save_statistics:
-            stats_file = self.output_dir / "regime_statistics.csv"
-            regime_stats.to_csv(stats_file)
-            logger.info(f"Saved regime statistics to {stats_file}")
+        stats_file = self.output_dir / "regime_statistics.csv"
+        regime_stats.to_csv(stats_file)
+        logger.info(f"Saved regime statistics to {stats_file}")
 
         # Plot
         fig, axes = plt.subplots(1, 2, figsize=(14, 6))
@@ -368,8 +389,7 @@ class FirstDeparturesAnalysis:
 
         plt.tight_layout()
 
-        plot_format = self.exp.cfg.validation.first_departures.output.plot_format
-        output_file = self.output_dir / f"regime_analysis.{plot_format}"
+        output_file = self.output_dir / "regime_analysis.png"
         fig.savefig(output_file, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
