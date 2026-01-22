@@ -450,6 +450,9 @@ def clean(experiment_path: Path, cycle: Optional[int], remove_wrfout: bool):
     """
     Clean up the scratch directory for the given cycle. Use after running the other
     postprocessing commands to save disk space.
+
+    Will always delete _post, _mean and _sd files. If --remove-wrfout is set, will also
+    delete the raw wrfout files.
     """
 
     logger.setup("postprocess-statistics", experiment_path)
@@ -465,6 +468,14 @@ def clean(experiment_path: Path, cycle: Optional[int], remove_wrfout: bool):
         exp.paths.scratch_analysis_path(cycle),
     ]
     for dir in scratch_dirs:
+        for f in chain(
+            dir.rglob("wrfout*_post"),
+            dir.rglob("wrfout*_mean"),
+            dir.rglob("wrfout*_sd"),
+        ):
+            logger.info(f"Removing {f}")
+            f.unlink()
+
         if remove_wrfout:
             for f in dir.rglob("wrfout*"):
                 logger.info(f"Removing {f}")
