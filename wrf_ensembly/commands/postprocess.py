@@ -8,9 +8,8 @@ from typing import Optional
 import click
 import xarray as xr
 
-from wrf_ensembly import experiment, external, nco, processors
+from wrf_ensembly import experiment, external, nco, processors, utils
 from wrf_ensembly import statistics as stats
-from wrf_ensembly import utils
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.processors import ProcessingContext, process_file_with_pipeline
@@ -153,6 +152,13 @@ def process_pipeline(
                 file_path = member_dir / wrfout_filename
                 if file_path.exists():
                     files_to_process.append(file_path)
+
+    # Ensure we don't process the file that matches the cycle start time
+    # Usually this is removed in `Experiment::advance_member` but might still exist
+    # if the execution was interrupted mid-run
+    cycle_start_time = exp.cycles[cycle].start
+    offending_file_name = f"wrfout_d01_{cycle_start_time.strftime('%Y-%m-%d_%H:%M:%S')}"
+    files_to_process = [f for f in files_to_process if f.name != offending_file_name]
 
     logger.info(f"Found {len(files_to_process)} files to process")
 
