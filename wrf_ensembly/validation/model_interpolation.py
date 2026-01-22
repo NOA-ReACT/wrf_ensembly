@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import xarray as xr
 
@@ -26,7 +27,7 @@ class ModelInterpolation:
         """
         self.exp = experiment
 
-    def run(self) -> Path:
+    def run(self) -> Path | None:
         """Run the model interpolation.
 
         Creates a parquet file containing observations with an additional
@@ -34,7 +35,7 @@ class ModelInterpolation:
         each observation location and time.
 
         Returns:
-            Path to the output model_interpolated.parquet file
+            Path to the output model_interpolated.parquet file, None on failure
         """
         obs = self._load_observations()
         obs = self._mark_da_usage(obs)
@@ -167,7 +168,11 @@ class ModelInterpolation:
 
         Returns:
             DataFrame with interpolated model values
+
+        Raises:
+            ValueError: If duplicate coordinates are found in forecast_mean
         """
+
         # Open all model output forecast mean files as a single xarray dataset
         # TODO: Allow mean/member selection
         forecast_mean = xr.open_mfdataset(
@@ -176,6 +181,25 @@ class ModelInterpolation:
             chunks={"time": 1},
             coords="minimal",
         )[needed_vars]
+
+        # Check forecast_mean coordinates for duplicates
+        for coord_name in ["t", "x", "y"]:
+            coord_vals = forecast_mean.coords[coord_name].values
+            unique, counts = np.unique(coord_vals, return_counts=True)
+            duplicates = unique[counts > 1]
+
+            if len(duplicates) > 0:
+                print(
+                    f"Duplicate values found in forecast_mean coordinate '{coord_name}':"
+                )
+                for dup in duplicates:
+                    indices = np.where(coord_vals == dup)[0]
+                    print(f"  Value: {dup}")
+                    print(f"  Appears {len(indices)} times at indices: {indices}")
+
+                raise ValueError(
+                    f"Duplicate values found in forecast_mean coordinate '{coord_name}': {duplicates}"
+                )
 
         # Interpolate the model data to observation locations and times
         model_obs = forecast_mean.interp(
@@ -201,6 +225,7 @@ class ModelInterpolation:
         Returns:
             Observations DataFrame with 'model_value' column added
         """
+
         def get_column_that_matches_quantity(row):
             # Get the quantity from the original obs dataframe
             quantity = str(obs.loc[row["index"], "quantity"])
