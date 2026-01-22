@@ -314,11 +314,66 @@ class ObservationsConfig:
 
 
 @dataclass
+class FirstDeparturesRegimeConfig:
+    """Configuration for regime-based first departures analysis."""
+
+    quantity: str
+    """The observation quantity to analyze (e.g., 'AOD_550nm', 'PM2_5_DRY')."""
+
+    bins: list[float]
+    """Bin edges for regime classification. Use float('inf') for unbounded upper limit."""
+
+    labels: list[str]
+    """Labels for each regime (length should be len(bins) - 1)."""
+
+    spatial_resolution: float = 1.0
+    """Resolution in degrees for spatial binning (default: 1.0)."""
+
+
+@dataclass
+class FirstDeparturesOutputConfig:
+    """Configuration for first departures analysis output."""
+
+    generate_plots: bool = True
+    """Whether to generate plots."""
+
+    save_statistics: bool = True
+    """Whether to save statistics tables."""
+
+    plot_format: str = "png"
+    """Format for saved plots (png, pdf, svg, etc.)."""
+
+
+@dataclass
+class FirstDeparturesConfig:
+    """Configuration for first departures analysis."""
+
+    enabled: bool = False
+    """Whether first departures analysis is enabled."""
+
+    quantities: list[str] = field(default_factory=list)
+    """List of quantities to analyze. If empty, will analyze all available quantities."""
+
+    regimes: list[FirstDeparturesRegimeConfig] = field(default_factory=list)
+    """Regime configurations for different observation types."""
+
+    output: FirstDeparturesOutputConfig = field(
+        default_factory=FirstDeparturesOutputConfig
+    )
+    """Output configuration for plots and statistics."""
+
+
+@dataclass
 class ValidationConfig:
     """Configuration related to validation of the experiment"""
 
     instruments: list[str] = field(default_factory=lambda: [])
     """List of instruments to use for validation, if missing it will use all available instruments."""
+
+    first_departures: FirstDeparturesConfig = field(
+        default_factory=FirstDeparturesConfig
+    )
+    """Configuration for first departures (O-B) analysis."""
 
 
 @dataclass
