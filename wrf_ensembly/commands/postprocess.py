@@ -1,22 +1,28 @@
-import concurrent.futures
+"""
+Postprocessing commands for ensemble WRF output
+"""
+
 import re
 import sys
-from itertools import chain
 from pathlib import Path
 from typing import Optional
 
 import click
 import xarray as xr
 
-from wrf_ensembly import experiment, external, nco, processors, utils
-from wrf_ensembly import statistics as stats
+from wrf_ensembly import experiment, processors
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
-from wrf_ensembly.processors import ProcessingContext, process_file_with_pipeline
+from wrf_ensembly.postprocess.streaming_pipeline import (
+    process_cycle_single_member,
+    process_cycle_streaming,
+)
+from wrf_ensembly.postprocess.utils import apply_compression
 
 
 @click.group(name="postprocess", cls=GroupWithStartEndPrint)
 def postprocess_cli():
+    """Postprocessing commands for ensemble output."""
     pass
 
 
@@ -25,11 +31,12 @@ def postprocess_cli():
 def print_variables_to_keep(experiment_path: Path):
     """
     Prints which variables will be kept in the wrfout files after postprocessing.
-    This is useful to check if the variables you want to keep are actually kept or check
-    how the regex filters are applied.
 
-    The variables are defined in the `PostprocessConfig:variables_to_keep` variable of the
-    configuration file.
+    This is useful to check if the variables you want to keep are actually kept
+    or to check how the regex filters are applied.
+
+    The variables are defined in the `PostprocessConfig:variables_to_keep` variable
+    of the configuration file.
 
     Cycle 0 output for member 0 must exist for this command to work.
     """
@@ -77,44 +84,49 @@ def print_variables_to_keep(experiment_path: Path):
 @click.option(
     "--cycle",
     type=int,
-    help="Cycle to compute statistics for. Will compute for current cycle if missing.",
-)
-@click.option(
-    "--jobs",
-    type=click.IntRange(min=0, max=None),
-    help="How many files to process in parallel",
+    help="Cycle to process. Defaults to current cycle.",
 )
 @click.option(
     "--only-last-timestep",
     is_flag=True,
     default=False,
-    help="If set, only process the last timestep of each cycle. A time-saving measure if you are only interested in the end-of-cycle data.",
+    help="Only process the last timestep of the cycle.",
 )
 @pass_experiment_path
-def process_pipeline(
+def run(
     experiment_path: Path,
     cycle: Optional[int],
-    jobs: Optional[int],
     only_last_timestep: bool,
 ):
     """
-    Apply the configured data processor pipeline to output files.
+    Run the complete postprocessing pipeline for a single cycle.
 
-    This command replaces apply-scripts with a more efficient plugin-based approach
-    that processes data in memory using a configurable pipeline of DataProcessor instances.
+    Processes all ensemble members through the configured processor pipeline,
+    computes ensemble statistics (mean and standard deviation), and writes
+    final output files directly without intermediate files.
+
+    This command processes ONE cycle at a time with no side effects, making it
+    safe to run multiple instances in parallel for different cycles:
+
+    \b
+        # Using GNU parallel
+        parallel -j 4 wrf_ensembly postprocess run --cycle {} ::: {0..23}
+
+    \b
+        # Using SLURM array jobs
+        #SBATCH --array=0-23
+        wrf_ensembly postprocess run --cycle $SLURM_ARRAY_TASK_ID
     """
 
-    logger.setup("postprocess-process-pipeline", experiment_path)
+    logger.setup("postprocess-run", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
     if cycle is None:
         cycle = exp.current_cycle_i
 
-    logger.info(f"Cycle: {exp.cycles[cycle]}")
+    logger.info(f"Processing cycle {cycle}: {exp.cycles[cycle]}")
 
-    jobs = utils.determine_jobs(jobs)
-    logger.info(f"Using {jobs} jobs")
-
+    # Create processor pipeline
     try:
         pipeline = processors.create_pipeline_from_config(
             exp.cfg.postprocess.processors
@@ -126,336 +138,75 @@ def process_pipeline(
         logger.error(f"Failed to create processor pipeline: {e}")
         sys.exit(1)
 
-    scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
-    scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
+    n_members = exp.cfg.assimilation.n_members
+    logger.info(f"Ensemble size: {n_members} members")
 
-    # Clean any old _post files first
-    for f in scratch_forecast_dir.rglob("wrfout*_post"):
-        logger.debug(f"Removing old file {f}")
-        f.unlink()
-    for f in scratch_analysis_dir.rglob("wrfout*_post"):
-        logger.debug(f"Removing old file {f}")
-        f.unlink()
-
-    if not only_last_timestep:
-        files_to_process = list(scratch_analysis_dir.rglob("member_*/wrfout*")) + list(
-            scratch_forecast_dir.rglob("member_*/wrfout*")
-        )
-        # Filter out any _post files that might still exist, just in case?
-        files_to_process = [f for f in files_to_process if not f.name.endswith("_post")]
+    # Choose processing function based on ensemble size
+    if n_members == 1:
+        logger.info("Single member ensemble - skipping statistics computation")
+        process_func = process_cycle_single_member
     else:
-        cycle_end = exp.cycles[cycle].end
-        wrfout_filename = f"wrfout_d01_{cycle_end.strftime('%Y-%m-%d_%H:%M:%S')}"
-        files_to_process = []
-        for d in [scratch_analysis_dir, scratch_forecast_dir]:
-            for member_dir in d.glob("member_*"):
-                file_path = member_dir / wrfout_filename
-                if file_path.exists():
-                    files_to_process.append(file_path)
+        process_func = process_cycle_streaming
 
-    # Ensure we don't process the file that matches the cycle start time
-    # Usually this is removed in `Experiment::advance_member` but might still exist
-    # if the execution was interrupted mid-run
-    cycle_start_time = exp.cycles[cycle].start
-    offending_file_name = f"wrfout_d01_{cycle_start_time.strftime('%Y-%m-%d_%H:%M:%S')}"
-    files_to_process = [f for f in files_to_process if f.name != offending_file_name]
-
-    logger.info(f"Found {len(files_to_process)} files to process")
-
-    if len(files_to_process) == 0:
-        logger.warning("No files found to process")
-        sys.exit(1)
-
-    # Create processor arguments for each file
-    process_args = []
-    for file_path in files_to_process:
-        # Extract metadata from file path
-        member_match = re.search(r"member_(\d+)", str(file_path))
-        member_id = int(member_match.group(1)) if member_match else 0
-
-        # Create output file path with _post suffix
-        output_file = file_path.parent / f"{file_path.name}_post"
-
-        context = ProcessingContext(
-            member=member_id,
-            cycle=cycle,
-            input_file=file_path,
-            output_file=output_file,
-            config=exp.cfg,
-        )
-
-        process_args.append(
-            (file_path, output_file, exp.cfg.postprocess.processors, context)
-        )
-
-    logger.info(f"Processing {len(files_to_process)} files through pipeline")
-    with concurrent.futures.ProcessPoolExecutor(max_workers=jobs) as executor:
-        futures = [
-            executor.submit(process_file_with_pipeline, args) for args in process_args
-        ]
-
-        # Wait for all to complete and handle any errors
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                future.result()
-            except Exception as e:
-                logger.error(f"Pipeline processing failed: {e}")
-                sys.exit(1)
-
-    logger.info("Pipeline processing completed successfully")
-
-
-@postprocess_cli.command()
-@click.option(
-    "--cycle",
-    type=int,
-    help="Cycle to compute statistics for. Will compute for all current cycle if missing.",
-)
-@click.option(
-    "--jobs",
-    type=click.IntRange(min=0, max=None),
-    help="How many files to process in parallel",
-)
-@pass_experiment_path
-def statistics(
-    experiment_path: Path,
-    cycle: Optional[int],
-    jobs: int,
-):
-    """
-    Calculates the ensemble mean and standard deviation from the forecast/analysis files of given cycle.
-    This function reads the `*_post` files created by the `wrf_post` and, optionally, `apply_scripts` commands.
-    """
-
-    logger.setup("postprocess-statistics", experiment_path)
-    exp = experiment.Experiment(experiment_path)
-
-    if cycle is None:
-        cycle = exp.current_cycle_i
-    logger.info(f"Cycle: {exp.cycles[cycle]}")
-
-    jobs = utils.determine_jobs(jobs)
-    logger.info(f"Using {jobs} jobs")
-
-    # Escape hatch when only one member is present
-    if exp.cfg.assimilation.n_members == 1:
-        logger.warning(
-            "Only one member, copying file over unchanged, no standard deviation."
-        )
-
-        analysis_path = exp.paths.scratch_analysis_path(cycle) / "member_00"
-        forecast_path = exp.paths.scratch_forecasts_path(cycle) / "member_00"
-        print(forecast_path)
-        for f in chain(
-            analysis_path.rglob("wrfout*_post"),
-            forecast_path.rglob("wrfout*_post"),
-        ):
-            print(f)
-            target = f.parent.parent / f.name.replace("_post", "_mean")
-            utils.copy(f, target)
-
-        return
-
-    # We have to use `stats.compute_ensemble_statistics` once for each output file in the cycle (both forecast and analysis)
-    # First, find out how many output files we have by checking the first member
-    args: list[tuple[list[Path], tuple[Path, Path]]] = []
-
-    scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
-    forecast_filenames = [
-        x.name for x in scratch_forecast_dir.rglob("member_00/wrfout*_post")
-    ]
-    for name in forecast_filenames:
-        output_mean_file = scratch_forecast_dir / name.replace("_post", "_mean")
-        output_sd_file = scratch_forecast_dir / name.replace("_post", "_sd")
-
-        input_files = [
-            scratch_forecast_dir / f"member_{i:02d}/{name}"
-            for i in range(exp.cfg.assimilation.n_members)
-        ]
-
-        args.append((input_files, (output_mean_file, output_sd_file)))
-
-    # Now do the same for the analysis files
-    scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
-    analysis_filenames = [
-        x.name for x in scratch_analysis_dir.rglob("member_00/wrfout*_post")
-    ]
-    for name in analysis_filenames:
-        output_mean_file = scratch_analysis_dir / name.replace("_post", "_mean")
-        output_sd_file = scratch_analysis_dir / name.replace("_post", "_sd")
-
-        input_files = [
-            scratch_analysis_dir / f"member_{i:02d}/{name}"
-            for i in range(exp.cfg.assimilation.n_members)
-        ]
-
-        args.append((input_files, (output_mean_file, output_sd_file)))
-
-    logger.info(f"Found {len(args)} filesets to process")
-
-    # Call `compute_ensemble_statistics` for each fileset, in parallel
-    with concurrent.futures.ProcessPoolExecutor(max_workers=jobs) as executor:
-        futures = []
-        for input_files, output_files in args:
-            futures.append(
-                executor.submit(
-                    stats.compute_ensemble_statistics,
-                    input_files,
-                    output_files[0],
-                    output_files[1],
-                )
-            )
-
-        for res in concurrent.futures.as_completed(futures):
-            res.result()
-
-    logger.info("All files processed successfully")
-
-
-@postprocess_cli.command()
-@click.option(
-    "--cycle",
-    type=int,
-    help="Cycle to compute statistics for. Will compute for all current cycle if missing.",
-)
-@click.option(
-    "--jobs",
-    type=click.IntRange(min=0, max=None),
-    default=4,
-    help="How many NCO commands to execute in parallel",
-)
-@pass_experiment_path
-def concatenate(
-    experiment_path: Path,
-    cycle: Optional[int],
-    jobs: int,
-):
-    """
-    Concatenates all output files (mean and standard deviation) into two files, one for analysis
-    and one for forecast. It uses the `_mean` and `_sd` files created by the `statistics` command.
-    """
-
-    logger.setup("postprocess-statistics", experiment_path)
-    exp = experiment.Experiment(experiment_path)
-
-    if cycle is None:
-        cycle = exp.current_cycle_i
-
-    commands = []
-
-    # Prepare compression related arguments
-    cmp_args = []
-    if len(exp.cfg.postprocess.ppc_filter) > 0:
-        cmp_args = ["--ppc", exp.cfg.postprocess.ppc_filter]
-    if len(exp.cfg.postprocess.compression_filters) > 0:
-        cmp_args.append(f"--cmp={exp.cfg.postprocess.compression_filters}")
-
-    if len(cmp_args) == 0:
-        logger.warning("No compression filters set, output files will be uncompressed")
-    else:
-        logger.info(f"Using compression filters: {' '.join(cmp_args)}")
-
-    # Find all forecast files
-    forecast_dir = exp.paths.forecast_path(cycle)
-    scratch_forecast_dir = exp.paths.scratch_forecasts_path(cycle)
-    forecast_files = sorted(scratch_forecast_dir.rglob("*_mean"))
-    if len(forecast_files) > 0:
-        commands.append(
-            nco.concatenate(
-                exp.cfg.postprocess.ncrcat_cmd,
-                forecast_files,
-                forecast_dir / f"forecast_mean_cycle_{cycle:03d}.nc",
-                cmp_args,
-            )
-        )
-    forecast_files = sorted(scratch_forecast_dir.rglob("*_sd"))
-    if len(forecast_files) > 0:
-        commands.append(
-            nco.concatenate(
-                exp.cfg.postprocess.ncrcat_cmd,
-                forecast_files,
-                forecast_dir / f"forecast_sd_cycle_{cycle:03d}.nc",
-                cmp_args,
-            )
-        )
-
-    # Find all analysis files
-    analysis_dir = exp.paths.analysis_path(cycle)
-    scratch_analysis_dir = exp.paths.scratch_analysis_path(cycle)
-    analysis_files = sorted(scratch_analysis_dir.rglob("*_mean"))
-    if len(analysis_files) > 0:
-        commands.append(
-            nco.concatenate(
-                exp.cfg.postprocess.ncrcat_cmd,
-                analysis_files,
-                analysis_dir / f"analysis_mean_cycle_{cycle:03d}.nc",
-                cmp_args,
-            )
-        )
-    analysis_files = sorted(scratch_analysis_dir.rglob("*_sd"))
-    if len(analysis_files) > 0:
-        commands.append(
-            nco.concatenate(
-                exp.cfg.postprocess.ncrcat_cmd,
-                analysis_files,
-                analysis_dir / f"analysis_sd_cycle_{cycle:03d}.nc",
-                cmp_args,
-            )
-        )
-
-    # Concatenate per-member if enabled
-    if exp.cfg.postprocess.keep_per_member:
-        for i in range(exp.cfg.assimilation.n_members):
-            forecast_files = list(
-                scratch_forecast_dir.glob(f"member_{i:02d}/wrfout*_post")
-            )
-            commands.append(
-                nco.concatenate(
-                    exp.cfg.postprocess.ncrcat_cmd,
-                    sorted(forecast_files),
-                    forecast_dir / f"forecast_member_{i:02d}_cycle_{cycle:03d}.nc",
-                    cmp_args,
-                )
-            )
-
-    failure = False
-    logger.info(
-        f"Executing {len(commands)} nco commands in parallel, using {jobs} jobs"
+    # Process forecast files
+    logger.info("Processing forecast files...")
+    forecast_result = process_func(
+        exp, cycle, pipeline, source="forecast", only_last_timestep=only_last_timestep
     )
-    for res in external.run_in_parallel(commands, jobs):
-        if res.returncode != 0:
-            logger.error(f"nco command failed with exit code {res.returncode}")
-            logger.error(res.output)
-            failure = True
+    if forecast_result is None:
+        logger.warning("No forecast files found to process")
+    else:
+        if isinstance(forecast_result, tuple):
+            logger.info(
+                f"Forecast output: {forecast_result[0].name}, {forecast_result[1].name}"
+            )
+        else:
+            logger.info(f"Forecast output: {forecast_result.name}")
 
-    if failure:
-        logger.error("One or more nco commands failed, exiting")
-        sys.exit(1)
+    # Process analysis files
+    logger.info("Processing analysis files...")
+    analysis_result = process_func(
+        exp, cycle, pipeline, source="analysis", only_last_timestep=only_last_timestep
+    )
+    if analysis_result is None:
+        logger.warning("No analysis files found to process")
+    else:
+        if isinstance(analysis_result, tuple):
+            logger.info(
+                f"Analysis output: {analysis_result[0].name}, {analysis_result[1].name}"
+            )
+        else:
+            logger.info(f"Analysis output: {analysis_result.name}")
+
+    # Apply NCO compression if configured
+    if exp.cfg.postprocess.compression_filters or exp.cfg.postprocess.ppc_filter:
+        logger.info("Applying NCO compression to output files...")
+        apply_compression(exp, cycle)
+
+    logger.info(f"Cycle {cycle} postprocessing complete")
 
 
 @postprocess_cli.command()
 @click.option(
     "--cycle",
     type=int,
-    help="Cycle to clean up. Will clean for current cycle if missing.",
+    help="Cycle to clean up. Defaults to current cycle.",
 )
 @click.option(
-    "--remove-wrfout",
+    "--remove-wrfout/--keep-wrfout",
     default=True,
-    is_flag=True,
-    help="Remove the raw wrfout files",
+    help="Remove the raw wrfout files (default: remove).",
 )
 @pass_experiment_path
 def clean(experiment_path: Path, cycle: Optional[int], remove_wrfout: bool):
     """
-    Clean up the scratch directory for the given cycle. Use after running the other
-    postprocessing commands to save disk space.
+    Clean up the scratch directory for the given cycle.
 
-    Will always delete _post, _mean and _sd files. If --remove-wrfout is set, will also
-    delete the raw wrfout files.
+    Use after running the postprocessing pipeline to save disk space.
+    By default, removes raw wrfout files. Use --keep-wrfout to preserve them.
     """
 
-    logger.setup("postprocess-statistics", experiment_path)
+    logger.setup("postprocess-clean", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
     if cycle is None:
@@ -467,16 +218,12 @@ def clean(experiment_path: Path, cycle: Optional[int], remove_wrfout: bool):
         exp.paths.scratch_forecasts_path(cycle),
         exp.paths.scratch_analysis_path(cycle),
     ]
-    for dir in scratch_dirs:
-        for f in chain(
-            dir.rglob("wrfout*_post"),
-            dir.rglob("wrfout*_mean"),
-            dir.rglob("wrfout*_sd"),
-        ):
-            logger.info(f"Removing {f}")
-            f.unlink()
+
+    for scratch_dir in scratch_dirs:
+        if not scratch_dir.exists():
+            continue
 
         if remove_wrfout:
-            for f in dir.rglob("wrfout*"):
+            for f in scratch_dir.rglob("wrfout*"):
                 logger.info(f"Removing {f}")
                 f.unlink()

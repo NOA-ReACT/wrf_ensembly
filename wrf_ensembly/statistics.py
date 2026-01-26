@@ -1,5 +1,8 @@
 """
-Python implementation for ensemble statistics, possible candidate for replacing nco and cdo.
+Statistics utilities for ensemble postprocessing.
+
+Provides Welford's algorithm for online computation of mean and variance,
+as well as utilities for creating NetCDF files from templates.
 """
 
 from dataclasses import dataclass
@@ -8,6 +11,7 @@ from typing import Literal
 
 import netCDF4
 import numpy as np
+import xarray as xr
 
 from wrf_ensembly.console import logger
 
@@ -171,69 +175,143 @@ def welford_finalise(
     return state.mean, stddev
 
 
-def compute_ensemble_statistics(
-    member_files: list[Path],
-    output_mean_file: Path,
-    output_std_file: Path,
-    zlib=True,
-    complevel: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9] = 2,
-):
+def get_structure_from_xarray(
+    ds: xr.Dataset, reference_time: np.datetime64 | None = None
+) -> NetCDFFile:
     """
-    Compute ensemble mean and standard deviation for a list of member files.
-    The output files are created with the same structure as the member files.
+    Extract NetCDFFile structure from an xarray Dataset.
 
-    Statistics will not be computed for coordinate variables or non-numeric variables.
+    This is useful when you have an in-memory processed dataset and need
+    to create output files with the same structure.
 
     Args:
-        member_files: List of paths to the member files for a given cycle.
-        output_mean_file: Path to the output mean file.
-        output_std_file: Path to the output standard deviation file.
-        zlib: Whether to use zlib compression.
-        complevel: If using zlib, what compression level to use (0-9).
+        ds: xarray Dataset to extract structure from.
+        reference_time: Reference time for the time coordinate. If provided,
+            the time variable will be stored as integer minutes since this time.
+            If None and the time variable is datetime64, uses the first time value.
+
+    Returns:
+        NetCDFFile with dimensions, variables, and attributes from the dataset.
     """
+    dims: dict[str, int] = {}
+    variables: dict[str, NetCDFVariable] = {}
+    attrs: dict[str, str] = {}
 
-    if not member_files:
-        raise ValueError("No member files provided.")
+    for dim_name, dim_size in ds.sizes.items():
+        dims[dim_name] = dim_size
 
-    output_mean_file.unlink(missing_ok=True)
-    output_std_file.unlink(missing_ok=True)
+    for var_name in list(ds.data_vars) + list(ds.coords):
+        var = ds[var_name]
+        var_attrs = dict(var.attrs)
 
-    template = get_structure(member_files[0])
-    mean_ds = create_file(output_mean_file, template, zlib, complevel)
-    std_ds = create_file(output_std_file, template, zlib, complevel)
+        # Special handling for time coordinate (datetime64 -> int64 minutes)
+        if var_name == "t" and np.issubdtype(var.dtype, np.datetime64):
+            # Determine reference time
+            if reference_time is None:
+                reference_time = var.values.flatten()[0]
 
-    results: dict[str, WelfordState] = {}
-    for i, path in enumerate(member_files):
-        logger.info(f"Processing member {i + 1}/{len(member_files)}: {path}")
+            # Convert reference time to string for units attribute
+            ref_time_str = np.datetime_as_string(reference_time, unit="s").replace(
+                "T", " "
+            )
+            var_attrs["units"] = f"minutes since {ref_time_str}"
+            var_attrs["calendar"] = "standard"
 
-        # For each variable, run welford_update and keep the state in `results`
-        with netCDF4.Dataset(path, "r") as ds:
-            for var_name, var in ds.variables.items():
-                # Skip non-numeric variables and coordinate variables
-                if (
-                    not np.issubdtype(var.dtype, np.number)
-                    or var_name in COORDINATE_VARIABLES
-                ):
-                    continue
+            nc_var = NetCDFVariable(
+                name=var_name,
+                dimensions=var.dims,
+                attributes=var_attrs,
+                dtype=np.dtype("int32"),
+            )
+            # Don't store constant value - time will be written incrementally
+        else:
+            nc_var = NetCDFVariable(
+                name=var_name,
+                dimensions=var.dims,
+                attributes=var_attrs,
+                dtype=var.dtype,
+            )
 
-                if var_name not in results:
-                    results[var_name] = WelfordState(
-                        0, np.zeros(var.shape), np.zeros(var.shape)
-                    )
+            # Store constant values for coordinate variables and non-numeric types
+            if (
+                not np.issubdtype(var.dtype, np.number)
+                or var_name in COORDINATE_VARIABLES
+            ):
+                nc_var.constant_value = var.values
 
-                welford_update(results[var_name], var[:])
+        variables[var_name] = nc_var
 
-    # Then use `welford_finalise` to get the mean and stddev for each variable,
-    # which are then written to the output files.
-    for var_name, state in results.items():
-        mean, stddev = welford_finalise(state)
+    attrs = dict(ds.attrs)
 
-        # Write mean and stddev to the output files
-        mean_var = mean_ds.variables[var_name]
-        std_var = std_ds.variables[var_name]
+    return NetCDFFile(dims, variables, attrs)
 
-        mean_var[:] = mean
-        std_var[:] = stddev
 
-    mean_ds.close()
-    std_ds.close()
+def create_welford_accumulators(template_ds: xr.Dataset) -> dict[str, WelfordState]:
+    """
+    Initialize Welford accumulators from a template xarray Dataset.
+
+    Creates accumulators for all numeric, non-coordinate variables in the dataset.
+
+    Args:
+        template_ds: xarray Dataset to use as a template for variable shapes.
+
+    Returns:
+        Dictionary mapping variable names to their WelfordState accumulators.
+    """
+    accumulators = {}
+
+    for var_name in template_ds.data_vars:
+        if var_name in COORDINATE_VARIABLES:
+            continue
+
+        var = template_ds[var_name]
+        if not np.issubdtype(var.dtype, np.number):
+            continue
+
+        shape = var.shape
+        accumulators[var_name] = WelfordState(
+            count=0,
+            mean=np.zeros(shape, dtype=np.float64),
+            m2=np.zeros(shape, dtype=np.float64),
+        )
+
+    return accumulators
+
+
+def update_accumulators_from_dataset(
+    accumulators: dict[str, WelfordState],
+    ds: xr.Dataset,
+) -> None:
+    """
+    Update Welford accumulators with data from an xarray Dataset (in-place).
+
+    Args:
+        accumulators: Dictionary of WelfordState objects to update.
+        ds: xarray Dataset containing the new values.
+    """
+    for var_name, state in accumulators.items():
+        if var_name in ds:
+            welford_update(state, ds[var_name].values)
+
+
+def finalize_accumulators(
+    accumulators: dict[str, WelfordState],
+) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+    """
+    Finalize Welford accumulators and return mean and standard deviation.
+
+    Args:
+        accumulators: Dictionary of WelfordState objects to finalize.
+
+    Returns:
+        Tuple of (means, stddevs) dictionaries mapping variable names to arrays.
+    """
+    means = {}
+    stddevs = {}
+
+    for var_name, state in accumulators.items():
+        mean, sd = welford_finalise(state)
+        means[var_name] = mean
+        stddevs[var_name] = sd
+
+    return means, stddevs

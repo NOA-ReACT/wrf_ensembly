@@ -492,14 +492,10 @@ class PostprocessConfig:
 
     By default, the built-in XWRFProcessor will always be used as the first step.
 
-    Other built-in processors:
-    - "script": Run external scripts (for backward compatibility with 0.9.0 where we had the `apply-scripts` command).
-
     External processors can be specified as "module.path:ClassName" or as a path to a Python file.
 
     Examples:
     processors = [
-        {"processor" = "script", "parameters" = {"script" = "python enhance_data.py {in} {out}"}},
         {"processor" = "my_package.processors:CustomProcessor", "parameters" = {"param" =  "value"}}
         {"processor" = "/path/to/file.py:MyProcessor", "parameters" = {"param2": "value2"}},
     ]
@@ -518,21 +514,6 @@ class PostprocessConfig:
     """
     Set to true to also concatenate per_member files when running the `concatenate` command.
     If enabled, you will get a `forecast_mean`, `forecast_sd` and `forecast_member_{d}` file for each cycle.
-    """
-
-    processor_cores: int = 1
-    """How many cores to use for the processor pipeline step"""
-
-    statistics_cores: int = 1
-    """How many cores to use for the `statistics` step"""
-
-    concatenate_cores: int = 1
-    """How many cores to use for the `concatenate` step"""
-
-    cdo_path = "cdo"
-    """
-    Path to the CDO executable or command needed to run cdo (e.g. micromamba run cdo).
-    If not set, will use the one in the PATH environment variable.
     """
 
     ncrcat_cmd = "ncrcat"
