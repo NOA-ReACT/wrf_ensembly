@@ -38,8 +38,12 @@ class StreamingNetCDFWriter:
         self,
         path: Path,
         template: NetCDFFile,
-        zlib: bool = True,
-        complevel: int = 2,
+        compression: str = "zlib",
+        complevel: int = 4,
+        shuffle: bool = True,
+        significant_digits: int | None = None,
+        significant_digits_overrides: dict[str, int] | None = None,
+        quantize_mode: str = "GranularBitRound",
     ):
         """
         Create output file from template structure.
@@ -47,8 +51,14 @@ class StreamingNetCDFWriter:
         Args:
             path: Path where the output file will be created.
             template: NetCDFFile structure to use as template.
-            zlib: Whether to use zlib compression for variables.
-            complevel: Compression level (0-9) if using zlib.
+            compression: Compression algorithm ('zlib', 'zstd', 'bzip2', 'szip', or 'none').
+            complevel: Compression level (0-9).
+            shuffle: Whether to apply shuffle filter before compression.
+            significant_digits: Default number of significant digits for quantization.
+                Set to None to disable quantization.
+            significant_digits_overrides: Dict mapping regex patterns to significant digits
+                for per-variable overrides.
+            quantize_mode: Quantization algorithm ('BitGroom', 'BitRound', 'GranularBitRound').
         """
         self.path = path
         self.template = template
@@ -68,7 +78,16 @@ class StreamingNetCDFWriter:
         path.unlink(missing_ok=True)
 
         # Create the file using the existing create_file function
-        self.ds = create_file(path, template, zlib, complevel)
+        self.ds = create_file(
+            path,
+            template,
+            compression=compression,
+            complevel=complevel,
+            shuffle=shuffle,
+            significant_digits=significant_digits,
+            significant_digits_overrides=significant_digits_overrides,
+            quantize_mode=quantize_mode,
+        )
 
     def append_timestep(
         self,

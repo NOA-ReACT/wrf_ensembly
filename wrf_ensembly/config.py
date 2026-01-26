@@ -345,6 +345,11 @@ class FirstDeparturesConfig:
     )
     """Colorbar ranges for the bias maps, the keys should be the instrument.quantity pairs with the value being a 2 float tuple. Use this to override the auto colorbar if a bad region is ruining your map."""
 
+    excluded_bboxes: list[tuple[float, float, float, float]] = field(
+        default_factory=list
+    )
+    """List of bounding boxes to exclude from the analysis (list of 4 floats: min_lat, min_lon, max_lat, max_lon)."""
+
     regimes: list[FirstDeparturesRegimeConfig] = field(default_factory=list)
     """Regime configurations for different instrument-quantity pairs."""
 
@@ -473,20 +478,48 @@ class PostprocessConfig:
     This filtering is applied during the `postprocess process-pipeline` step.
     """
 
-    compression_filters: str = "shf|zst,3"
+    # --- Native compression settings (netCDF4-python) ---
+
+    compression: str = "zlib"
     """
-    Which compression filter to apply when producing the final cycle files
-    (during `postprocess concatenate`). Consult the NCO manual for exact options available.
-    This refers to lossless compression and is always a good idea but the default ZST
-    algorithm might not be available on your system. Set to empty string to disable compression.
+    Compression algorithm to use: 'zlib', 'zstd', 'bzip2', 'szip', or 'none'.
+    Note: 'zstd' and 'bzip2' require HDF5 plugins to be installed.
+    Use 'none' to disable compression entirely.
     """
 
-    ppc_filter: str = "default=3#Z.*=6#X.*=6"
+    compression_level: int = 4
     """
-    Controls lossy quantization, which is applied during `postprocess concatenate`. This
-    affects the precision of the output files. Consult the NCO manual for exact options available. The default value applies the granular BR algorithm with 3 significant digits
-    to all variables, except for those starting with Z or X, which get 6 significant digits.
-    A small investigation has yielded that these values are a good compromise between file size and precision, at least for dust and wind related fields. Set to empty string to disable quantization.
+    Compression level (0-9). Higher values give better compression but are slower.
+    A value of 0 disables compression even if a compression algorithm is specified.
+    """
+
+    shuffle: bool = True
+    """
+    Apply the shuffle filter before compression. This reorders bytes to improve
+    compression ratios, especially for floating-point data. Recommended to keep enabled.
+    """
+
+    significant_digits: int = 3
+    """
+    Number of significant digits to preserve during quantization (lossy compression).
+    Set to zero to disable quantization entirely. Requires netcdf-c >= 4.9.0.
+    """
+
+    significant_digits_overrides: Dict[str, int] = field(
+        default_factory=lambda: {"Z.*": 6, "X.*": 6}
+    )
+    """
+    Per-variable overrides for significant_digits. Keys are regex patterns that match
+    variable names, values are the number of significant digits to use.
+    Variables matching a pattern use that value instead of the default.
+    Example: {"Z.*": 6, "X.*": 6} gives 6 digits to variables starting with Z or X.
+    """
+
+    quantize_mode: str = "GranularBitRound"
+    """
+    Quantization algorithm: 'BitGroom', 'BitRound', or 'GranularBitRound'.
+    'GranularBitRound' typically provides best compression for geophysical data.
+    Only used when significant_digits is not None.
     """
 
     processors: list[ProcessorConfig] = field(default_factory=lambda: [])

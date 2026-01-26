@@ -5,15 +5,43 @@ Provides Welford's algorithm for online computation of mean and variance,
 as well as utilities for creating NetCDF files from templates.
 """
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Optional
 
 import netCDF4
 import numpy as np
 import xarray as xr
 
 from wrf_ensembly.console import logger
+
+
+def _get_variable_significant_digits(
+    var_name: str,
+    default_digits: Optional[int],
+    overrides: Optional[dict[str, int]],
+) -> Optional[int]:
+    """
+    Get the significant_digits value for a variable based on regex pattern matching.
+
+    Args:
+        var_name: Name of the variable.
+        default_digits: Default significant digits to use if no pattern matches.
+        overrides: Dictionary mapping regex patterns to significant digits values.
+
+    Returns:
+        The significant_digits value to use, or None if quantization is disabled.
+    """
+    if default_digits is None:
+        return None
+
+    if overrides:
+        for pattern, digits in overrides.items():
+            if re.match(pattern, var_name):
+                return digits
+
+    return default_digits
 
 
 @dataclass
@@ -82,8 +110,12 @@ def get_structure(file: Path) -> NetCDFFile:
 def create_file(
     path: Path,
     template: NetCDFFile,
-    zlib=True,
-    complevel: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8, 9] = 2,
+    compression: str = "zlib",
+    complevel: int = 4,
+    shuffle: bool = True,
+    significant_digits: Optional[int] = None,
+    significant_digits_overrides: Optional[dict[str, int]] = None,
+    quantize_mode: str = "GranularBitRound",
 ) -> netCDF4.Dataset:
     """
     Creates a netCDF4 file at the given path with the structure of the template.
@@ -94,8 +126,14 @@ def create_file(
     Args:
         path: Path to the output file.
         template: Template structure to copy.
-        zlib: Whether to use zlib compression.
-        complevel: If using zlib, what compression level to use (0-9).
+        compression: Compression algorithm ('zlib', 'zstd', 'bzip2', 'szip', or 'none').
+        complevel: Compression level (0-9).
+        shuffle: Whether to apply shuffle filter before compression.
+        significant_digits: Default number of significant digits for quantization.
+            Set to None to disable quantization.
+        significant_digits_overrides: Dict mapping regex patterns to significant digits
+            for per-variable overrides.
+        quantize_mode: Quantization algorithm ('BitGroom', 'BitRound', 'GranularBitRound').
     """
 
     output_dir = path.parent
@@ -110,15 +148,56 @@ def create_file(
         else:
             ds.createDimension(dim_name, dim_size)
 
+    # Determine compression settings
+    use_compression = compression != "none" and complevel > 0
+
     for var_name, var_tmpl in template.variables.items():
-        var = ds.createVariable(
-            var_name,
-            var_tmpl.dtype,
-            var_tmpl.dimensions,
-            fill_value=var_tmpl.attributes.get("_FillValue", None),
-            zlib=zlib,
-            complevel=complevel,
+        # Determine significant_digits for this variable
+        var_digits = _get_variable_significant_digits(
+            var_name, significant_digits, significant_digits_overrides
         )
+
+        # Build createVariable kwargs
+        create_kwargs: dict = {
+            "varname": var_name,
+            "datatype": var_tmpl.dtype,
+            "dimensions": var_tmpl.dimensions,
+            "fill_value": var_tmpl.attributes.get("_FillValue", None),
+        }
+
+        if use_compression:
+            create_kwargs["compression"] = compression
+            create_kwargs["complevel"] = complevel
+            create_kwargs["shuffle"] = shuffle
+
+        # Only apply quantization to numeric variables (not coordinates or strings)
+        if var_digits is not None and var_name not in COORDINATE_VARIABLES:
+            if np.issubdtype(var_tmpl.dtype, np.floating):
+                create_kwargs["significant_digits"] = var_digits
+                create_kwargs["quantize_mode"] = quantize_mode
+
+        try:
+            var = ds.createVariable(**create_kwargs)
+        except Exception as e:
+            # Provide a clearer error message for compression/quantization failures
+            error_msg = str(e)
+            if "compression" in error_msg.lower():
+                raise RuntimeError(
+                    f"Failed to create variable '{var_name}' with compression='{compression}'. "
+                    f"The '{compression}' filter may not be available in your netCDF4 installation. "
+                    f"Try setting compression='zlib' or compression='none' in your config."
+                ) from e
+            elif (
+                "significant_digits" in error_msg.lower()
+                or "quantize" in error_msg.lower()
+            ):
+                raise RuntimeError(
+                    f"Failed to create variable '{var_name}' with quantization. "
+                    f"Your netCDF4 installation may not support significant_digits. "
+                    f"Try setting significant_digits=null in your config."
+                ) from e
+            else:
+                raise
 
         for attr_name, attr_value in var_tmpl.attributes.items():
             if attr_name == "_FillValue":

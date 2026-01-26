@@ -8,23 +8,54 @@ files.
 """
 
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 import numpy as np
 import xarray as xr
 
-from wrf_ensembly.config import Config
+from wrf_ensembly.config import Config, PostprocessConfig
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import Experiment
 from wrf_ensembly.postprocess.streaming_writer import StreamingNetCDFWriter
 from wrf_ensembly.processors import ProcessingContext, ProcessorPipeline
 from wrf_ensembly.statistics import (
+    NetCDFFile,
     WelfordState,
     create_welford_accumulators,
     finalize_accumulators,
     get_structure_from_xarray,
     update_accumulators_from_dataset,
 )
+
+
+def _create_writer(
+    path: Path,
+    template: NetCDFFile,
+    postprocess_cfg: PostprocessConfig,
+) -> StreamingNetCDFWriter:
+    """
+    Create a StreamingNetCDFWriter with compression settings from config.
+
+    Args:
+        path: Path where the output file will be created.
+        template: NetCDFFile structure to use as template.
+        postprocess_cfg: Postprocess configuration with compression settings.
+
+    Returns:
+        Configured StreamingNetCDFWriter instance.
+    """
+    return StreamingNetCDFWriter(
+        path,
+        template,
+        compression=postprocess_cfg.compression,
+        complevel=postprocess_cfg.compression_level,
+        shuffle=postprocess_cfg.shuffle,
+        significant_digits=postprocess_cfg.significant_digits
+        if postprocess_cfg.significant_digits != 0
+        else None,
+        significant_digits_overrides=postprocess_cfg.significant_digits_overrides,
+        quantize_mode=postprocess_cfg.quantize_mode,
+    )
 
 
 def process_members_for_timestep(
@@ -49,8 +80,8 @@ def process_members_for_timestep(
         Tuple of (accumulators, last_processed_dataset).
         The last dataset is returned to provide template/coordinate information.
     """
-    accumulators: Optional[dict[str, WelfordState]] = None
-    last_processed: Optional[xr.Dataset] = None
+    accumulators: dict[str, WelfordState] | None = None
+    last_processed: xr.Dataset | None = None
 
     for member_i, wrfout_path in enumerate(wrfout_paths):
         if not wrfout_path.exists():
@@ -90,7 +121,7 @@ def process_cycle_streaming(
     pipeline: ProcessorPipeline,
     source: Literal["forecast", "analysis"],
     only_last_timestep: bool = False,
-) -> Optional[tuple[Path, Path]]:
+) -> tuple[Path, Path] | None:
     """
     Process an entire cycle in streaming fashion.
 
@@ -172,8 +203,8 @@ def process_cycle_streaming(
     logger.info(f"Creating output files: {mean_path.name}, {sd_path.name}")
 
     with (
-        StreamingNetCDFWriter(mean_path, template) as mean_writer,
-        StreamingNetCDFWriter(sd_path, template) as sd_writer,
+        _create_writer(mean_path, template, exp.cfg.postprocess) as mean_writer,
+        _create_writer(sd_path, template, exp.cfg.postprocess) as sd_writer,
     ):
         # Write first timestep (already processed)
         means, stddevs = finalize_accumulators(first_accumulators)
@@ -212,7 +243,7 @@ def process_cycle_single_member(
     pipeline: ProcessorPipeline,
     source: Literal["forecast", "analysis"],
     only_last_timestep: bool = False,
-) -> Optional[Path]:
+) -> Path | None:
     """
     Process a cycle with only one ensemble member.
 
@@ -287,7 +318,7 @@ def process_cycle_single_member(
 
     logger.info(f"Creating output file: {mean_path.name}")
 
-    with StreamingNetCDFWriter(mean_path, template) as writer:
+    with _create_writer(mean_path, template, exp.cfg.postprocess) as writer:
         # Write first timestep (already processed)
         data = {var: template_ds[var].values for var in template_ds.data_vars}
         time_val = template_ds["t"].values
