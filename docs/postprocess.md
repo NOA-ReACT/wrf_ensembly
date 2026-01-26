@@ -1,21 +1,14 @@
 # Postprocessing
 
-WRF Ensembly provides a comprehensive postprocessing pipeline for transforming raw WRF output files into analysis-ready datasets. The postprocessing system consists of several stages that can be executed individually or through SLURM jobs, allowing for flexible and efficient data processing workflows.
+WRF Ensembly provides a postprocessing pipeline for transforming raw WRF output files into analysis-ready datasets (at least in the author's opinion). The postprocessing system uses a streaming architecture that processes ensemble members one at a time, computes statistics on-the-fly, and writes final output files directly without intermediate files.
 
 ## Overview
 
-The postprocessing pipeline transforms raw `wrfout` files through several stages:
+The postprocessing pipeline transforms raw `wrfout` files through a unified streaming process:
 
-1. **Data Processing Pipeline** - Applies custom transformations and standardizes the data format
-2. **Ensemble Statistics** - Computes mean and standard deviation across ensemble members
-3. **Concatenation** - Combines temporal files into single files per cycle with compression
-4. **Cleanup** - Removes temporary files to save disk space
-
-All postprocessing commands follow the pattern:
-
-```bash
-wrf-ensembly EXPERIMENT_PATH postprocess COMMAND [OPTIONS]
-```
+1. **Streaming Processing** - For each output timestep, processes all ensemble members through the configured processor pipeline, accumulates statistics (ensemble mean and standard deviation) using Welford's algorithm, and writes results directly to final NetCDF files
+2. **Optional Compression** - Applies NCO compression filters to final output files
+3. **Cleanup** - Removes raw wrfout files to save disk space
 
 ## File Transformations and Output Paths
 
@@ -44,34 +37,27 @@ The postprocessing pipeline transforms raw WRF output files in several key ways,
 
 The postprocessing system creates files in several locations within your experiment directory:
 
-**Intermediate Files (scratch directory):**
+**Input Files (scratch directory):**
 ```
 EXPERIMENT_PATH/scratch/
 ├── analysis/cycle_XXX/member_YY/
-│   ├── wrfout_*               # Raw WRF analysis files
-│   ├── wrfout_*_post          # Processed individual files
-│   ├── wrfout_*_mean          # Ensemble mean files
-│   └── wrfout_*_sd            # Ensemble std deviation files
+│   └── wrfout_d01_YYYY-MM-DD_HH:MM:SS    # Raw WRF analysis files
 └── forecasts/cycle_XXX/member_YY/
-    ├── wrfout_*               # Raw WRF forecast files
-    ├── wrfout_*_post          # Processed individual files
-    ├── wrfout_*_mean          # Ensemble mean files
-    └── wrfout_*_sd            # Ensemble std deviation files
+    └── wrfout_d01_YYYY-MM-DD_HH:MM:SS    # Raw WRF forecast files
 ```
 
-**Final Output Files (data directory):**
+**Output Files (data directory):**
 ```
 EXPERIMENT_PATH/data/
 ├── analysis/cycle_XXX/
-│   ├── analysis_mean_cycle_XXX.nc   # Concatenated analysis ensemble mean
-│   └── analysis_sd_cycle_XXX.nc     # Concatenated analysis ensemble std dev
+│   ├── analysis_mean_cycle_XXX.nc   # Analysis ensemble mean (all timesteps)
+│   └── analysis_sd_cycle_XXX.nc     # Analysis ensemble std dev (all timesteps)
 └── forecasts/cycle_XXX/
-    ├── forecast_mean_cycle_XXX.nc   # Concatenated forecast ensemble mean
-    ├── forecast_sd_cycle_XXX.nc     # Concatenated forecast ensemble std dev
-    └── forecast_member_YY_cycle_XXX.nc  # Individual members (if keep_per_member=true)
+    ├── forecast_mean_cycle_XXX.nc   # Forecast ensemble mean (all timesteps)
+    └── forecast_sd_cycle_XXX.nc     # Forecast ensemble std dev (all timesteps)
 ```
 
-The final concatenated files in the `data/` directory are the primary analysis products, containing all time steps for a cycle in CF-compliant NetCDF format with optimized compression.
+The output files in the `data/` directory are the primary analysis products. Each file contains all timesteps for a cycle in CF-compliant NetCDF file.
 
 ### Customization Options
 
@@ -106,60 +92,43 @@ wind_.* -> wind_east: (('Time', 'bottom_top', 'south_north', 'west_east',)) (flo
 wind_.* -> wind_north: (('Time', 'bottom_top', 'south_north', 'west_east',)) (float32)
 ```
 
-### process-pipeline
+### run
 
 ```bash
-wrf-ensembly EXPERIMENT_PATH postprocess process-pipeline [--cycle CYCLE] [--jobs JOBS]
+wrf-ensembly EXPERIMENT_PATH postprocess run [--cycle CYCLE] [--only-last-timestep]
 ```
 
-Applies the configured data processor pipeline to output files. This command replaces the legacy `apply-scripts` approach with a more efficient plugin-based system that processes data in memory using a configurable pipeline of `DataProcessor` instances.
+Runs the complete postprocessing pipeline for a single cycle using a streaming architecture. This command:
+
+1. Processes all ensemble members through the configured processor pipeline (one member at a time)
+2. Computes ensemble statistics (mean and standard deviation) on-the-fly using Welford's algorithm
+3. Writes results directly to final output files without creating intermediate files
+4. Optionally applies NCO compression filters to the output files
 
 **Options:**
-- `--cycle CYCLE` - Cycle to process (uses current cycle if not specified)
-- `--jobs JOBS` - Number of files to process in parallel (default: determined automatically)
-
-The pipeline processes all `wrfout` files in both the analysis and forecast directories for the specified cycle, creating `*_post` files that contain the processed data.
-
-### statistics
-
-```bash
-wrf-ensembly EXPERIMENT_PATH postprocess statistics [--cycle CYCLE] [--jobs JOBS]
-```
-
-Calculates ensemble mean and standard deviation from the forecast/analysis files for the given cycle. This function reads the `*_post` files created by the `process-pipeline` command and computes ensemble statistics across all members.
-
-**Options:**
-- `--cycle CYCLE` - Cycle to compute statistics for (uses current cycle if not specified)
-- `--jobs JOBS` - Number of files to process in parallel (default: determined automatically)
+- `--cycle CYCLE` - Cycle to process (defaults to current cycle)
+- `--only-last-timestep` - Only process the last timestep of the cycle (useful for testing or when only the final analysis is needed)
 
 **Output files:**
-- `*_mean` - Ensemble mean files
-- `*_sd` - Ensemble standard deviation files
+- `forecast_mean_cycle_XXX.nc` - Forecast ensemble mean (all timesteps)
+- `forecast_sd_cycle_XXX.nc` - Forecast ensemble standard deviation (all timesteps)
+- `analysis_mean_cycle_XXX.nc` - Analysis ensemble mean (all timesteps)
+- `analysis_sd_cycle_XXX.nc` - Analysis ensemble standard deviation (all timesteps)
 
-For single-member experiments, the command simply copies the files without computing statistics.
+For single-member experiments (n_members=1), only the mean files are created (no standard deviation). If no analysis is done for a cycle (no DA), no analysis files are generated.
 
-### concatenate
+**Parallel Execution:**
+
+This command processes ONE cycle at a time with no side effects, making it safe to run multiple instances in parallel for different cycles:
 
 ```bash
-wrf-ensembly EXPERIMENT_PATH postprocess concatenate [--cycle CYCLE] [--jobs JOBS]
+# Using GNU parallel
+parallel -j 4 wrf_ensembly EXPERIMENT_PATH postprocess run --cycle {} ::: {0..23}
+
+# Using SLURM array jobs
+#SBATCH --array=0-23
+wrf_ensembly EXPERIMENT_PATH postprocess run --cycle $SLURM_ARRAY_TASK_ID
 ```
-
-Concatenates all output files (mean and standard deviation) into consolidated files for each cycle. Uses the `*_mean` and `*_sd` files created by the `statistics` command and combines them temporally into single NetCDF files.
-
-**Options:**
-- `--cycle CYCLE` - Cycle to concatenate (uses current cycle if not specified)
-- `--jobs JOBS` - Number of NCO commands to execute in parallel (default: 4)
-
-**Output files:**
-- `forecast_mean_cycle_XXX.nc` - Concatenated forecast ensemble mean
-- `forecast_sd_cycle_XXX.nc` - Concatenated forecast ensemble standard deviation
-- `analysis_mean_cycle_XXX.nc` - Concatenated analysis ensemble mean
-- `analysis_sd_cycle_XXX.nc` - Concatenated analysis ensemble standard deviation
-
-If `keep_per_member` is enabled, also creates:
-- `forecast_member_XX_cycle_XXX.nc` - Individual member forecasts
-
-The concatenation process applies compression and quantization filters as specified in the configuration.
 
 ### clean
 
@@ -167,11 +136,71 @@ The concatenation process applies compression and quantization filters as specif
 wrf-ensembly EXPERIMENT_PATH postprocess clean [--cycle CYCLE] [--remove-wrfout]
 ```
 
-Cleans up the scratch directory for the given cycle to save disk space. This command should be run after completing the other postprocessing steps.
+Cleans up the scratch directory for the given cycle to save disk space. This command should be run after completing the postprocessing.
 
 **Options:**
 - `--cycle CYCLE` - Cycle to clean (uses current cycle if not specified)
 - `--remove-wrfout` - Remove raw wrfout files (default: true)
+
+## Streaming Architecture
+
+The postprocessing system uses a streaming architecture implemented in the `wrf_ensembly.postprocess` module, which contains:
+
+- **`streaming_pipeline.py`** - Core streaming logic for processing cycles
+- **`streaming_writer.py`** - Incremental NetCDF writer for time-series output
+- **`utils.py`** - Utility functions like NCO compression
+
+### How Streaming Works
+
+For each output timestep in a cycle, the pipeline:
+
+1. **Opens each member's wrfout file** sequentially (one at a time)
+2. **Applies the processor pipeline** to transform the data
+3. **Updates running statistics** using Welford's algorithm for numerically stable mean/variance computation
+4. **Writes the timestep** to the output files (mean and standard deviation)
+
+### Module Components
+
+#### StreamingNetCDFWriter
+
+The `StreamingNetCDFWriter` class manages incremental writes to NetCDF files with an unlimited time dimension:
+
+```python
+from wrf_ensembly.postprocess import StreamingNetCDFWriter
+
+# Create writer from a template dataset structure
+writer = StreamingNetCDFWriter(output_path, template)
+
+# Append timesteps one at a time
+for timestep_data, time_value in data_stream:
+    writer.append_timestep(timestep_data, time_value)
+
+writer.close()
+```
+
+#### Streaming Pipeline Functions
+
+The module provides two main processing functions:
+
+**`process_cycle_streaming()`** - For multi-member ensembles:
+- Processes all members for each timestep
+- Computes ensemble mean and standard deviation using Welford's algorithm
+- Writes both mean and std dev files
+
+**`process_cycle_single_member()`** - For single-member experiments:
+- Skips statistics computation
+- Writes only the mean file (no std dev needed)
+
+Both functions return paths to the created output files and handle missing files gracefully.
+
+#### Welford's Algorithm
+
+The streaming statistics use Welford's algorithm, which computes mean and variance in a single pass through the data with numerical stability. This is implemented in the `wrf_ensembly.statistics` module and used by the streaming pipeline.
+
+Benefits:
+- Single pass through data (no need to store all members)
+- Numerically stable for large ensembles
+- Constant memory usage regardless of ensemble size
 
 ## Data Processor Pipeline
 
@@ -309,20 +338,9 @@ The default compression settings provide a good balance between file size and pr
 - **Compression filters**: `"shf|zst,3"` applies shuffle and Zstandard compression
 - **Quantization**: `"default=3#Z.*=6#X.*=6"` keeps 3 significant digits for most variables, 6 for height/horizontal coordinates
 
-These filters are passed to nco's commands when doing the concatenation step. Read NCO's documentation for more details on the available compression and quantization options.
-If your netCDF libraries are not built to handle Zstandard compression, you will not see any errors but the files will not be compressed. Always double check your netCDF output file sizes and check them with `ncdump -hs` to see which compression is applied. If you can't seem to get Zstandard to work, just use `deflate` instead.
+These filters are applied by NCO's `ncks` command after the streaming pipeline creates the output files. Read NCO's documentation for more details on the available compression and quantization options.
 
-### Resource Allocation
-
-For large ensembles, tune the core allocation:
-
-```toml
-processor_cores = 24    # Parallel file processing
-statistics_cores = 8  # Parallel statistics computation
-concatenate_cores = 8  # Parallel NCO operations
-```
-
-Your main bottleneck here will likely be RAM usage, so ensure that you have enough RAM to run all these things in parallel. The `processor_cores` setting controls how many files are processed in parallel, while `statistics_cores` and `concatenate_cores` control parallelism for statistics computation and NCO concatenation, respectively.
+**Important:** If your netCDF libraries are not built to handle Zstandard compression, you will not see any errors but the files will not be compressed. Always double check your netCDF output file sizes and check them with `ncdump -hs` to see which compression is applied. If you can't seem to get Zstandard to work, just use `deflate` instead.
 
 ### Error Handling
 
@@ -331,7 +349,8 @@ The pipeline stops on any processor error. To debug issues:
 1. Check log files in the experiment's `logs/` directory
 2. Test processors individually with small datasets
 3. Use the `print-variables-to-keep` command to verify variable filtering
-4. Examine intermediate `*_post` files for processing artifacts
+4. Try `--only-last-timestep` to test the pipeline on a single timestep before processing the full cycle
+5. Check that raw wrfout files exist and are readable in the scratch directory
 
 ## Integration with SLURM
 

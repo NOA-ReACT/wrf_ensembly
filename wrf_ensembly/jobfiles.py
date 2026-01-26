@@ -245,13 +245,6 @@ def generate_postprocess_jobfile(
 
     exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
 
-    jobs = exp.cfg.slurm.directives_postprocess.get("ntasks", -1)
-    if jobs == -1:
-        logger.warning(
-            "ntasks not set in `slurm.directives_postprocess``. Using default value of 1"
-        )
-        jobs = 1
-
     jobfile = exp.paths.jobfiles / f"cycle_{cycle}_postprocess.job.sh"
     dynamic_directives = {
         "job-name": f"{exp.cfg.metadata.name}_postprocess_cycle_{cycle}",
@@ -262,45 +255,13 @@ def generate_postprocess_jobfile(
     commands = [
         _build_command(
             base_cmd,
-            "process-pipeline",
+            "run",
             cycle=cycle,
-            jobs=exp.cfg.postprocess.processor_cores,
         ),
     ]
-    if exp.cfg.postprocess.compute_ensemble_statistics_in_job:
-        commands.append(
-            _build_command(
-                base_cmd,
-                "statistics",
-                cycle=cycle,
-                jobs=exp.cfg.postprocess.statistics_cores,
-            )
-        )
-    commands.append(
-        _build_command(
-            base_cmd,
-            "concatenate",
-            cycle=cycle,
-            jobs=exp.cfg.postprocess.concatenate_cores,
-        )
-    )
 
     if clean:
         commands.append(_build_command(base_cmd, "clean"))
-
-    max_used_jobs = max(
-        exp.cfg.postprocess.processor_cores,
-        exp.cfg.postprocess.statistics_cores,
-        exp.cfg.postprocess.concatenate_cores,
-    )
-    if max_used_jobs < int(jobs):
-        logger.warning(
-            f"Number of SLURM tasks ({jobs}) is less than the maximum number of jobs used ({max_used_jobs})."
-        )
-    if max_used_jobs > int(jobs):
-        logger.warning(
-            f"Number of SLURM tasks ({jobs}) is greater than the maximum number of jobs used ({max_used_jobs})."
-        )
 
     jobfile.write_text(
         templates.generate(

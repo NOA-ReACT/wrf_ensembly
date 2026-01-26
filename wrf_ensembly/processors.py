@@ -8,14 +8,12 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-import traceback
 from typing import List
 
 import numpy as np
 import xarray as xr
 import xwrf  # noqa: F401
 
-from wrf_ensembly import external
 from wrf_ensembly.config import Config, ProcessorConfig
 from wrf_ensembly.console import logger
 
@@ -185,65 +183,6 @@ class XWRFPostProcessor(DataProcessor):
         return "xWRF Post-processor"
 
 
-class ScriptProcessor(DataProcessor):
-    """
-    Processor that applies external scripts to the dataset.
-    """
-
-    def __init__(self, script: str, **kwargs):
-        super().__init__(**kwargs)
-        self.script = script
-        if "{in}" not in script or "{out}" not in script:
-            raise ValueError(
-                f"Script '{script}' does not contain the required placeholders {{in}} and {{out}}"
-            )
-
-    def process(self, ds: xr.Dataset, context: ProcessingContext) -> xr.Dataset:
-        """Apply external script to the dataset."""
-        logger.debug(f"Applying script processor: {self.script}")
-
-        # Create temporary files for input and output
-        import tempfile
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir = Path(tmpdir)
-
-            # Write input dataset to temporary file
-            input_file = tmpdir / "input.nc"
-            comp = dict(zlib=True, complevel=3)
-            encoding = {var: comp for var in ds.data_vars}
-            ds.to_netcdf(input_file, unlimited_dims=["Time"], encoding=encoding)
-
-            # Create output file path
-            output_file = tmpdir / "output.nc"
-
-            # Replace placeholders with actual file paths
-            cmd = self.script.replace("{in}", str(input_file))
-            cmd = cmd.replace("{out}", str(output_file))
-
-            # Replace additional context placeholders
-            cmd = cmd.replace("{d}", str(context.member))
-            cmd = cmd.replace("{c}", str(context.cycle))
-
-            # Execute the script
-            res = external.runc(cmd.split())
-            if res.returncode != 0:
-                logger.error(
-                    f"Command {' '.join(res.command)} failed with return code {res.returncode} and output: {res.output}"
-                )
-                raise external.ExternalProcessFailed(res)
-
-            # Read the processed dataset
-            if not output_file.exists():
-                raise RuntimeError(f"Script did not create output file: {output_file}")
-
-            return xr.open_dataset(output_file)
-
-    @property
-    def name(self) -> str:
-        return f"Script: {self.script}"
-
-
 class ProcessorPipeline:
     """
     A pipeline of DataProcessor objects that processes datasets sequentially.
@@ -281,7 +220,6 @@ def load_processor_from_string(processor_spec: str, **kwargs) -> DataProcessor:
                        - "module.path:ClassName" (import from installed module)
                        - "/path/to/file.py:ClassName" (import from file)
                        - "/path/to/file.py" (import from file, use class with same name as file)
-                       - Built-in processor name ("xwrf-post", "script")
         **kwargs: Additional keyword arguments to pass to the processor constructor
 
     Returns:
@@ -291,13 +229,7 @@ def load_processor_from_string(processor_spec: str, **kwargs) -> DataProcessor:
         load_processor_from_string("my_package.processors:MyProcessor")
         load_processor_from_string("/home/user/my_processor.py:MyProcessor")
         load_processor_from_string("/home/user/my_processor.py")  # Uses class MyProcessor
-        load_processor_from_string("xwrf-post")
-        load_processor_from_string("script", script="python my_script.py {in} {out}")
     """
-    # Handle built-in processors
-    if processor_spec == "script":
-        return ScriptProcessor(**kwargs)
-
     # Handle file-based processors
     if ".py" in processor_spec:
         file_path = processor_spec
@@ -368,6 +300,8 @@ def create_pipeline_from_config(config: List[ProcessorConfig]) -> ProcessorPipel
     """
     Create a processor pipeline from configuration.
 
+    The XWRFPostProcessor is always included as the first step in the pipeline.
+
     Args:
         config: List of processor configurations, each containing:
                - 'processor': processor specification string
@@ -378,12 +312,10 @@ def create_pipeline_from_config(config: List[ProcessorConfig]) -> ProcessorPipel
 
     Example:
         config = [
-            {"processor": "script", "script": "python add_new_variable.py {in} {out}"},
-            {"processor": "my_package.processors:CustomProcessor", "param1": "value1"}
+            {"processor": "my_package.processors:CustomProcessor", "param1": "value1"},
             {"processor": "/path/to/file.py:MyProcessor", "param2": "value2"},
         ]
     """
-
     # Start with the xWRF post-processor as the default, always as the first step
     processors: list[DataProcessor] = [XWRFPostProcessor()]
 
@@ -394,33 +326,3 @@ def create_pipeline_from_config(config: List[ProcessorConfig]) -> ProcessorPipel
         )
 
     return ProcessorPipeline(processors)
-
-
-def process_file_with_pipeline(args):
-    """
-    Process a single file through the processor pipeline.
-
-    This function is defined at module level to be pickleable for ProcessPoolExecutor.
-
-    Args:
-        args: Tuple of (input_file, output_file, processor_configs, context)
-    """
-    input_file, output_file, processor_configs, context = args
-
-    try:
-        # Create pipeline from config
-        pipeline = create_pipeline_from_config(processor_configs)
-
-        # Load, process, and save dataset
-        with xr.open_dataset(input_file) as ds:
-            processed_ds = pipeline.process(ds, context)
-
-            comp = dict(zlib=True, complevel=3)
-            encoding = {var: comp for var in processed_ds.data_vars}
-            processed_ds.to_netcdf(output_file, unlimited_dims=["t"], encoding=encoding)
-
-        logger.debug(f"Successfully processed {input_file} -> {output_file}")
-
-    except Exception as e:
-        logger.error(f"Error processing {input_file}: {e} ({traceback.format_exc()})")
-        raise
