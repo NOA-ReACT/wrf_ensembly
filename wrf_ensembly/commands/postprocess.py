@@ -13,11 +13,14 @@ import xarray as xr
 from wrf_ensembly import experiment, processors
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
+from wrf_ensembly.postprocess.compression import (
+    CompressionConfigError,
+    validate_compression_config,
+)
 from wrf_ensembly.postprocess.streaming_pipeline import (
     process_cycle_single_member,
     process_cycle_streaming,
 )
-from wrf_ensembly.postprocess.utils import apply_compression
 
 
 @click.group(name="postprocess", cls=GroupWithStartEndPrint)
@@ -126,6 +129,22 @@ def run(
 
     logger.info(f"Processing cycle {cycle}: {exp.cycles[cycle]}")
 
+    # Validate compression configuration
+    try:
+        validate_compression_config(exp.cfg.postprocess)
+        logger.info(
+            f"Compression: {exp.cfg.postprocess.compression} "
+            f"(level={exp.cfg.postprocess.compression_level}, shuffle={exp.cfg.postprocess.shuffle})"
+        )
+        if exp.cfg.postprocess.significant_digits is not None:
+            logger.info(
+                f"Quantization: {exp.cfg.postprocess.quantize_mode} "
+                f"(default digits={exp.cfg.postprocess.significant_digits})"
+            )
+    except CompressionConfigError as e:
+        logger.error(f"Compression configuration error: {e}")
+        sys.exit(1)
+
     # Create processor pipeline
     try:
         pipeline = processors.create_pipeline_from_config(
@@ -177,11 +196,6 @@ def run(
             )
         else:
             logger.info(f"Analysis output: {analysis_result.name}")
-
-    # Apply NCO compression if configured
-    if exp.cfg.postprocess.compression_filters or exp.cfg.postprocess.ppc_filter:
-        logger.info("Applying NCO compression to output files...")
-        apply_compression(exp, cycle)
 
     logger.info(f"Cycle {cycle} postprocessing complete")
 

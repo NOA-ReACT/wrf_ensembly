@@ -88,6 +88,15 @@ class FirstDeparturesAnalysis:
         if "departure" not in df.columns:
             df["departure"] = df["value"] - df["model_value"]
 
+        # Remove any regions marked as excluded (cfg option `exclude_bboxes`)
+        # After adding the new column so we avoid a `.copy()` and any 'assigning a view' problems
+        for bbox in self.exp.cfg.validation.first_departures.excluded_bboxes:
+            logger.debug(f"Excluding region {bbox}")
+            df = df[
+                ~df["latitude"].between(bbox[0], bbox[2])
+                | ~df["longitude"].between(bbox[1], bbox[3])
+            ]
+
         results = {
             "instrument": self.instrument,
             "quantity": self.quantity,
