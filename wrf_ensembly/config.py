@@ -340,6 +340,11 @@ class FirstDeparturesConfig:
     instrument_quantity_pairs: list[str] = field(default_factory=list)
     """List of instrument.quantity pairs to analyze (e.g., ['MODIS.AOD_550nm', 'VIIRS.AOD_550nm']). If empty, will analyze all available pairs."""
 
+    bias_map_colorbar_ranges: dict[str, tuple[float, float]] = field(
+        default_factory=dict
+    )
+    """Colorbar ranges for the bias maps, the keys should be the instrument.quantity pairs with the value being a 2 float tuple. Use this to override the auto colorbar if a bad region is ruining your map."""
+
     regimes: list[FirstDeparturesRegimeConfig] = field(default_factory=list)
     """Regime configurations for different instrument-quantity pairs."""
 

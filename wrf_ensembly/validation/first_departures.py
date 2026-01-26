@@ -319,8 +319,14 @@ class FirstDeparturesAnalysis:
 
             # Use diverging colormap centered at 0 for bias
             if "Bias" in title:
-                vmax = max(abs(grid.values.min()), abs(grid.values.max()))
-                vmin = -vmax
+                cfg_override = self.exp.cfg.validation.first_departures.bias_map_colorbar_ranges.get(
+                    f"{self.instrument}.{self.quantity}", None
+                )
+                if cfg_override is not None:
+                    vmin, vmax = cfg_override
+                else:
+                    vmax = max(abs(np.nanmin(grid)), abs(np.nanmax(grid)))
+                    vmin = -vmax
             else:
                 vmin, vmax = None, None
 
