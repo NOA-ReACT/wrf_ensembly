@@ -447,3 +447,132 @@ def plot_cycle_locations(experiment_path: Path, cycle: int):
     logger.info(
         f"Saved observation locations plot for cycle {cycle_info.index} to {output_path}"
     )
+
+
+@observations_cli.command()
+@click.argument("cycle", type=int, required=True)
+@click.option(
+    "--center-lat",
+    type=float,
+    default=None,
+    help="Latitude to center the zoom on. Defaults to domain center.",
+)
+@click.option(
+    "--center-lon",
+    type=float,
+    default=None,
+    help="Longitude to center the zoom on. Defaults to domain center.",
+)
+@click.option(
+    "--window-size",
+    type=int,
+    default=15,
+    help="Number of grid points to show in each direction from center (default 15, giving ~30x30).",
+)
+@click.option(
+    "--instrument",
+    type=str,
+    default=None,
+    help="Filter observations to this instrument.",
+)
+@click.option(
+    "--quantity",
+    type=str,
+    default=None,
+    help="Filter observations to this quantity.",
+)
+@pass_experiment_path
+def plot_compare_obs_to_grid(
+    experiment_path: Path,
+    cycle: int,
+    center_lat: float | None,
+    center_lon: float | None,
+    window_size: int,
+    instrument: str | None,
+    quantity: str | None,
+):
+    """
+    Plot observation locations overlaid on the WRF model grid, zoomed in to compare
+    observation density with grid resolution. Useful for determining optimal superobbing
+    bin sizes.
+
+    The plot shows grid points as grey squares connected by lines, with observations
+    as colored dots on top. By default it zooms to ~30x30 grid points around the domain
+    center.
+    """
+
+    import numpy as np
+    import xarray as xr
+
+    logger.setup("observations-plot-compare-obs-to-grid", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    cycle_info = exp.cycles[cycle]
+
+    # Load observations
+    parquet_path = exp.paths.obs / f"cycle_{cycle_info.index:03d}.parquet"
+    if not parquet_path.is_file():
+        logger.error(
+            f"Cycle {cycle_info.index} parquet file {parquet_path} does not exist, "
+            "run `wrf-ensembly observations prepare-cycles` first"
+        )
+        return
+    obs = observations.io.read_obs(parquet_path)
+    if obs is None or obs.empty:
+        logger.error(f"Cycle {cycle_info.index} has no observations, cannot plot")
+        return
+
+    # Filter by instrument/quantity if requested
+    if instrument is not None:
+        obs = obs[obs["instrument"] == instrument]
+    if quantity is not None:
+        obs = obs[obs["quantity"] == quantity]
+    if obs.empty:
+        logger.error("No observations remaining after filtering")
+        return
+
+    # Load grid coordinates from wrfinput
+    if not exp.cfg.data.per_member_meteorology:
+        wrfinput_path = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
+    else:
+        wrfinput_path = exp.paths.data_icbc / "member_00" / "wrfinput_d01_cycle_0"
+
+    if not wrfinput_path.exists():
+        logger.error(f"wrfinput file not found at {wrfinput_path}")
+        return
+
+    with xr.open_dataset(wrfinput_path) as ds:
+        grid_lat = ds["XLAT"].isel(Time=0).values
+        grid_lon = ds["XLONG"].isel(Time=0).values
+
+    # Determine center grid index
+    center_idx = None
+    if center_lat is not None and center_lon is not None:
+        # Find nearest grid point to the given lat/lon
+        dist = (grid_lat - center_lat) ** 2 + (grid_lon - center_lon) ** 2
+        center_idx = np.unravel_index(np.argmin(dist), dist.shape)
+        logger.info(
+            f"Centering on grid index {center_idx} (nearest to {center_lat}, {center_lon})"
+        )
+
+    proj = wrf.get_wrf_cartopy_crs(exp.cfg.domain_control)
+    fig = observations.plotting.plot_obs_vs_grid(
+        grid_lat=grid_lat,
+        grid_lon=grid_lon,
+        observations=obs,
+        proj=proj,
+        center_idx=center_idx,
+        window_size=window_size,
+    )
+
+    title = f"Observations vs Grid - Cycle {cycle_info.index}"
+    if instrument or quantity:
+        filters = [f for f in [instrument, quantity] if f is not None]
+        title += f" ({', '.join(filters)})"
+    fig.suptitle(title)
+
+    output_path = exp.paths.plots / f"obs_vs_grid_cycle_{cycle_info.index:03d}.png"
+    output_path.parent.mkdir(exist_ok=True, parents=True)
+
+    fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    logger.info(f"Saved obs vs grid plot to {output_path}")
