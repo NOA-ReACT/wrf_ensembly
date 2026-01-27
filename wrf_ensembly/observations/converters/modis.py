@@ -192,7 +192,7 @@ def convert_modis(
             "z": 0.0,
             "z_type": "columnar",
             "value": aod550,
-            "value_uncertainty": pd.NA,  # MODIS doesn't provide uncertainty in this product
+            "value_uncertainty": pd.NA,  # Will compute just below
             "qc_flag": valid_mask.astype(int),
             "orig_filename": hdf_path.name,
             "metadata": pd.NA,
@@ -203,6 +203,11 @@ def convert_modis(
         {"indices": indices[i], "names": binned_coord_names, "shape": binned_shape}
         for i in range(df.shape[0])
     ]
+
+    # Compute uncertainty based on AOD value
+    # Formula devised through a first departures comparison of MODIS AOD and a WRF freerun
+    # over the Sahara, August of 2024
+    df["value_uncertainty"] = np.maximum(0.05 + 0.30 * df["value"], 0.1)
 
     # Filter to only valid observations
     df = df[df["qc_flag"] == 1]
