@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Literal
 
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
@@ -20,6 +21,7 @@ def plot_forecast_vs_analysis(
     experiment_name: str = "",
     cycle: int = 0,
     time_str: str = "",
+    plot_type: Literal["mean", "spread"] = "mean",
 ) -> Figure:
     """
     Create a three-panel comparison plot: forecast, analysis, and analysis - forecast.
@@ -33,6 +35,7 @@ def plot_forecast_vs_analysis(
         experiment_name: Name of the experiment for the figure title.
         cycle: Cycle index for the figure title.
         time_str: Time string for the figure title.
+        plot_type: Type of plot to create, either "mean" or "spread".
 
     Returns:
         A matplotlib Figure with three panels.
@@ -85,23 +88,37 @@ def plot_forecast_vs_analysis(
         figsize=figsize,
     )
 
+    # Configure panels based on plot type
+    if plot_type == "spread":
+        forecast_title = "Forecast Spread"
+        analysis_title = "Analysis Spread"
+        diff_title = "Analysis Spread - Forecast Spread"
+        main_cmap = variable_cfg.spread_cmap
+        main_vmin = variable_cfg.spread_vmin
+        main_vmax = variable_cfg.spread_vmax
+    else:  # mean
+        forecast_title = "Forecast"
+        analysis_title = "Analysis"
+        diff_title = "Analysis - Forecast"
+        main_cmap = variable_cfg.cmap
+        main_vmin = variable_cfg.vmin
+        main_vmax = variable_cfg.vmax
+
+    # If vmin/vmax not specified, use combined range from both forecast and analysis
+    # so they have the same color scale
+    if main_vmin is None or main_vmax is None:
+        combined_min = min(float(forecast_var.min()), float(analysis_var.min()))
+        combined_max = max(float(forecast_var.max()), float(analysis_var.max()))
+        if main_vmin is None:
+            main_vmin = combined_min
+        if main_vmax is None:
+            main_vmax = combined_max
+
     panels = [
+        (forecast_title, forecast_var, main_cmap, main_vmin, main_vmax),
+        (analysis_title, analysis_var, main_cmap, main_vmin, main_vmax),
         (
-            "Forecast",
-            forecast_var,
-            variable_cfg.cmap,
-            variable_cfg.vmin,
-            variable_cfg.vmax,
-        ),
-        (
-            "Analysis",
-            analysis_var,
-            variable_cfg.cmap,
-            variable_cfg.vmin,
-            variable_cfg.vmax,
-        ),
-        (
-            "Analysis - Forecast",
+            diff_title,
             diff_var,
             variable_cfg.diff_cmap,
             variable_cfg.diff_vmin,

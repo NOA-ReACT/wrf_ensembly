@@ -583,11 +583,20 @@ class PlotVariableConfig:
     diff_vmax: Optional[float] = None
     """Colorbar maximum for the difference panel. None means auto."""
 
+    spread_vmin: Optional[float] = None
+    """Colorbar minimum for forecast/analysis spread panels. None means auto."""
+
+    spread_vmax: Optional[float] = None
+    """Colorbar maximum for forecast/analysis spread panels. None means auto."""
+
     cmap: str = "viridis"
     """Colormap for forecast/analysis panels"""
 
     diff_cmap: str = "RdBu_r"
     """Colormap for the difference panel"""
+
+    spread_cmap: str = "viridis"
+    """Colormap for spread panels"""
 
 
 @dataclass
@@ -602,6 +611,9 @@ class ForecastVsAnalysisPlotsConfig:
 
     dpi: int = 150
     """DPI for saved plot images"""
+
+    include_spread: bool = False
+    """Whether to also generate spread comparison plots"""
 
 
 @dataclass
