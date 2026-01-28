@@ -6,8 +6,12 @@ import xarray as xr
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.config import PlotVariableConfig
 from wrf_ensembly.console import logger
+from wrf_ensembly.diagnostics import read_obs_seq_nc
 from wrf_ensembly.experiment import experiment
-from wrf_ensembly.plotting import plot_forecast_vs_analysis
+from wrf_ensembly.plotting import (
+    generate_filter_stats_plots,
+    plot_forecast_vs_analysis,
+)
 from wrf_ensembly.wrf import get_wrf_cartopy_crs
 
 
@@ -149,3 +153,55 @@ def forecast_vs_analysis(experiment_path: Path, cycle: int, variables: tuple):
         analysis_ds.close()
 
     logger.info(f"All plots saved to {output_dir}")
+
+
+@plots_cli.command()
+@click.argument("cycle", type=int)
+@pass_experiment_path
+def cycle_filter_stats(experiment_path: Path, cycle: int):
+    """
+    Generate diagnostic plots from DART filter output for a given cycle.
+
+    Reads the obs_seq.final NetCDF diagnostics file and produces scatter plots
+    and rank histograms. Plots are generated for each observation type
+    separately and for all types combined.
+    """
+
+    logger.setup("plots-cycle-filter-stats", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    diag_file = exp.paths.data_diag / f"cycle_{exp.cycles[cycle].index}.nc"
+    if not diag_file.exists():
+        logger.error(f"Diagnostics file not found: {diag_file}")
+        logger.error("Ensure `ensemble filter` has been run for this cycle.")
+        return
+
+    logger.info(f"Reading diagnostics from {diag_file}")
+    df = read_obs_seq_nc(diag_file)
+    logger.info(f"Loaded {len(df)} observations")
+
+    base_output_dir = exp.paths.plots / "cycle_filter_stats" / f"cycle_{cycle:03d}"
+
+    # Generate plots for all observations combined
+    logger.info("Generating plots for all observation types combined...")
+    generate_filter_stats_plots(
+        df,
+        base_output_dir / "all",
+        "All Types",
+        logger=logger,
+    )
+
+    # Generate plots per observation type
+    obs_types = df["obs_type"].unique()
+    if len(obs_types) > 1:
+        for obs_type in sorted(obs_types):
+            logger.info(f"Generating plots for {obs_type}...")
+            subset = df[df["obs_type"] == obs_type].copy()
+            generate_filter_stats_plots(
+                subset,
+                base_output_dir / obs_type,
+                obs_type,
+                logger=logger,
+            )
+
+    logger.info(f"All plots saved to {base_output_dir}")
