@@ -426,11 +426,11 @@ def filter(experiment_path: Path):
         )
         sys.exit(1)
 
-    exp.filter()
-
-    exp.state_machine.current_cycle.transition(StateTransition.FILTER_COMPLETE)
-    exp.save_status_to_db()
-    logger.info("Filter complete - ready for analysis")
+    success = exp.filter()
+    if success:
+        exp.state_machine.current_cycle.transition(StateTransition.FILTER_COMPLETE)
+        exp.save_status_to_db()
+        logger.info("Filter complete - ready for analysis")
 
 
 @ensemble_cli.command()
