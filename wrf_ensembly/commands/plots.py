@@ -29,33 +29,61 @@ def plots_cli():
     multiple=True,
     help="Plot only these variables (overrides config). Can be specified multiple times.",
 )
+@click.option(
+    "--include-spread/--no-include-spread",
+    default=None,
+    help="Generate spread comparison plots in addition to mean plots. If not specified, uses config value.",
+)
 @pass_experiment_path
-def forecast_vs_analysis(experiment_path: Path, cycle: int, variables: tuple):
+def forecast_vs_analysis(
+    experiment_path: Path, cycle: int, variables: tuple, include_spread: bool | None
+):
     """
     Generate three-panel comparison plots (forecast, analysis, difference) for a given cycle.
 
     Requires that `postprocess run` has been completed for the given cycle.
     Variables to plot are configured in [plots.forecast_vs_analysis] in the config file,
     or can be overridden with the --variables/-v option.
+
+    By default, only mean plots are generated. Use --include-spread to also generate
+    spread (standard deviation) comparison plots.
     """
 
     logger.setup("plots-forecast-vs-analysis", experiment_path)
     exp = experiment.Experiment(experiment_path)
     plot_cfg = exp.cfg.plots.forecast_vs_analysis
 
+    # Determine whether to include spread plots
+    if include_spread is None:
+        include_spread = plot_cfg.include_spread
+
     # Locate data files
     forecast_dir = exp.paths.forecast_path(cycle)
     analysis_dir = exp.paths.analysis_path(cycle)
 
-    forecast_file = forecast_dir / f"forecast_mean_cycle_{cycle:03d}.nc"
-    analysis_file = analysis_dir / f"analysis_mean_cycle_{cycle:03d}.nc"
+    forecast_mean_file = forecast_dir / f"forecast_mean_cycle_{cycle:03d}.nc"
+    analysis_mean_file = analysis_dir / f"analysis_mean_cycle_{cycle:03d}.nc"
 
-    if not forecast_file.exists():
-        logger.error(f"Forecast file not found: {forecast_file}")
+    if not forecast_mean_file.exists():
+        logger.error(f"Forecast file not found: {forecast_mean_file}")
         return
-    if not analysis_file.exists():
-        logger.error(f"Analysis file not found: {analysis_file}")
+    if not analysis_mean_file.exists():
+        logger.error(f"Analysis file not found: {analysis_mean_file}")
         return
+
+    # Check for spread files if needed
+    if include_spread:
+        forecast_spread_file = forecast_dir / f"forecast_sd_cycle_{cycle:03d}.nc"
+        analysis_spread_file = analysis_dir / f"analysis_sd_cycle_{cycle:03d}.nc"
+
+        if not forecast_spread_file.exists():
+            logger.error(f"Forecast spread file not found: {forecast_spread_file}")
+            logger.error("Spread files are required when --include-spread is enabled")
+            return
+        if not analysis_spread_file.exists():
+            logger.error(f"Analysis spread file not found: {analysis_spread_file}")
+            logger.error("Spread files are required when --include-spread is enabled")
+            return
 
     # Determine which variables to plot
     if variables:
@@ -84,60 +112,65 @@ def forecast_vs_analysis(experiment_path: Path, cycle: int, variables: tuple):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Open datasets and align forecast time to analysis time
-    forecast_ds = xr.open_dataset(forecast_file)
-    analysis_ds = xr.open_dataset(analysis_file)
+    forecast_mean_ds = xr.open_dataset(forecast_mean_file)
+    analysis_mean_ds = xr.open_dataset(analysis_mean_file)
+
+    if include_spread:
+        forecast_spread_ds = xr.open_dataset(forecast_spread_file)
+        analysis_spread_ds = xr.open_dataset(analysis_spread_file)
 
     # The forecast file may contain multiple timesteps while the analysis is always
     # a single timestep at the end of the cycle. Select the forecast timestep that
     # matches the analysis time.
-    time_dim = None
-    for candidate in ("t", "Time", "time"):
-        if candidate in forecast_ds.dims and candidate in analysis_ds.dims:
-            time_dim = candidate
-            break
+    analysis_time = analysis_mean_ds["t"].values[-1]
+    analysis_time_str = str(analysis_time)[:19]  # Trim to "YYYY-MM-DDTHH:MM:SS"
 
-    analysis_time_str = ""
-    if time_dim is not None:
-        analysis_time = analysis_ds[time_dim].values[-1]
-        analysis_time_str = str(analysis_time)[:19]  # Trim to "YYYY-MM-DDTHH:MM:SS"
-        matching = forecast_ds[time_dim] == analysis_time
-        if matching.any():
-            forecast_ds = forecast_ds.sel({time_dim: analysis_time})
-            analysis_ds = analysis_ds.isel({time_dim: -1})
-            logger.info(
-                f"Selected forecast timestep matching analysis time: {analysis_time}"
-            )
-        else:
-            logger.warning(
-                f"No matching timestep found in forecast for analysis time {analysis_time}, "
-                "using last forecast timestep"
-            )
-            forecast_ds = forecast_ds.isel({time_dim: -1})
-            analysis_ds = analysis_ds.isel({time_dim: -1})
+    matching = forecast_mean_ds["t"] == analysis_time
+    if matching.any():
+        forecast_mean_ds = forecast_mean_ds.sel(t=analysis_time)
+        analysis_mean_ds = analysis_mean_ds.isel(t=-1)
+        if include_spread:
+            forecast_spread_ds = forecast_spread_ds.sel(t=analysis_time)
+            analysis_spread_ds = analysis_spread_ds.isel(t=-1)
+        logger.info(
+            f"Selected forecast timestep matching analysis time: {analysis_time}"
+        )
+    else:
+        logger.warning(
+            f"No matching timestep found in forecast for analysis time {analysis_time}, "
+            "using last forecast timestep"
+        )
+        forecast_mean_ds = forecast_mean_ds.isel(t=-1)
+        analysis_mean_ds = analysis_mean_ds.isel(t=-1)
+        if include_spread:
+            forecast_spread_ds = forecast_spread_ds.isel(t=-1)
+            analysis_spread_ds = analysis_spread_ds.isel(t=-1)
 
     try:
         for var_cfg in vars_to_plot:
-            if var_cfg.name not in forecast_ds:
+            # Generate mean plots
+            if var_cfg.name not in forecast_mean_ds:
                 logger.warning(
                     f"Variable '{var_cfg.name}' not found in forecast file, skipping"
                 )
                 continue
-            if var_cfg.name not in analysis_ds:
+            if var_cfg.name not in analysis_mean_ds:
                 logger.warning(
                     f"Variable '{var_cfg.name}' not found in analysis file, skipping"
                 )
                 continue
 
-            logger.info(f"Plotting {var_cfg.name}...")
+            logger.info(f"Plotting {var_cfg.name} (mean)...")
             fig = plot_forecast_vs_analysis(
-                forecast_ds,
-                analysis_ds,
+                forecast_mean_ds,
+                analysis_mean_ds,
                 var_cfg,
                 arrangement=plot_cfg.arrangement,
                 proj=proj,
                 experiment_name=exp.cfg.metadata.name,
                 cycle=cycle,
                 time_str=analysis_time_str,
+                plot_type="mean",
             )
 
             suffix = f"_level{var_cfg.level}" if var_cfg.level is not None else ""
@@ -148,9 +181,45 @@ def forecast_vs_analysis(experiment_path: Path, cycle: int, variables: tuple):
             import matplotlib.pyplot as plt
 
             plt.close(fig)
+
+            # Generate spread plots if requested
+            if include_spread:
+                if var_cfg.name not in forecast_spread_ds:
+                    logger.warning(
+                        f"Variable '{var_cfg.name}' not found in forecast spread file, skipping spread plot"
+                    )
+                    continue
+                if var_cfg.name not in analysis_spread_ds:
+                    logger.warning(
+                        f"Variable '{var_cfg.name}' not found in analysis spread file, skipping spread plot"
+                    )
+                    continue
+
+                logger.info(f"Plotting {var_cfg.name} (spread)...")
+                fig = plot_forecast_vs_analysis(
+                    forecast_spread_ds,
+                    analysis_spread_ds,
+                    var_cfg,
+                    arrangement=plot_cfg.arrangement,
+                    proj=proj,
+                    experiment_name=exp.cfg.metadata.name,
+                    cycle=cycle,
+                    time_str=analysis_time_str,
+                    plot_type="spread",
+                )
+
+                output_path = output_dir / f"{var_cfg.name}{suffix}_spread.png"
+                fig.savefig(output_path, dpi=plot_cfg.dpi, bbox_inches="tight")
+                logger.info(f"Saved {output_path}")
+                fig.clear()
+                plt.close(fig)
+
     finally:
-        forecast_ds.close()
-        analysis_ds.close()
+        forecast_mean_ds.close()
+        analysis_mean_ds.close()
+        if include_spread:
+            forecast_spread_ds.close()
+            analysis_spread_ds.close()
 
     logger.info(f"All plots saved to {output_dir}")
 
