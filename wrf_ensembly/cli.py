@@ -41,6 +41,7 @@ class LazyGroup(click.Group):
         "status": ("wrf_ensembly.commands.status", "status_cli"),
         "observations": ("wrf_ensembly.commands.observations", "observations_cli"),
         "validation": ("wrf_ensembly.commands.validation", "validation_cli"),
+        "plots": ("wrf_ensembly.commands.plots", "plots_cli"),
     },
 )
 @click.argument(
