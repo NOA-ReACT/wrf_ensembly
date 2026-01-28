@@ -562,6 +562,59 @@ class PostprocessConfig:
 
 
 @dataclass
+class PlotVariableConfig:
+    """Configuration for a single variable to plot"""
+
+    name: str
+    """Variable name in the netCDF file"""
+
+    level: Optional[int] = None
+    """Vertical level index to select. None means the variable is 2D."""
+
+    vmin: Optional[float] = None
+    """Colorbar minimum for forecast/analysis panels. None means auto."""
+
+    vmax: Optional[float] = None
+    """Colorbar maximum for forecast/analysis panels. None means auto."""
+
+    diff_vmin: Optional[float] = None
+    """Colorbar minimum for the difference panel. None means auto."""
+
+    diff_vmax: Optional[float] = None
+    """Colorbar maximum for the difference panel. None means auto."""
+
+    cmap: str = "viridis"
+    """Colormap for forecast/analysis panels"""
+
+    diff_cmap: str = "RdBu_r"
+    """Colormap for the difference panel"""
+
+
+@dataclass
+class ForecastVsAnalysisPlotsConfig:
+    """Configuration for forecast vs analysis comparison plots"""
+
+    variables: list[PlotVariableConfig] = field(default_factory=list)
+    """List of variables to plot"""
+
+    arrangement: str = "horizontal"
+    """Panel arrangement: 'horizontal' (1x3) or 'vertical' (3x1)"""
+
+    dpi: int = 150
+    """DPI for saved plot images"""
+
+
+@dataclass
+class PlotsConfig:
+    """Configuration for diagnostic plots"""
+
+    forecast_vs_analysis: ForecastVsAnalysisPlotsConfig = field(
+        default_factory=ForecastVsAnalysisPlotsConfig
+    )
+    """Configuration for forecast vs analysis comparison plots"""
+
+
+@dataclass
 class CopyFileConfig:
     """
     Configuration about a file to copy into the DART directory before running assimilation
@@ -631,6 +684,9 @@ class Config(DataClassTOMLMixin):
 
     environment: EnvironmentConfig = field(default_factory=EnvironmentConfig)
     """Environment variables to set when running the experiment"""
+
+    plots: PlotsConfig = field(default_factory=PlotsConfig)
+    """Configuration for diagnostic plots"""
 
 
 def _convert_datetimes_to_iso(obj: Any) -> Any:
