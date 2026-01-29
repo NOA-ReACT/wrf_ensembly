@@ -571,6 +571,9 @@ class PlotVariableConfig:
     level: Optional[int] = None
     """Vertical level index to select. None means the variable is 2D."""
 
+    extent: Optional[tuple[float, float, float, float]] = None
+    """Geographical extent of the plot (in degrees, min_lon, max_lon, min_lat, max_lat)"""
+
     vmin: Optional[float] = None
     """Colorbar minimum for forecast/analysis panels. None means auto."""
 

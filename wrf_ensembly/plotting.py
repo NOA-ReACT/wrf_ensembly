@@ -147,6 +147,9 @@ def plot_forecast_vs_analysis(
 
         ax.coastlines()
 
+        if variable_cfg.extent:
+            ax.set_extent(variable_cfg.extent, crs=ccrs.PlateCarree())
+
         level_str = (
             f" (level {variable_cfg.level})" if variable_cfg.level is not None else ""
         )
