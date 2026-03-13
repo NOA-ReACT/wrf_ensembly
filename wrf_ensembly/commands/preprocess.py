@@ -2,11 +2,16 @@ import datetime as dt
 import os
 import shutil
 import sys
+import tomllib
 from itertools import chain
 from pathlib import Path
 from typing import Optional
 
 import click
+import numpy as np
+import xarray as xr
+from rich.console import Console
+from rich.table import Table
 
 from wrf_ensembly import config, experiment, external, utils, wrf
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
@@ -365,14 +370,8 @@ def real(
 @click.option(
     "--jobs", type=int, help="Number of processes to use (also respects SLURM_NTASKS)"
 )
-@click.option(
-    "--member",
-    type=int,
-    callback=check_is_member_option_is_required,
-    help="When using different IC/BC for each member, which member to process",
-)
 @pass_experiment_path
-def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optional[int]):
+def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
     """
     Uses `interpolator-for-wrfchem` to interpolate the chemical initial conditions onto the WRF domain.
 
@@ -400,8 +399,12 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optiona
         logger.error(f"Species mapping file {mapping_path.resolve()} does not exist")
         sys.exit(1)
 
+    # Grab required variables from mapping file
+    species_map = tomllib.loads(mapping_path.read_text())
+    chem_vars = list(species_map["species_map"].keys())
+
     # Check that the provided global model contains data for all our cycles
-    global_model = INTERPOLATOR_GLOBAL_MODELS[chem.model_name](chem.path, mapping_path)
+    global_model = INTERPOLATOR_GLOBAL_MODELS[chem.model_name](chem.path, chem_vars)
     global_model_times = [t.replace(tzinfo=dt.timezone.utc) for t in global_model.times]
     missing_times = []
     for cycle in exp.cycles:
@@ -424,41 +427,11 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optiona
     # The necessary commands are gathered inside the array to run in parallel.
     commands = []
 
+    members = [0]
     if exp.cfg.data.per_member_meteorology:
-        wrfinput_path = (
-            exp.paths.data_icbc
-            / f"member_{member:02d}"
-            / f"wrfinput_d01_member_{member:02d}_cycle_0"
-        )
-    else:
-        wrfinput_path = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
-    commands.append(
-        external.ExternalProcess(
-            [
-                "interpolator-for-wrfchem",
-                chem.model_name,
-                chem.path,
-                mapping_path,
-                wrfinput_path,
-            ],
-            log_filename="interpolator_wrfinput.log",
-        )
-    )
-    for cycle in exp.cycles:
-        if exp.cfg.data.per_member_meteorology:
-            wrfinput_path = (
-                exp.paths.data_icbc
-                / f"member_{member:02d}"
-                / f"wrfinput_d01_member_{member:02d}_cycle_{cycle.index}"
-            )
-            wrfbdy_path = (
-                exp.paths.data_icbc
-                / f"member_{member:02d}"
-                / f"wrfbdy_d01_member_{member:02d}_cycle_{cycle.index}"
-            )
-        else:
-            wrfbdy_path = exp.paths.data_icbc / f"wrfbdy_d01_cycle_{cycle.index}"
-            wrfinput_path = exp.paths.data_icbc / f"wrfinput_d01_cycle_{cycle.index}"
+        members = list(range(exp.cfg.assimilation.n_members))
+
+    for member_i in members:
         commands.append(
             external.ExternalProcess(
                 [
@@ -466,13 +439,29 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optiona
                     chem.model_name,
                     chem.path,
                     mapping_path,
-                    wrfinput_path,
-                    f"--wrfbdy={wrfbdy_path}",
-                    "--no-ic",
+                    exp.paths.ic_path(member_i, 0),
                 ],
-                log_filename=f"interpolator_wrfbdy_cycle_{cycle.index}.log",
+                log_filename="interpolator_wrfinput.log",
             )
         )
+    for cycle in exp.cycles:
+        for member_i in members:
+            wrfinput_path = exp.paths.ic_path(member_i, cycle.index)
+            wrfbdy_path = exp.paths.bc_path(member_i, cycle.index)
+            commands.append(
+                external.ExternalProcess(
+                    [
+                        "interpolator-for-wrfchem",
+                        chem.model_name,
+                        chem.path,
+                        mapping_path,
+                        wrfinput_path,
+                        f"--wrfbdy={wrfbdy_path}",
+                        "--no-ic",
+                    ],
+                    log_filename=f"interpolator_wrfbdy_cycle_{cycle.index}.log",
+                )
+            )
 
     failure = False
     logger.info(f"Running interpolator-for-wrfchem with {jobs} jobs")
@@ -496,6 +485,105 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int], member: Optiona
     if failure:
         logger.error("One or more interpolator-for-wrfchem commands failed, exiting")
         sys.exit(1)
+
+
+@preprocess_cli.command()
+@pass_experiment_path
+def icbc_status(experiment_path: Path):
+    """
+    Shows the status of initial/boundary condition files for all members and cycles.
+    For files that exist, we also check if `interpolate-chem` has been executed by reading
+    the target variables from `species_map.toml` and checking if they are not filled with
+    zeros.
+    """
+
+    logger.setup("preprocess-icbc-status", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    # Check chemistry if species_map.toml exists
+    species_map_path = experiment_path / "species_map.toml"
+    chem_vars = []
+    if species_map_path.exists():
+        # Read the target variables
+        # The TOML format contains a `species_map` dictionary with keys that correspond
+        # to the variables of interest
+        species_map = tomllib.loads(species_map_path.read_text())
+        chem_vars = list(species_map["species_map"].keys())
+
+    n_members = exp.cfg.assimilation.n_members
+
+    def summarize(n_ok, n_total):
+        if n_ok == n_total:
+            return f"[green]✓ all ({n_ok})[/green]"
+        elif n_ok == 0:
+            return "[red]✗ none[/red]"
+        else:
+            return f"[yellow]~ {n_ok}/{n_total}[/yellow]"
+
+    def summarize_chem(n_ok, n_checked, n_total):
+        """n_ok: members with all chem vars non-zero, n_checked: members whose file existed"""
+        if n_checked == 0:
+            return "[dim]-[/dim]"
+        if n_ok == n_total:
+            return "[green]✓ all non-zero[/green]"
+        elif n_ok == 0:
+            return "[red]✗ all zero[/red]"
+        else:
+            return f"[yellow]~ {n_ok}/{n_total}[/yellow]"
+
+    table = Table(title="IC/BC Status")
+    table.add_column("Cycle", justify="center", style="bold cyan")
+    table.add_column("IC", justify="center")
+    table.add_column("BC", justify="center")
+    if chem_vars:
+        table.add_column("Chem (IC)", justify="center")
+        table.add_column("Chem (BC)", justify="center")
+
+    for cycle in exp.cycles:
+        ic_ok = 0
+        bc_ok = 0
+        ic_chem_ok = 0
+        bc_chem_ok = 0
+        ic_chem_checked = 0
+        bc_chem_checked = 0
+
+        for i in range(n_members):
+            ic = exp.paths.ic_path(i, cycle.index)
+            bc = exp.paths.bc_path(i, cycle.index)
+
+            if ic.exists():
+                ic_ok += 1
+                if chem_vars:
+                    ic_chem_checked += 1
+                    with xr.open_dataset(ic) as ds:
+                        if all(
+                            not np.all(ds[var].to_numpy() == 0) for var in chem_vars
+                        ):
+                            ic_chem_ok += 1
+
+            if bc.exists():
+                bc_ok += 1
+                if chem_vars:
+                    bc_chem_checked += 1
+                    with xr.open_dataset(bc) as ds:
+                        if all(
+                            not np.all(ds[f"{var}_BXS"].to_numpy() == 0)
+                            for var in chem_vars
+                        ):
+                            bc_chem_ok += 1
+
+        row = [
+            str(cycle.index),
+            summarize(ic_ok, n_members),
+            summarize(bc_ok, n_members),
+        ]
+        if chem_vars:
+            row.append(summarize_chem(ic_chem_ok, ic_chem_checked, n_members))
+            row.append(summarize_chem(bc_chem_ok, bc_chem_checked, n_members))
+
+        table.add_row(*row)
+
+    Console().print(table)
 
 
 @preprocess_cli.command()
