@@ -204,12 +204,7 @@ class Experiment:
             np.random.seed(self.cfg.perturbations.seed)
 
         # Open the first wrfinput file to get the shape of each variable
-        if self.cfg.data.per_member_meteorology:
-            wrfinput = xr.open_dataset(
-                self.paths.data_icbc / "member_00" / "wrfinput_d01_member_00_cycle_0"
-            )
-        else:
-            wrfinput = xr.open_dataset(self.paths.data_icbc / "wrfinput_d01_cycle_0")
+        wrfinput = xr.open_dataset(self.paths.ic_path(0, 0))
 
         pert_file = self.paths.data_diag / "perturbations" / f"perts_cycle_{cycle_i}.nc"
         pert_file.parent.mkdir(parents=True, exist_ok=True)
@@ -575,16 +570,7 @@ class Experiment:
         # Link wrfinput, required by filter to read coordinates
         wrfinput_path = dart_dir / "wrfinput_d01"
         wrfinput_path.unlink(missing_ok=True)
-        if self.cfg.data.per_member_meteorology:
-            wrfinput_cur_cycle_path = (
-                self.paths.data_icbc
-                / "member_00"
-                / f"wrfinput_d01_member_00_cycle_{self.current_cycle_i}"
-            )
-        else:
-            wrfinput_cur_cycle_path = (
-                self.paths.data_icbc / f"wrfinput_d01_cycle_{self.current_cycle_i}"
-            )
+        wrfinput_cur_cycle_path = self.paths.ic_path(0, self.current_cycle_i)
         wrfinput_path.symlink_to(wrfinput_cur_cycle_path)
         logger.info(f"Linked {wrfinput_path} to {wrfinput_cur_cycle_path}")
 
@@ -657,29 +643,8 @@ class Experiment:
         logger.info(f"Using {analysis_file} as analysis for member {member_i}")
 
         # Copy the initial & boundary condition files for the next cycle, as is
-        # First check if there is a member-specific IC/BC file for the next cycle,
-        # otherwise use the ensemble default
-        icbc_file = (
-            self.paths.data_icbc
-            / f"member_{member_i:02d}"
-            / f"wrfinput_d01_member_{member_i:02d}_cycle_{next_cycle_i}"
-        )
-        if icbc_file.exists():
-            logger.info(f"Using member-specific IC/BC file {icbc_file}")
-        else:
-            icbc_file = self.paths.data_icbc / f"wrfinput_d01_cycle_{next_cycle_i}"
-
-        # First check if there is a member-specific BC file for the next cycle,
-        # otherwise use the ensemble default
-        bdy_file = (
-            self.paths.data_icbc
-            / f"member_{member_i:02d}"
-            / f"wrfbdy_d01_member_{member_i:02d}_cycle_{next_cycle_i}"
-        )
-        if bdy_file.exists():
-            logger.info(f"Using member-specific BC file {bdy_file}")
-        else:
-            bdy_file = self.paths.data_icbc / f"wrfbdy_d01_cycle_{next_cycle_i}"
+        icbc_file = self.paths.ic_path(member_i, next_cycle_i)
+        bdy_file = self.paths.bc_path(member_i, next_cycle_i)
 
         icbc_target_file = member_path / "wrfinput_d01"
         bdy_target_file = member_path / "wrfbdy_d01"

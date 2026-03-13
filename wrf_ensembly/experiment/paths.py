@@ -114,3 +114,31 @@ class ExperimentPaths:
         if cycle is None:
             return self.scratch_dart
         return self.scratch_dart / f"cycle_{cycle:03d}"
+
+    def ic_path(self, member: int, cycle: int) -> Path:
+        """
+        Get the initial conditions (wrfinput) file for a given member/cycle.
+        Returns the member-specific path if it exists, otherwise the shared path.
+        """
+        member_path = (
+            self.data_icbc
+            / f"member_{member:02d}"
+            / f"wrfinput_d01_member_{member:02d}_cycle_{cycle}"
+        )
+        if member_path.exists():
+            return member_path
+        return self.data_icbc / f"wrfinput_d01_cycle_{cycle}"
+
+    def bc_path(self, member: int, cycle: int) -> Path:
+        """
+        Get the boundary conditions (wrfbdy) file for a given member/cycle.
+        Returns the member-specific path if it exists, otherwise the shared path.
+        """
+        member_path = (
+            self.data_icbc
+            / f"member_{member:02d}"
+            / f"wrfbdy_d01_member_{member:02d}_cycle_{cycle}"
+        )
+        if member_path.exists():
+            return member_path
+        return self.data_icbc / f"wrfbdy_d01_cycle_{cycle}"
