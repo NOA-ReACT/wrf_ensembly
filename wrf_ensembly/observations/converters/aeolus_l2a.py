@@ -3,18 +3,15 @@
 from pathlib import Path
 
 import click
+import coda
 import numpy as np
 import pandas as pd
 
 from wrf_ensembly.observations import io as obs_io
 
-try:
-    import coda
 
-    HAS_CODA = True
-except (ImportError, OSError):
-    HAS_CODA = False
-    coda = None
+def _read_brc_geolocation(cf, brc_idx: int, meas_idx: int, height_bin_count: int):
+    """Read and destagger rayleigh geolocation for one BRC/measurement.
 
 
 def convert_aeolus_l2a(path: Path) -> pd.DataFrame | None:

@@ -6,15 +6,9 @@ import click
 import numpy as np
 import pandas as pd
 
+import coda
+
 from wrf_ensembly.observations import io as obs_io
-
-try:
-    import coda
-
-    HAS_CODA = True
-except (ImportError, OSError):
-    HAS_CODA = False
-    coda = None
 
 
 # Variable mappings for Mie retrievals
@@ -64,18 +58,9 @@ def convert_aeolus_l2b(path: Path) -> pd.DataFrame | None:
 
     Returns:
         A pandas DataFrame in WRF-Ensembly Observation format, or None if no valid data.
-
-    Raises:
-        ImportError: If the coda library is not installed.
     """
-    if not HAS_CODA:
-        raise ImportError(
-            "The 'coda' library is required for reading AEOLUS L2B files. "
-            "Please install it using: pip install coda"
-        )
-
     # Open the CODA file
-    cf = coda.open(str(path))  # type: ignore[union-attr]
+    cf = coda.open(str(path))
     if cf.product_type != "ALD_U_N_2B":
         cf.close()
         raise ValueError("Input file is not an AEOLUS DBL L2B file.")
@@ -86,8 +71,8 @@ def convert_aeolus_l2b(path: Path) -> pd.DataFrame | None:
         data = {}
         for k, v in variables.items():
             try:
-                data[k] = coda.fetch(cf, *v)  # type: ignore[union-attr]
-            except coda.CodacError:  # type: ignore[union-attr]
+                data[k] = coda.fetch(cf, *v)
+            except coda.CodacError:
                 # If we can't fetch a variable, fill with NaN or appropriate default
                 if k in ["qc_pass", "observation_type"]:
                     data[k] = np.array([])
@@ -225,12 +210,6 @@ def aeolus_l2b(input_path: Path, output_path: Path):
     INPUT_PATH: Path to the AEOLUS L2B file
     OUTPUT_PATH: Path where to save the converted observations (will be saved as parquet)
     """
-    if not HAS_CODA:
-        raise click.ClickException(
-            "The 'coda' library is required for reading AEOLUS L2B files. "
-            "Please install it using: pip install coda"
-        )
-
     print(f"Converting AEOLUS L2B file: {input_path}")
     print(f"Output path: {output_path}")
 

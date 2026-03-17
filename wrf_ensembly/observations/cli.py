@@ -26,14 +26,12 @@ The resulting CLI will be: wrf-ensembly-obs-convert your_format [args...]
 import click
 
 from wrf_ensembly.observations.converters import (
+    HAS_AEOLUS_CONVERTERS,
     aeronet_cli,
     earthcare_ebd_cli,
+    modis_cli,
     remotap_spexone_cli,
     viirs_cli,
-    modis_cli,
-    aeolus_l2b_cli,
-    aeolus_l2a_cli,
-    HAS_AEOLUS_CONVERTERS,
 )
 from wrf_ensembly.observations.operations import (
     dump_info,
@@ -55,6 +53,9 @@ def convert_group():
     This tool provides converters for various observation data formats.
     Each converter takes raw observation files and converts them to the
     standardized WRF-Ensembly observation format (parquet files).
+
+    Some converters require extra dependencies:
+        - `aeolus-l2a` and `aeolus-l2b`: `stcorp/coda`
     """
     pass
 
@@ -67,8 +68,10 @@ convert_group.add_command(modis_cli)
 
 # Only add AEOLUS converters if the 'coda' library is available
 if HAS_AEOLUS_CONVERTERS:
-    convert_group.add_command(aeolus_l2b_cli)
+    from wrf_ensembly.observations.converters import aeolus_l2a_cli, aeolus_l2b_cli
+
     convert_group.add_command(aeolus_l2a_cli)
+    convert_group.add_command(aeolus_l2b_cli)
 
 
 @cli.group()
