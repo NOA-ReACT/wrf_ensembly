@@ -66,6 +66,62 @@ def _read_feature_mask(
     )  # (brc_count, meas_count, height_bin_count)
 
 
+def _vertical_bin_profile(
+    alt_1d: np.ndarray,
+    data_arrays: list[np.ndarray],
+    bin_edges: list[float],
+) -> tuple[np.ndarray, list[np.ndarray]]:
+    """Bin one profile's height bins into target altitude ranges.
+
+    Args:
+        alt_1d: Altitude midpoints for this profile, shape (height_bin_count,).
+        data_arrays: List of 1D arrays of shape (height_bin_count,) to bin.
+        bin_edges: Ascending altitude edges in meters defining the target bins.
+
+    Returns:
+        Tuple of (new_alt_1d, binned_arrays) where new_alt_1d has shape
+        (n_bins,) with bin midpoints, and binned_arrays have the same structure
+        as data_arrays but with n_bins = len(bin_edges)-1 elements.
+        Bins with no native samples get NaN.
+    """
+    n_bins = len(bin_edges) - 1
+    bin_edges_arr = np.array(bin_edges, dtype=float)
+    indices = np.digitize(alt_1d, bin_edges_arr) - 1  # 0-indexed bin assignment
+
+    new_alt = np.array(
+        [(bin_edges[k] + bin_edges[k + 1]) / 2.0 for k in range(n_bins)]
+    )
+    binned = []
+    for arr in data_arrays:
+        out = np.full(n_bins, np.nan)
+        for k in range(n_bins):
+            mask = indices == k
+            if mask.any():
+                out[k] = np.nanmean(arr[mask])
+        binned.append(out)
+
+    return new_alt, binned
+
+
+def _horizontal_bin_2d(
+    arrays: list[np.ndarray],
+    bin_size: int,
+) -> list[np.ndarray]:
+    """Average groups of bin_size consecutive profiles along axis 0.
+
+    Trims the profile dimension to a multiple of bin_size before averaging.
+    Each array must have shape (profile_count, height_bin_count).
+    """
+    n = arrays[0].shape[0]
+    n_bins = n // bin_size
+    result = []
+    for arr in arrays:
+        trimmed = arr[: n_bins * bin_size]
+        new_shape = (n_bins, bin_size) + arr.shape[1:]
+        result.append(np.nanmean(trimmed.reshape(new_shape), axis=1))
+    return result
+
+
 def _make_obs_df(
     timestamp_flat,
     lon_flat,
@@ -109,7 +165,14 @@ def _make_obs_df(
 
 
 def _convert_mle(
-    cf, brc_count: int, height_bin_count: int, feature_mask: np.ndarray, path: Path
+    cf,
+    brc_count: int,
+    height_bin_count: int,
+    feature_mask: np.ndarray,
+    path: Path,
+    vertical_bins: list[float] | None = None,
+    horizontal_bin_size: int | None = None,
+    filter_before_binning: bool = False,
 ) -> pd.DataFrame | None:
     """Convert the SCA-MLE product."""
     lat = np.zeros((brc_count, height_bin_count))
@@ -145,17 +208,63 @@ def _convert_mle(
             cf, "sca_mle_pcd", i, "profile_pcd_bins", -1, "extinction_variance"
         )
 
-    qc_pass = (valid_meas > 15) & (extinction != -1)
+    # Replace -1 sentinels with NaN before any binning
+    extinction = np.where(extinction == -1, np.nan, extinction)
 
-    brc_idx = np.repeat(np.arange(brc_count), height_bin_count)
+    qc_pass = valid_meas > 15
+
+    if filter_before_binning:
+        extinction = np.where(qc_pass, extinction, np.nan)
+
+    if vertical_bins is not None:
+        new_h = len(vertical_bins) - 1
+        new_lat = np.zeros((brc_count, new_h))
+        new_lon = np.zeros((brc_count, new_h))
+        new_alt = np.zeros((brc_count, new_h))
+        new_alt_top = np.full((brc_count, new_h), np.nan)
+        new_alt_bottom = np.full((brc_count, new_h), np.nan)
+        new_extinction = np.full((brc_count, new_h), np.nan)
+        new_timestamp = np.zeros((brc_count, new_h))
+        new_valid_meas = np.full((brc_count, new_h), np.nan)
+        bin_alt_tops = np.array(vertical_bins[1:], dtype=float)
+        bin_alt_bottoms = np.array(vertical_bins[:-1], dtype=float)
+        for i in range(brc_count):
+            binned_alt, binned = _vertical_bin_profile(
+                alt[i],
+                [lat[i], lon[i], extinction[i], valid_meas[i].astype(float)],
+                vertical_bins,
+            )
+            new_alt[i] = binned_alt
+            new_lat[i], new_lon[i], new_extinction[i], new_valid_meas[i] = binned
+            new_timestamp[i] = timestamp[i, 0]
+            new_alt_top[i] = bin_alt_tops
+            new_alt_bottom[i] = bin_alt_bottoms
+        lat, lon, alt, alt_top, alt_bottom = new_lat, new_lon, new_alt, new_alt_top, new_alt_bottom
+        extinction, valid_meas, timestamp = new_extinction, new_valid_meas, new_timestamp
+        height_bin_count = new_h
+
+    if horizontal_bin_size is not None:
+        lat, lon, alt, alt_top, alt_bottom, extinction, valid_meas, timestamp = (
+            _horizontal_bin_2d(
+                [lat, lon, alt, alt_top, alt_bottom, extinction, valid_meas, timestamp],
+                horizontal_bin_size,
+            )
+        )
+        brc_count = lat.shape[0]
+
+    qc_pass = ~np.isnan(extinction)
+    if not filter_before_binning and vertical_bins is None and horizontal_bin_size is None:
+        qc_pass = (valid_meas > 15) & ~np.isnan(extinction)
+
+    profile_idx = np.repeat(np.arange(brc_count), height_bin_count)
     bin_idx = np.tile(np.arange(height_bin_count), brc_count)
 
     n = brc_count * height_bin_count
     orig_coords = [
         {
-            "indices": np.array((brc_idx[i], bin_idx[i]), dtype=int),
+            "indices": np.array((profile_idx[i], bin_idx[i]), dtype=int),
             "shape": np.array((brc_count, height_bin_count), dtype=int),
-            "names": np.array(("brc", "height_bin"), dtype=object),
+            "names": np.array(("profile", "height_bin"), dtype=object),
         }
         for i in range(n)
     ]
@@ -165,10 +274,10 @@ def _convert_mle(
     valid_meas_flat = valid_meas.ravel()
     metadata = [
         {
-            "profile_id": int(brc_idx[i]),
-            "altitude_top": float(alt_top_flat[i]),
-            "altitude_bottom": float(alt_bottom_flat[i]),
-            "valid_measurements_in_brc": int(valid_meas_flat[i]),
+            "profile_id": int(profile_idx[i]),
+            "altitude_top": float(alt_top_flat[i]) if not np.isnan(alt_top_flat[i]) else None,
+            "altitude_bottom": float(alt_bottom_flat[i]) if not np.isnan(alt_bottom_flat[i]) else None,
+            "valid_measurements_in_brc": float(valid_meas_flat[i]) if not np.isnan(valid_meas_flat[i]) else None,
         }
         for i in range(n)
     ]
@@ -192,7 +301,14 @@ def _convert_mle(
 
 
 def _convert_sca(
-    cf, sca_count: int, height_bin_count: int, feature_mask: np.ndarray, path: Path
+    cf,
+    sca_count: int,
+    height_bin_count: int,
+    feature_mask: np.ndarray,
+    path: Path,
+    vertical_bins: list[float] | None = None,
+    horizontal_bin_size: int | None = None,
+    filter_before_binning: bool = False,
 ) -> pd.DataFrame | None:
     """Convert the SCA product.
 
@@ -230,6 +346,9 @@ def _convert_sca(
         (sca_count, height_bin_count)
     )
 
+    # Replace -1 sentinels with NaN before any binning
+    extinction = np.where(extinction == -1, np.nan, extinction)
+
     # processing_qc_flag is a bit-packed valid-if-set field (1-indexed):
     #   Bit 1 (0x01): extinction valid
     #   Bit 2 (0x02): backscatter valid
@@ -241,11 +360,51 @@ def _convert_sca(
     # We require at least the extinction bit to be set.
     # Also require at least 15 cloud-free measurements per BRC bin (same as MLE).
     valid_meas = np.sum(feature_mask, axis=1)  # (sca_count, height_bin_count)
-    qc_pass = (
-        ((processing_qc.astype(int) & 0x01) == 1)
-        & (extinction != -1)
-        & (valid_meas > 15)
-    )
+    qc_pass = ((processing_qc.astype(int) & 0x01) == 1) & (valid_meas > 15)
+
+    if filter_before_binning:
+        extinction = np.where(qc_pass, extinction, np.nan)
+
+    if vertical_bins is not None:
+        new_h = len(vertical_bins) - 1
+        new_lat = np.zeros((sca_count, new_h))
+        new_lon = np.zeros((sca_count, new_h))
+        new_alt = np.zeros((sca_count, new_h))
+        new_extinction = np.full((sca_count, new_h), np.nan)
+        new_timestamp = np.zeros((sca_count, new_h))
+        new_valid_meas = np.full((sca_count, new_h), np.nan)
+        new_processing_qc = np.full((sca_count, new_h), np.nan)
+        for i in range(sca_count):
+            binned_alt, binned = _vertical_bin_profile(
+                alt[i],
+                [lat[i], lon[i], extinction[i], valid_meas[i].astype(float), processing_qc[i]],
+                vertical_bins,
+            )
+            new_alt[i] = binned_alt
+            new_lat[i], new_lon[i], new_extinction[i], new_valid_meas[i], new_processing_qc[i] = binned
+            new_timestamp[i] = timestamp[i, 0]
+        lat, lon, alt = new_lat, new_lon, new_alt
+        extinction, valid_meas, processing_qc, timestamp = (
+            new_extinction, new_valid_meas, new_processing_qc, new_timestamp
+        )
+        height_bin_count = new_h
+
+    if horizontal_bin_size is not None:
+        lat, lon, alt, extinction, valid_meas, processing_qc, timestamp = (
+            _horizontal_bin_2d(
+                [lat, lon, alt, extinction, valid_meas, processing_qc, timestamp],
+                horizontal_bin_size,
+            )
+        )
+        sca_count = lat.shape[0]
+
+    qc_pass = ~np.isnan(extinction)
+    if not filter_before_binning and vertical_bins is None and horizontal_bin_size is None:
+        qc_pass = (
+            ((processing_qc.astype(int) & 0x01) == 1)
+            & ~np.isnan(extinction)
+            & (valid_meas > 15)
+        )
 
     sca_idx = np.repeat(np.arange(sca_count), height_bin_count)
     bin_idx = np.tile(np.arange(height_bin_count), sca_count)
@@ -255,7 +414,7 @@ def _convert_sca(
         {
             "indices": np.array((sca_idx[i], bin_idx[i]), dtype=int),
             "shape": np.array((sca_count, height_bin_count), dtype=int),
-            "names": np.array(("sca_profile", "height_bin"), dtype=object),
+            "names": np.array(("profile", "height_bin"), dtype=object),
         }
         for i in range(n)
     ]
@@ -291,11 +450,15 @@ def _convert_ael_pro(
     height_bin_count: int,
     feature_mask: np.ndarray,
     path: Path,
+    vertical_bins: list[float] | None = None,
+    horizontal_bin_size: int | None = None,
+    filter_before_binning: bool = False,
 ) -> pd.DataFrame | None:
     """Convert the AEL-PRO product.
 
     AEL-PRO is a per-measurement (finer resolution) product with brc_count × meas_count
-    profiles, each with height_bin_count altitude bins.
+    profiles, each with height_bin_count altitude bins. The BRC and measurement dimensions
+    are flattened into a single profile dimension before any binning is applied.
     """
     lat = np.zeros((brc_count, meas_count, height_bin_count))
     lon = np.zeros((brc_count, meas_count, height_bin_count))
@@ -350,15 +513,14 @@ def _convert_ael_pro(
     # Reject if any of bits 0–5 are set.
     # Also apply the per-measurement feature mask directly (AEL-PRO resolution matches).
     _AEL_PRO_PROBLEM_BITS = 0x3F
-    qc_pass = (
+    qc_pass_3d = (
         ((quality_index_bins.astype(int) & _AEL_PRO_PROBLEM_BITS) == 0)
         & (extinction != -1)
         & feature_mask
     )
 
-    brc_idx = np.repeat(np.arange(brc_count), meas_count * height_bin_count)
-    meas_idx = np.tile(np.repeat(np.arange(meas_count), height_bin_count), brc_count)
-    bin_idx = np.tile(np.arange(height_bin_count), brc_count * meas_count)
+    # Replace -1 sentinels with NaN before any binning
+    extinction = np.where(extinction == -1, np.nan, extinction)
 
     # BRC-level timestamps, repeated for each measurement and height bin
     timestamp = coda.fetch(cf, "ael_pro_opt_properties", -1, "starttime")
@@ -366,24 +528,97 @@ def _convert_ael_pro(
         (brc_count, meas_count, height_bin_count)
     )
 
-    n = brc_count * meas_count * height_bin_count
+    # Build brc_id array before flattening (needed for metadata)
+    brc_ids = np.repeat(np.arange(brc_count), meas_count).reshape(
+        (brc_count, meas_count)
+    )
+
+    # Flatten (brc, meas, H) → (brc*meas, H)
+    profile_count = brc_count * meas_count
+    lat = lat.reshape(profile_count, height_bin_count)
+    lon = lon.reshape(profile_count, height_bin_count)
+    alt = alt.reshape(profile_count, height_bin_count)
+    alt_top = alt_top.reshape(profile_count, height_bin_count)
+    alt_bottom = alt_bottom.reshape(profile_count, height_bin_count)
+    extinction = extinction.reshape(profile_count, height_bin_count)
+    timestamp = timestamp.reshape(profile_count, height_bin_count)
+    qc_pass_2d = qc_pass_3d.reshape(profile_count, height_bin_count)
+    brc_ids_flat = brc_ids.ravel()  # (profile_count,) — one BRC id per flattened profile
+    meas_ids_flat = np.tile(np.arange(meas_count), brc_count)
+
+    if filter_before_binning:
+        extinction = np.where(qc_pass_2d, extinction, np.nan)
+
+    if vertical_bins is not None:
+        new_h = len(vertical_bins) - 1
+        new_lat = np.zeros((profile_count, new_h))
+        new_lon = np.zeros((profile_count, new_h))
+        new_alt = np.zeros((profile_count, new_h))
+        new_extinction = np.full((profile_count, new_h), np.nan)
+        new_timestamp = np.zeros((profile_count, new_h))
+        bin_alt_tops = np.array(vertical_bins[1:], dtype=float)
+        bin_alt_bottoms = np.array(vertical_bins[:-1], dtype=float)
+        new_alt_top = np.tile(bin_alt_tops, (profile_count, 1))
+        new_alt_bottom = np.tile(bin_alt_bottoms, (profile_count, 1))
+        for p in range(profile_count):
+            binned_alt, binned = _vertical_bin_profile(
+                alt[p],
+                [lat[p], lon[p], extinction[p]],
+                vertical_bins,
+            )
+            new_alt[p] = binned_alt
+            new_lat[p], new_lon[p], new_extinction[p] = binned
+            new_timestamp[p] = timestamp[p, 0]
+        lat, lon, alt, alt_top, alt_bottom = new_lat, new_lon, new_alt, new_alt_top, new_alt_bottom
+        extinction, timestamp = new_extinction, new_timestamp
+        height_bin_count = new_h
+
+    if horizontal_bin_size is not None:
+        lat, lon, alt, alt_top, alt_bottom, extinction, timestamp = (
+            _horizontal_bin_2d(
+                [lat, lon, alt, alt_top, alt_bottom, extinction, timestamp],
+                horizontal_bin_size,
+            )
+        )
+        # brc_ids and meas_ids: take the first value in each horizontal group
+        n_new = profile_count // horizontal_bin_size
+        brc_ids_flat = brc_ids_flat[: n_new * horizontal_bin_size].reshape(
+            n_new, horizontal_bin_size
+        )[:, 0]
+        meas_ids_flat = meas_ids_flat[: n_new * horizontal_bin_size].reshape(
+            n_new, horizontal_bin_size
+        )[:, 0]
+        profile_count = lat.shape[0]
+
+    qc_pass = ~np.isnan(extinction)
+    if not filter_before_binning and vertical_bins is None and horizontal_bin_size is None:
+        qc_pass = qc_pass_2d
+
+    profile_idx = np.repeat(np.arange(profile_count), height_bin_count)
+    bin_idx = np.tile(np.arange(height_bin_count), profile_count)
+
+    n = profile_count * height_bin_count
     orig_coords = [
         {
-            "indices": np.array((brc_idx[i], meas_idx[i], bin_idx[i]), dtype=int),
-            "shape": np.array((brc_count, meas_count, height_bin_count), dtype=int),
-            "names": np.array(("brc", "measurement", "height_bin"), dtype=object),
+            "indices": np.array((profile_idx[i], bin_idx[i]), dtype=int),
+            "shape": np.array((profile_count, height_bin_count), dtype=int),
+            "names": np.array(("profile", "height_bin"), dtype=object),
         }
         for i in range(n)
     ]
 
     alt_top_flat = alt_top.ravel()
     alt_bottom_flat = alt_bottom.ravel()
+    # Expand brc/meas ids to all height bins for metadata
+    brc_ids_per_obs = np.repeat(brc_ids_flat, height_bin_count)
+    meas_ids_per_obs = np.repeat(meas_ids_flat, height_bin_count)
     metadata = [
         {
-            "profile_id": int(brc_idx[i]),
-            "measurement_id": int(meas_idx[i]),
-            "altitude_top": float(alt_top_flat[i]),
-            "altitude_bottom": float(alt_bottom_flat[i]),
+            "profile_id": int(profile_idx[i]),
+            "brc_id": int(brc_ids_per_obs[i]),
+            "measurement_id": int(meas_ids_per_obs[i]),
+            "altitude_top": float(alt_top_flat[i]) if not np.isnan(alt_top_flat[i]) else None,
+            "altitude_bottom": float(alt_bottom_flat[i]) if not np.isnan(alt_bottom_flat[i]) else None,
         }
         for i in range(n)
     ]
@@ -411,6 +646,10 @@ def convert_aeolus_l2a(
     include_mle: bool = True,
     include_sca: bool = True,
     include_ael_pro: bool = True,
+    vertical_bins: list[float] | None = None,
+    horizontal_bin_size: int | None = None,
+    ael_pro_horizontal_bin_size: int | None = None,
+    filter_before_binning: bool = False,
 ) -> pd.DataFrame | None:
     """Convert an AEOLUS L2A file to WRF-Ensembly Observation format.
 
@@ -419,6 +658,11 @@ def convert_aeolus_l2a(
         include_mle: Include the SCA-MLE product (instrument: AEOLUS_L2A_MLE).
         include_sca: Include the SCA product (instrument: AEOLUS_L2A_SCA).
         include_ael_pro: Include the AEL-PRO product (instrument: AEOLUS_L2A_AEL_PRO).
+        vertical_bins: Altitude bin edges in meters for vertical downsampling (all products).
+        horizontal_bin_size: Number of consecutive BRCs to average for MLE and SCA.
+        ael_pro_horizontal_bin_size: Number of consecutive profiles to average for AEL-PRO
+            (applied after flattening the BRC×measurement dimensions).
+        filter_before_binning: Set QC-failed values to NaN before averaging.
 
     Returns:
         A pandas DataFrame in WRF-Ensembly Observation format, or None if no valid data.
@@ -447,7 +691,16 @@ def convert_aeolus_l2a(
         print(
             f"  Converting MLE product ({mle_count} BRCs × {height_bin_count} bins)..."
         )
-        df = _convert_mle(cf, mle_count, height_bin_count, feature_mask, path)
+        df = _convert_mle(
+            cf,
+            mle_count,
+            height_bin_count,
+            feature_mask,
+            path,
+            vertical_bins=vertical_bins,
+            horizontal_bin_size=horizontal_bin_size,
+            filter_before_binning=filter_before_binning,
+        )
         if df is not None:
             parts.append(df)
 
@@ -455,7 +708,16 @@ def convert_aeolus_l2a(
         print(
             f"  Converting SCA product ({sca_count} profiles × {height_bin_count} bins)..."
         )
-        df = _convert_sca(cf, sca_count, height_bin_count, feature_mask, path)
+        df = _convert_sca(
+            cf,
+            sca_count,
+            height_bin_count,
+            feature_mask,
+            path,
+            vertical_bins=vertical_bins,
+            horizontal_bin_size=horizontal_bin_size,
+            filter_before_binning=filter_before_binning,
+        )
         if df is not None:
             parts.append(df)
 
@@ -465,7 +727,15 @@ def convert_aeolus_l2a(
             f"({mle_count} BRCs × {meas_in_brc_count} measurements × {height_bin_count} bins)..."
         )
         df = _convert_ael_pro(
-            cf, mle_count, meas_in_brc_count, height_bin_count, feature_mask, path
+            cf,
+            mle_count,
+            meas_in_brc_count,
+            height_bin_count,
+            feature_mask,
+            path,
+            vertical_bins=vertical_bins,
+            horizontal_bin_size=ael_pro_horizontal_bin_size,
+            filter_before_binning=filter_before_binning,
         )
         if df is not None:
             parts.append(df)
@@ -493,14 +763,60 @@ def convert_aeolus_l2a(
     default=True,
     help="Include AEL-PRO product (AEOLUS_L2A_AEL_PRO).",
 )
+@click.option(
+    "--vertical-bins",
+    type=str,
+    default=None,
+    help="Altitude bin edges in meters, comma-separated (e.g. '0,1000,3000,8000,15000'). "
+    "Data within each range is averaged. Applied to all products.",
+)
+@click.option(
+    "--horizontal-bin-size",
+    type=int,
+    default=None,
+    help="Number of consecutive BRCs to average for MLE and SCA products.",
+)
+@click.option(
+    "--ael-pro-horizontal-bin-size",
+    type=int,
+    default=None,
+    help="Number of consecutive profiles to average for AEL-PRO (applied after flattening "
+    "the BRC×measurement dimensions into a single profile axis).",
+)
+@click.option(
+    "--filter-before-binning",
+    is_flag=True,
+    default=False,
+    help="Apply QC filtering before binning (sets bad data to NaN before averaging). "
+    "Recommended when using any binning option.",
+)
 def aeolus_l2a(
-    input_path: Path, output_path: Path, mle: bool, sca: bool, ael_pro: bool
+    input_path: Path,
+    output_path: Path,
+    mle: bool,
+    sca: bool,
+    ael_pro: bool,
+    vertical_bins: str | None,
+    horizontal_bin_size: int | None,
+    ael_pro_horizontal_bin_size: int | None,
+    filter_before_binning: bool,
 ):
     """Convert AEOLUS L2A file to WRF-Ensembly observation format.
 
     INPUT_PATH: Path to the AEOLUS L2A file
     OUTPUT_PATH: Path where to save the converted observations (will be saved as parquet)
+
+    If you specify any bin sizes, data will be aggregated using mean (NaNs ignored).
+    MLE and SCA share the same --horizontal-bin-size (BRC-level resolution).
+    AEL-PRO has a separate --ael-pro-horizontal-bin-size since it is at much finer
+    resolution (individual measurements within BRCs).
+    It is recommended to use --filter-before-binning alongside any binning option.
     """
+    vertical_bins_parsed: list[float] | None = None
+    if vertical_bins is not None:
+        vertical_bins_parsed = [float(v) for v in vertical_bins.split(",")]
+        print(f"Using vertical bins: {vertical_bins_parsed}")
+
     print(f"Converting AEOLUS L2A file: {input_path}")
     print(f"Output path: {output_path}")
 
@@ -509,6 +825,10 @@ def aeolus_l2a(
         include_mle=mle,
         include_sca=sca,
         include_ael_pro=ael_pro,
+        vertical_bins=vertical_bins_parsed,
+        horizontal_bin_size=horizontal_bin_size,
+        ael_pro_horizontal_bin_size=ael_pro_horizontal_bin_size,
+        filter_before_binning=filter_before_binning,
     )
     if converted_df is None or converted_df.empty:
         print("No observations found in the input file, aborting")
