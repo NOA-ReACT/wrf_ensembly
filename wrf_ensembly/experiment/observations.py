@@ -4,9 +4,8 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
-from wrf_ensembly import external
+from wrf_ensembly import external, wrf
 from wrf_ensembly import observations as obs
-from wrf_ensembly import wrf
 from wrf_ensembly.config import Config
 from wrf_ensembly.console import logger
 from wrf_ensembly.cycling import CycleInformation
@@ -66,13 +65,7 @@ class ExperimentObservations:
                         ) NOT NULL,
                         orig_filename STRING NOT NULL,
                         metadata JSON,
-                        cluster_id STRING,
-                        downsampling_info STRUCT(
-                            method STRING,
-                            obs_count INT,
-                            time_spread_seconds DOUBLE,
-                            spatial_spread_meters DOUBLE
-                        )
+                        cluster_id STRING
             )"""
         )
         return con
@@ -269,90 +262,6 @@ class ExperimentObservations:
 
         return len(df.index)
 
-    def apply_superobbing(self) -> None:
-        """
-        Applies the configured downsampling (super-orbing) methods to all observations in the database.
-
-        This uses a two-step process:
-        1. Assign cluster IDs to observations based on spatio-temporal bins
-        2. Compute superobs by aggregating observations within each cluster
-
-        It will clear any old cluster IDs and downsampled observations first, then replace them with new ones.
-
-        The `observations.superobbing` configuration dictionary controls how to downsample each instrument.
-        The keys are the `instrument.quantity` pairs, e.g. `radiosonde.temperature`, and the values are
-        how to downsample, check the `SuperobbingConfig` dataclass in `config.py` for details.
-        """
-
-        if not self.cfg.observations.superobbing:
-            logger.info("No superobbing configuration found, skipping downsampling.")
-            return
-
-        with self._get_duckdb(read_only=False) as con:
-            # Clean up any old downsampled observations and cluster IDs
-            res = con.execute(
-                "DELETE FROM observations WHERE downsampling_info IS NOT NULL"
-            )
-            if res.rowcount > 0:
-                logger.info(f"Removed {res.rowcount} old downsampled observations.")
-
-            # Clear old cluster IDs
-            con.execute("UPDATE observations SET cluster_id = NULL")
-
-            for key, superobb_config in self.cfg.observations.superobbing.items():
-                try:
-                    instrument, quantity = key.split(".")
-                except ValueError:
-                    raise ValueError(
-                        f"Invalid superobbing key '{key}', must be in the format 'instrument.quantity'"
-                    )
-
-                logger.info(f"Applying superobbing for {instrument}.{quantity}")
-                logger.info("  Step 1: Assigning cluster IDs...")
-                obs.superobbing.assign_cluster_ids_duckdb_minmax(
-                    con, superobb_config, instrument, quantity
-                )
-
-                logger.info("  Step 2: Computing superobs from clusters...")
-                df_superobbed = obs.superobbing.compute_superobs_from_clusters(
-                    con, superobb_config, self.cfg.domain_control, instrument, quantity
-                )
-
-                if df_superobbed.empty:
-                    logger.warning(
-                        f"No superobbed observations generated for {instrument}.{quantity}, skipping."
-                    )
-                    continue
-
-                # Insert the new superobed observations
-                con.register("df_superobed_view", df_superobbed)
-                con.execute(
-                    """
-                    INSERT INTO observations (
-                        instrument, quantity, time, longitude, latitude, x, y, z, z_type,
-                        value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata,
-                        cluster_id, downsampling_info
-                    )
-                    SELECT
-                        instrument, quantity, time, longitude, latitude, x, y, z, z_type,
-                        value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata,
-                        cluster_id, downsampling_info
-                    FROM df_superobed_view
-                """
-                )
-
-                logger.info(
-                    f"Superobbing complete for {instrument}.{quantity}, generated {len(df_superobbed)} superobservations."
-                )
-
-    def delete_superobs(self):
-        """
-        Deletes all super-orbed observations from the database.
-        """
-
-        with self._get_duckdb(read_only=False) as con:
-            con.execute("DELETE FROM observations WHERE downsampling_info IS NOT NULL")
-
     def get_observations_for_cycle(
         self, cycle: CycleInformation
     ) -> pd.DataFrame | None:
@@ -379,27 +288,9 @@ class ExperimentObservations:
 
         # Query the observations with duck db, find only files that overlap with the time window and instrument list
         with self._get_duckdb(read_only=True) as con:
-            # If there are no super-orbed observations, we will use the original ones.
-            superobbed_count = con.execute(
-                """
-                SELECT COUNT(*) FROM observations WHERE downsampling_info IS NOT NULL
-            """
-            ).fetchone()
-            superobbed_count = superobbed_count[0] if superobbed_count else 0
-            superobbed_available = superobbed_count > 0
-
-            if superobbed_available:
-                logger.info("Using superobbs for assimilation.")
-                observations = con.execute(
-                    f"SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}' AND downsampling_info IS NOT NULL"
-                ).fetchdf()
-            else:
-                logger.info(
-                    "No super-orbed observations found, using original observations."
-                )
-                observations = con.execute(
-                    f"SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}' AND downsampling_info IS NULL"
-                ).fetchdf()
+            observations = con.execute(
+                f"SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}' AND downsampling_info IS NULL"
+            ).fetchdf()
 
         if instruments is not None:
             observations = observations[observations["instrument"].isin(instruments)]

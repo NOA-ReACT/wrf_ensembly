@@ -260,39 +260,11 @@ class AssimilationConfig:
 
 
 @dataclass
-class SuperobbingConfig:
-    """Configuration of how to superobb a specific instrument's observations"""
-
-    spatial_radius_x_meters: float
-    """Spatial radius in the x direction, meters"""
-
-    spatial_radius_y_meters: float
-    """Spatial radius in the y direction, meters"""
-
-    spatial_radius_z: Optional[float] = None
-    """
-    Spatial radius in the z direction, in whatever units the observation's z_type is in
-    (e.g., meters for height, hPa for pressure).
-
-    If missing, no clustering in the z direction is done.
-    """
-
-    temporal_radius_seconds: Optional[int] = None
-    """
-    Temporal radius in seconds
-    If missing, no clustering in the time dimension is done.
-    """
-
-
-@dataclass
 class ObservationsConfig:
     """Configuration related to observation preprocessing (mainly for the `observations preprocess-for-wrf` command)"""
 
     instruments_to_assimilate: Optional[list[str]] = None
     """Which instruments to assimilate. If None, all available instruments are used."""
-
-    superobbing: Dict[str, SuperobbingConfig] = field(default_factory=dict)
-    """Configuration of how to superobb specific instruments. Key is the instrument name."""
 
     error_inflation_factor: Dict[str, float] = field(default_factory=dict)
     """

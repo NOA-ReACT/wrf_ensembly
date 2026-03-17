@@ -177,59 +177,6 @@ wrf-ensembly obs plot-cycle-locations 0
 wrf-ensembly obs delete 'original_file.nc'
 ```
 
-## Superorbing (Downsampling)
-
-Superorbing reduces observation density by spatiotemporally clustering nearby observations and combining them into "superobservations". This helps:
-
-- Reduce computational cost of data assimilation
-- Avoid over-representation of densely observed areas
-- Maintain representative coverage
-
-### Configuration
-
-Superorbing is configured in the experiment's config file under `observations.superorbing`:
-
-```toml
-[observations.superorbing]
-
-[observations.superorbing."aeronet.AOD_500nm"]
-spatial_radius_x_meters = 50000.0
-spatial_radius_y_meters = 50000.0
-temporal_radius_seconds = 1800
-
-[observations.superorbing."radiosonde.temperature"]
-spatial_radius_x_meters = 100000.0
-spatial_radius_y_meters = 100000.0
-spatial_radius_z = 50.0  # 50 hPa for pressure levels, since the z_type is 'pressure'
-temporal_radius_seconds = 3600
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `spatial_radius_x_meters` | float | **Required.** Spatial clustering radius in x direction (meters) |
-| `spatial_radius_y_meters` | float | **Required.** Spatial clustering radius in y direction (meters) |
-| `spatial_radius_z` | float | Spatial clustering radius in z direction (in units of z_type). Optional |
-| `temporal_radius_seconds` | int | Temporal clustering radius (seconds). *Default: 60* |
-
-### Algorithm
-
-The system uses DBSCAN clustering to group observations that are:
-- Within specified spatial distances (x, y, and optionally z directions)
-- Within specified temporal distance
-- From the same instrument and quantity
-
-Superobservations are created by:
-- Uncertainty-weighted averaging of observation values
-- Combining uncertainties assuming independent errors
-- Recording metadata about the number of original observations and their spread
-
-### Applying Superorbing
-
-```bash
-# Apply configured superorbing to all observations
-wrf-ensembly obs superorbing
-```
-
 ## Cycle Preparation
 
 Before data assimilation, observations must be prepared for each assimilation cycle:

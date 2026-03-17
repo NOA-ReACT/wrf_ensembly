@@ -10,7 +10,7 @@ Structure:
 - converters/: Individual converter modules for instruments, each containing both conversion functions and CLI commands
 """
 
-from . import converters, dart, io, plotting, superobbing
+from . import converters, dart, io, plotting
 from .utils import project_locations_to_wrf
 
 __all__ = [
@@ -18,6 +18,5 @@ __all__ = [
     "converters",
     "project_locations_to_wrf",
     "dart",
-    "superobbing",
     "plotting",
 ]
