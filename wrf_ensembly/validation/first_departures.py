@@ -38,13 +38,20 @@ class FirstDeparturesAnalysis:
     and uncertainty across different regimes, spatial regions, and time periods.
     """
 
-    def __init__(self, experiment: Experiment, instrument: str, quantity: str):
+    def __init__(
+        self,
+        experiment: Experiment,
+        instrument: str,
+        quantity: str,
+        proj: ccrs.Projection | None = None,
+    ):
         """Initialize first departures analysis for a specific instrument-quantity pair.
 
         Args:
             experiment: The experiment to analyze
             instrument: The instrument name (e.g., 'MODIS', 'VIIRS')
             quantity: The observation quantity to analyze (e.g., 'AOD_550nm')
+            proj: Cartopy projection for map plots. If None, uses PlateCarree.
         """
         self.exp = experiment
         self.instrument = instrument
@@ -60,6 +67,9 @@ class FirstDeparturesAnalysis:
 
         # Load regime config if available
         self.regime_config = self._get_regime_config()
+
+        # Set map projection
+        self.map_proj = proj or ccrs.PlateCarree()
 
     def _get_regime_config(self) -> Optional[FirstDeparturesRegimeConfig]:
         """Get regime configuration for this instrument-quantity pair if it exists."""
@@ -311,7 +321,7 @@ class FirstDeparturesAnalysis:
 
         # Plot
         fig, axes = plt.subplots(
-            3, 1, figsize=(12, 10), subplot_kw={"projection": ccrs.PlateCarree()}
+            3, 1, figsize=(12, 10), subplot_kw={"projection": self.map_proj}
         )
 
         titles = [
@@ -324,7 +334,7 @@ class FirstDeparturesAnalysis:
 
         for ax, grid, title, cmap in zip(axes, grids, titles, cmaps):
             ax.coastlines()
-            ax.gridlines(draw_labels=True, alpha=0.3)
+            ax.gridlines(alpha=0.3)
 
             # Use diverging colormap centered at 0 for bias
             if "Bias" in title:
@@ -352,7 +362,7 @@ class FirstDeparturesAnalysis:
             ax.set_title(
                 f"{self.exp.cfg.metadata.name} - {title} - {self.instrument}.{self.quantity}"
             )
-            fig.colorbar(pcm, ax=ax, orientation="horizontal", pad=0.05, shrink=0.8)
+            fig.colorbar(pcm, ax=ax, orientation="horizontal", pad=0.05, shrink=0.6)
 
         plt.tight_layout()
 

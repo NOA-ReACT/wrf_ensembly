@@ -76,7 +76,7 @@ def plot_forecast_vs_analysis(
 
     if arrangement == "vertical":
         nrows, ncols = 3, 1
-        figsize = (8, 18)
+        figsize = (2.5, 6)
     else:
         nrows, ncols = 1, 3
         figsize = (22, 6)

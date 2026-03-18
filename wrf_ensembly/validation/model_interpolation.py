@@ -8,7 +8,7 @@ import xarray as xr
 
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment.experiment import Experiment
-from wrf_ensembly.observations.mapping import QUANTITY_TO_WRF_VAR
+from wrf_ensembly.observations import QUANTITY_REGISTRY
 
 
 class ModelInterpolation:
@@ -124,8 +124,9 @@ class ModelInterpolation:
         """
         needed_vars = set()
         for quantity in obs["quantity"].unique():
-            if quantity in QUANTITY_TO_WRF_VAR:
-                needed_vars.add(QUANTITY_TO_WRF_VAR[quantity])
+            quantity_info = QUANTITY_REGISTRY.get(quantity)
+            if quantity_info is not None and quantity_info.model_equivalent is not None:
+                needed_vars.add(quantity_info.model_equivalent)
             else:
                 logger.warning(
                     f"Quantity {quantity} not found in observation mappings, "
@@ -229,7 +230,10 @@ class ModelInterpolation:
         def get_column_that_matches_quantity(row):
             # Get the quantity from the original obs dataframe
             quantity = str(obs.loc[row["index"], "quantity"])
-            var_name = QUANTITY_TO_WRF_VAR.get(quantity, None)
+            quantity_info = QUANTITY_REGISTRY.get(quantity, None)
+            var_name = (
+                quantity_info.model_equivalent if quantity_info is not None else None
+            )
             if var_name is not None and var_name in row:
                 return row[var_name]
             else:

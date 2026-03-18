@@ -7,6 +7,7 @@ from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_pat
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import experiment
 from wrf_ensembly.validation import FirstDeparturesAnalysis, ModelInterpolation
+from wrf_ensembly.wrf import get_wrf_cartopy_crs
 
 
 @click.group(name="validation", cls=GroupWithStartEndPrint)
@@ -63,6 +64,15 @@ def analyze_first_departures(experiment_path: Path, instrument_quantity: tuple):
 
     logger.setup("validation-analyze-first-departures", experiment_path)
     exp = experiment.Experiment(experiment_path)
+
+    # Get cartopy projection
+    try:
+        proj = get_wrf_cartopy_crs(exp.cfg.domain_control)
+    except NotImplementedError:
+        logger.warning(
+            "Could not create cartopy projection for this domain, falling back to PlateCarree"
+        )
+        proj = None
 
     # Load model_interpolated.parquet
     model_interpolated_file = exp.paths.data / "model_interpolated.parquet"
@@ -137,7 +147,7 @@ def analyze_first_departures(experiment_path: Path, instrument_quantity: tuple):
             continue
 
         # Run analysis
-        analysis = FirstDeparturesAnalysis(exp, instrument, quantity)
+        analysis = FirstDeparturesAnalysis(exp, instrument, quantity, proj=proj)
         results = analysis.run(pair_df)
 
         logger.info(f"Results for {instrument}.{quantity}:")
