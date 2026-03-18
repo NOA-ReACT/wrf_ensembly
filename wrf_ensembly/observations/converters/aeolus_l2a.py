@@ -672,17 +672,20 @@ def convert_aeolus_l2a(
         cf.close()
         raise ValueError("Input file is not an AEOLUS DBL L2A file.")
 
+    num_brc = int(coda.fetch(cf, "sph", "num_brc"))
     mle_count = int(coda.fetch(cf, "sph", "num_prof_mle"))
     sca_count = int(coda.fetch(cf, "sph", "num_prof_sca"))
     meas_in_brc_count = int(coda.fetch(cf, "sph", "num_meas_max_brc"))
     height_bin_count = int(coda.fetch(cf, "sph", "num_bins_per_meas"))
 
-    # Read the feature mask once; shape (mle_count, meas_in_brc_count, height_bin_count).
+    # Read the feature mask once; shape (num_brc, meas_in_brc_count, height_bin_count).
     # All three products use the same underlying mask — BRC-level products sum over
     # the measurement axis, AEL-PRO uses it per-measurement directly.
+    # The feature mask always covers all num_brc BRCs, which may differ from
+    # num_prof_mle/num_prof_sca in some files.
     print("  Reading feature mask...")
     feature_mask = _read_feature_mask(
-        cf, mle_count, meas_in_brc_count, height_bin_count
+        cf, num_brc, meas_in_brc_count, height_bin_count
     )
 
     parts = []
@@ -695,7 +698,7 @@ def convert_aeolus_l2a(
             cf,
             mle_count,
             height_bin_count,
-            feature_mask,
+            feature_mask[:mle_count],
             path,
             vertical_bins=vertical_bins,
             horizontal_bin_size=horizontal_bin_size,
@@ -712,7 +715,7 @@ def convert_aeolus_l2a(
             cf,
             sca_count,
             height_bin_count,
-            feature_mask,
+            feature_mask[:sca_count],
             path,
             vertical_bins=vertical_bins,
             horizontal_bin_size=horizontal_bin_size,
@@ -724,11 +727,11 @@ def convert_aeolus_l2a(
     if include_ael_pro:
         print(
             f"  Converting AEL-PRO product "
-            f"({mle_count} BRCs × {meas_in_brc_count} measurements × {height_bin_count} bins)..."
+            f"({num_brc} BRCs × {meas_in_brc_count} measurements × {height_bin_count} bins)..."
         )
         df = _convert_ael_pro(
             cf,
-            mle_count,
+            num_brc,
             meas_in_brc_count,
             height_bin_count,
             feature_mask,
