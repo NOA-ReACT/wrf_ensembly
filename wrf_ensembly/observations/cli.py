@@ -37,6 +37,7 @@ from wrf_ensembly.observations.operations import (
     dump_info,
     filter_obs,
     join_files,
+    plot_file,
     to_obs_seq,
 )
 
@@ -88,6 +89,7 @@ operations_group.add_command(join_files)
 operations_group.add_command(dump_info)
 operations_group.add_command(filter_obs)
 operations_group.add_command(to_obs_seq)
+operations_group.add_command(plot_file)
 
 if __name__ == "__main__":
     cli()

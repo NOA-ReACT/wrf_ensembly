@@ -1,10 +1,14 @@
 """Some utility commands for performing basic operations on observation files, such as dump, info, etc."""
 
 import json
+import time
 from pathlib import Path
+from typing import Any
 
 import click
+import matplotlib.pyplot as plt
 import pandas as pd
+from matplotlib.axes import Axes
 from rich.progress import track
 from rich.table import Table
 
@@ -12,6 +16,8 @@ from wrf_ensembly import external
 from wrf_ensembly.console import console
 from wrf_ensembly.observations import dart as observations_dart
 from wrf_ensembly.observations import io as obs_io
+from wrf_ensembly.observations import plotting
+from wrf_ensembly.observations.plotting import plot_observation_locations_on_map
 
 
 @click.command()
@@ -200,3 +206,111 @@ def to_obs_seq(obs_file: Path, output_file: Path, dart_path: Path):
         print("Error converting to DART obs_seq!")
     else:
         print(f"Successfully converted to DART obs_seq: {output_file}")
+
+
+def _build_subtitle(df: pd.DataFrame, qc: int | None = None) -> str:
+    """Prepare the plot subtitle"""
+
+    t_min = df["time"].min()
+    t_max = df["time"].max()
+    n_obs = len(df)
+    n_valid = df["value"].notna().sum()
+
+    parts = [
+        f"{t_min:%Y-%m-%d %H:%M} to {t_max:%H:%M} UTC",
+        f"{n_valid}/{n_obs} obs",
+        f"lon [{df['longitude'].min():.1f}, {df['longitude'].max():.1f}]",
+        f"lat [{df['latitude'].min():.1f}, {df['latitude'].max():.1f}]",
+    ]
+    if qc is not None:
+        parts.append(f"qc={qc}")
+
+    return "  |  ".join(parts)
+
+
+@click.command()
+@click.argument("obs_file", type=click.Path(exists=True, path_type=Path))
+@click.argument(
+    "output_file", required=False, type=click.Path(path_type=Path, dir_okay=True)
+)
+@click.option("--dpi", type=int, default=200, help="DPI for output file")
+@click.option("--vmin", type=float, default=None, help="Override colorbar minimum")
+@click.option("--vmax", type=float, default=None, help="Override colorbar maximum")
+@click.option(
+    "--ylim",
+    type=(float, float),
+    default=(None, None),
+    help="Override y-axis limits (low high)",
+)
+@click.option("--qc", type=int, default=None, help="Filter to specific QC flag value")
+@click.option("--no-robust", is_flag=True, help="Disable robust color scaling")
+def plot_file(
+    obs_file: Path,
+    output_file: Path | None = None,
+    dpi: int = 200,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    ylim: tuple[float | None, float | None] = (None, None),
+    qc: int | None = None,
+    no_robust: bool = False,
+):
+    if output_file is None:
+        output_file = obs_file.parent
+    output_file.mkdir(exist_ok=True)
+
+    t = time.process_time()
+    print("Reading data... ", end="")
+    df = obs_io.read_obs(obs_file)
+    print(f"done in {time.process_time() - t:.2f}s")
+
+    if qc is not None:
+        df = df[df["qc_flag"] == qc]
+        if df.empty:
+            print(f"No observations with qc_flag == {qc}")
+            return
+
+    # Build kwargs that override registry defaults
+    plot_kwargs: dict[str, Any] = {}
+    if vmin is not None:
+        plot_kwargs["vmin"] = vmin
+    if vmax is not None:
+        plot_kwargs["vmax"] = vmax
+    if no_robust:
+        plot_kwargs["robust"] = False
+
+    instrument_quantity = (df["instrument"] + "." + df["quantity"]).unique()
+    for iq in instrument_quantity:
+        print(f"Plotting for {iq}")
+        group = df[df["instrument"] + "." + df["quantity"] == iq]
+        fig = plotting.plot_observations(group, plot_kwargs=plot_kwargs)
+
+        if ylim != (None, None):
+            for ax in fig.get_axes():
+                if not isinstance(ax, Axes):
+                    continue
+                if ax.get_label() == "<colorbar>":
+                    continue
+                ax.set_ylim(*ylim)
+
+        fig.text(
+            0.5, 1.0, obs_file.stem, ha="center", va="top", fontsize=9, color="0.4"
+        )
+        subtitle = _build_subtitle(group, qc=qc)
+        fig.text(0.5, 0.0, subtitle, ha="center", va="bottom", fontsize=7, color="0.5")
+
+        output_file_iq = output_file / f"{obs_file.stem}_{iq}.png"
+        fig.tight_layout()
+        fig.savefig(output_file_iq, dpi=dpi, bbox_inches="tight", pad_inches=0.3)
+        plt.close(fig)
+
+    # Now create a map plot showing where the observations lie
+    print("Plotting map...")
+    fig = plot_observation_locations_on_map(df, None)
+    fig.tight_layout()
+    fig.savefig(
+        output_file / f"{obs_file.stem}_map.png",
+        dpi=dpi,
+        bbox_inches="tight",
+        pad_inches=0.3,
+    )
+    plt.close(fig)

@@ -11,6 +11,13 @@ Structure:
 """
 
 from . import converters, dart, io, plotting
+from .definitions import (
+    INSTRUMENT_REGISTRY,
+    QUANTITY_REGISTRY,
+    AxisSpec,
+    InstrumentSpec,
+    QuantitySpec,
+)
 from .utils import project_locations_to_wrf
 
 __all__ = [
@@ -19,4 +26,9 @@ __all__ = [
     "project_locations_to_wrf",
     "dart",
     "plotting",
+    "INSTRUMENT_REGISTRY",
+    "QUANTITY_REGISTRY",
+    "AxisSpec",
+    "InstrumentSpec",
+    "QuantitySpec",
 ]

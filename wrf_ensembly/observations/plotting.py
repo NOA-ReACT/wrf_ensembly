@@ -1,8 +1,84 @@
+from typing import Any
+
 import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import xarray as xr
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+
+from wrf_ensembly.observations.utils import reconstruct_array
+
+from .definitions import (
+    INSTRUMENT_REGISTRY,
+    QUANTITY_REGISTRY,
+    Geometry,
+    InstrumentSpec,
+    QuantitySpec,
+)
+
+
+def _plot_geom_profile_curtain(
+    ds: xr.Dataset,
+    inst_spec: InstrumentSpec,
+    qty_spec: QuantitySpec,
+    ax: Axes | None = None,
+    **kwargs,
+) -> Figure:
+    fig, ax = (ax.figure, ax) if ax else plt.subplots(figsize=(10, 4))
+
+    if inst_spec.y is None:
+        raise ValueError("Trying to plot a 2D Curtain but AxisSpec for y is missing!")
+
+    # Registry defaults, overridden by any kwargs passed in
+    pcolormesh_kwargs = dict(
+        cmap=qty_spec.cmap,
+        vmin=qty_spec.vmin,
+        vmax=qty_spec.vmax,
+        robust=True,
+        cbar_kwargs=dict(label=qty_spec.label),
+    )
+    pcolormesh_kwargs.update(kwargs)
+
+    ds["value"].plot.pcolormesh(
+        x=inst_spec.x.coord,
+        y=inst_spec.y.coord,
+        ax=ax,
+        **pcolormesh_kwargs,
+    )
+    ax.set_xlabel(inst_spec.x.label)
+    ax.set_ylabel(inst_spec.y.label)
+    ax.set_title(inst_spec.label, fontsize=11)
+    return fig
+
+
+GEOMETRY_PLOTTERS = {Geometry.PROFILE_CURTAIN: _plot_geom_profile_curtain}
+
+
+def plot_observations(df: pd.DataFrame, plot_kwargs: dict[str, Any] = {}) -> Figure:
+    """
+    Plots the given observations using the appropriate geometry plotter
+    """
+
+    # Grab instrument and quantity
+    instrument_quantity = df["instrument"] + "." + df["quantity"]
+    if len(instrument_quantity.unique()) != 1:
+        raise ValueError(
+            "Only one value can be plotted at a time (one pair of instrument and quantity)"
+        )
+    if len(df["orig_filename"].unique()) != 1:
+        raise ValueError("Only one source file can be plotted at a time")
+
+    instrument = INSTRUMENT_REGISTRY[df.iloc[0]["instrument"]]
+    quantity = QUANTITY_REGISTRY[df.iloc[0]["quantity"]]
+
+    # Fold array back to original dimensions
+    ds = reconstruct_array(df)
+    return GEOMETRY_PLOTTERS[instrument.geometry](
+        ds, instrument, quantity, **plot_kwargs
+    )
 
 
 def plot_observation_locations_on_map(
@@ -45,7 +121,10 @@ def plot_observation_locations_on_map(
         figsize=(10, 8),
         **fig_kwargs,
     )
-    ax.coastlines()
+    ax.add_feature(cfeature.LAND, facecolor="lightgray", zorder=0)
+    ax.add_feature(cfeature.OCEAN, facecolor="aliceblue", zorder=0)
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.4, zorder=1)
+    ax.gridlines(linewidth=0.3, color="gray", alpha=0.5)
 
     if "instrument" in observations.columns and "quantity" in observations.columns:
         for (instrument, quantity), group in observations.groupby(
@@ -61,14 +140,14 @@ def plot_observation_locations_on_map(
                 **ax_kwargs,
             )
 
-        # Create a nice legend outside the plot
         ax.legend(
-            loc="lower center",
-            bbox_to_anchor=(1, 0.5),
+            loc="lower left",
             title="Instrument - Quantity",
-            fontsize="small",
-            title_fontsize="medium",
-            frameon=False,
+            fontsize=7,
+            title_fontsize=8,
+            markerscale=4,
+            frameon=True,
+            framealpha=0.8,
         )
 
     else:
@@ -81,7 +160,7 @@ def plot_observation_locations_on_map(
         )
 
     if domain_bounds is not None:
-        ax.set_extent(domain_bounds, crs=proj or ccrs.PlateCarree())
+        ax.set_extent(domain_bounds, crs=ccrs.PlateCarree())
 
     return fig
 
