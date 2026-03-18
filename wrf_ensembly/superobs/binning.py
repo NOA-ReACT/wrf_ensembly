@@ -47,32 +47,35 @@ def _aggregate_group(
     # Sanity check
     assert len(bin_indices) == len(new_shape)
 
-    # Remove any observation with bad QC
-    group = group[group["qc_flag"] == 0]
-    if group.empty:
-        return None
+    # Prefer good-QC observations; fall back to all observations with qc_flag=1
+    good = group[group["qc_flag"] == 0]
+    if not good.empty:
+        agg_group = good
+        qc = 0
+    else:
+        agg_group = group
+        qc = 1
 
-    n = len(group)
-    first = group.iloc[0]
+    n = len(agg_group)
+    first = agg_group.iloc[0]
 
     # Deal with value and uncertainty
-    mean_val = group["value"].mean()
-    instr_err = float(np.sqrt((group["value_uncertainty"] ** 2).mean()) / np.sqrt(n))
+    mean_val = agg_group["value"].mean()
+    instr_err = float(
+        np.sqrt((agg_group["value_uncertainty"] ** 2).mean()) / np.sqrt(n)
+    )
     repr_err = (
-        float(group["value"].std()) if n > 1 else float(first["value_uncertainty"])
+        float(agg_group["value"].std()) if n > 1 else float(first["value_uncertainty"])
     )
     total_err = float(np.sqrt(instr_err**2 + repr_err**2))
 
     # Compute centroid for location
-    mean_lon = group["longitude"].mean()
-    mean_lat = group["latitude"].mean()
-    mean_x = group["x"].mean()
-    mean_y = group["y"].mean()
-    mean_z = group["z"].mean()
-    mean_time = group["time"].mean()
-
-    # QC passes by default because we only include good observations
-    qc = 0
+    mean_lon = agg_group["longitude"].mean()
+    mean_lat = agg_group["latitude"].mean()
+    mean_x = agg_group["x"].mean()
+    mean_y = agg_group["y"].mean()
+    mean_z = agg_group["z"].mean()
+    mean_time = agg_group["time"].mean()
 
     # Handle coordinates: use the `bin_indices` and `new_shape`, append `_bin` to all names
     orig_coords = {
@@ -159,11 +162,6 @@ def grid_bin(
         bin_indices = tuple(int(group[col].iloc[0]) for col in group_cols)
         return _aggregate_group(group, new_shape, bin_indices)
 
-    result = (
-        df.groupby(group_cols, group_keys=False)
-        .apply(_agg)
-        .dropna(how="all")
-        .reset_index(drop=True)
-    )
+    result = df.groupby(group_cols, group_keys=False).apply(_agg).reset_index(drop=True)
 
     return result
