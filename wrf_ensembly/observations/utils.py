@@ -29,94 +29,119 @@ def project_locations_to_wrf(
 
 
 def reconstruct_array(
-    df: pd.DataFrame, fill_value=np.nan, trim_all_nan_slices=True
+    df: pd.DataFrame,
+    value_columns: list[str] | None = None,
+    fill_value=np.nan,
+    trim_all_nan_slices: bool = True,
 ) -> xr.Dataset:
     """
-    The WRF-Ensembly observation dataframes have an 'orig_coords' column which contains
-    the original shape and indices of the observation in the original file. This function
-    takes the dataframe and reconstructs the original array, filling missing values with `fill_value`.
+    Reconstruct the original array shape from a flat observation DataFrame using the
+    `orig_coords` column (which contains the original shape, indices, and dimension
+    names from the source file).
+
+    Missing entries are filled with `fill_value`. Coordinate fields (latitude,
+    longitude, z, time, qc_flag) are always reconstructed alongside the requested
+    value columns.
 
     Args:
-        df: The dataframe containing the observations, with an 'orig_coords' column.
-            Please filter to only include observations from a single original file and quantity.
-        fill_value: The value to use for missing entries in the reconstructed array
-        trim_all_nan_slices: If True, drop slices along any dimension where all values are
-            NaN. Useful when plotting because the spatial filtering may have removed
-            entire rows/columns.
+        df: DataFrame containing observations with an `orig_coords` column.
+            Must contain observations from a single original file and quantity
+            (i.e., all rows must share the same `orig_coords.shape` and
+            `orig_coords.names`).
+        value_columns: Which columns to include as data variables in the output
+            Dataset. Defaults to ``["value", "value_uncertainty"]``. Useful for
+            including precomputed model equivalents, e.g.
+            ``["value", "value_uncertainty", "model_equivalent"]``.
+        fill_value: Fill value for array positions with no observation.
+        trim_all_nan_slices: If True, drop slices along any dimension where all
+            values are NaN. Useful when spatial filtering has removed entire
+            rows or columns from the original grid.
 
     Returns:
-        An xarray Dataset with the reconstructed data (as `obs_value` and `obs_uncertainty`). The latitude, longitude, z and time coordinates will be included.
+        xarray Dataset with reconstructed data variables and coordinate fields
+        (latitude, longitude, z, time, qc_flag) mapped back to their original
+        positions.
+
+    Raises:
+        ValueError: If `orig_coords` is missing, or rows have inconsistent
+            shapes/names.
     """
 
     if "orig_coords" not in df.columns:
-        raise ValueError("Dataframe must contain 'orig_coords' column")
+        raise ValueError("DataFrame must contain an 'orig_coords' column")
+    if df.empty:
+        raise ValueError("DataFrame is empty")
 
-    # This would be a job for `len(orig_coords.unique()) == 1` but you can't do unique on dicts
-    first_orig_coords = df["orig_coords"].iloc[0]
-    for i in range(1, df.shape[0]):
-        other_row = df["orig_coords"].iloc[i]
-        if (other_row["names"] != first_orig_coords["names"]).any():
-            raise ValueError(
-                "Dataframe must only contain observations from a single original file"
-            )
-        if (other_row["shape"] != first_orig_coords["shape"]).any():
-            raise ValueError(
-                "Dataframe must only contain observations from a single original file"
-            )
+    value_columns = value_columns or ["value", "value_uncertainty"]
 
-    orig_coords = df["orig_coords"].iloc[0]
-    shape = orig_coords["shape"]
-    indices = orig_coords["indices"]
-    names = orig_coords["names"]
+    # Validate consistency across rows
+    shapes = df["orig_coords"].apply(lambda r: tuple(r["shape"]))
+    names_series = df["orig_coords"].apply(lambda r: tuple(r["names"]))
+    if shapes.nunique() != 1:
+        raise ValueError(
+            "All rows must share the same orig_coords.shape "
+            "(DataFrame must contain observations from a single original file)"
+        )
+    if names_series.nunique() != 1:
+        raise ValueError(
+            "All rows must share the same orig_coords.names "
+            "(DataFrame must contain observations from a single original file)"
+        )
+
+    # Extract shape, names, build index arrays
+    first = df["orig_coords"].iloc[0]
+    shape = tuple(first["shape"])
+    names = list(first["names"])
 
     if len(shape) != len(names):
         raise ValueError(
             "'shape' and 'names' in 'orig_coords' must have the same length"
         )
-    if len(indices) != len(names):
-        raise ValueError(
-            "'indices' and 'names' in 'orig_coords' must have the same length"
-        )
 
-    obs_value = np.full(shape, fill_value)
-    obs_uncertainty = np.full(shape, np.nan)
+    indices = np.array(
+        df["orig_coords"].apply(lambda r: tuple(r["indices"])).tolist(),
+        dtype=np.intp,
+    )
+    idx_tuple = tuple(indices[:, k] for k in range(indices.shape[1]))
+
+    # Reconstruct the value columns
+    data_vars: dict[str, tuple[list[str], np.ndarray]] = {}
+    for col in value_columns:
+        if col not in df.columns:
+            raise ValueError(f"Column '{col}' not found in DataFrame")
+        arr = np.full(shape, fill_value, dtype=np.float64)
+        arr[idx_tuple] = df[col].values
+        data_vars[col] = (names, arr)
+
+    # Reconstruct coordinate fields
     latitude = np.full(shape, np.nan)
     longitude = np.full(shape, np.nan)
     z = np.full(shape, np.nan)
-    time = np.full(shape, np.nan, dtype="datetime64[ns]")
     qc_flag = np.full(shape, np.nan)
+    latitude[idx_tuple] = df["latitude"].values
+    longitude[idx_tuple] = df["longitude"].values
+    z[idx_tuple] = df["z"].values
+    qc_flag[idx_tuple] = df["qc_flag"].values
 
-    for i, row in df.iterrows():
-        idx = tuple(row["orig_coords"]["indices"])
-        obs_value[idx] = row["value"]
-        obs_uncertainty[idx] = row["value_uncertainty"]
-        latitude[idx] = row["latitude"]
-        longitude[idx] = row["longitude"]
-        z[idx] = row["z"]
-        time[idx] = pd.to_datetime(row["time"])
-        qc_flag[idx] = row["qc_flag"]
+    time = np.full(shape, np.datetime64("NaT"), dtype="datetime64[ns]")
+    time[idx_tuple] = pd.to_datetime(df["time"]).values
 
-    coords = {
+    coords: dict[str, tuple[list[str], np.ndarray] | np.ndarray] = {
         "time": (names, time),
         "latitude": (names, latitude),
         "longitude": (names, longitude),
         "z": (names, z),
         "qc_flag": (names, qc_flag),
     }
+    # Dimension index coordinates
     for i, name in enumerate(names):
         coords[name] = np.arange(shape[i])
 
-    dataset = xr.Dataset(
-        {
-            "obs_value": (names, obs_value),
-            "obs_uncertainty": (names, obs_uncertainty),
-        },
-        coords=coords,
-    )
+    dataset = xr.Dataset(data_vars, coords=coords)
 
     if trim_all_nan_slices:
-        # Drop slices along any dimension where all values are NaN
         for dim in names:
-            dataset = dataset.dropna(dim=dim, how="all")
+            # Use the first value column as the reference for trimming
+            dataset = dataset.dropna(dim=dim, how="all", subset=[value_columns[0]])
 
     return dataset
