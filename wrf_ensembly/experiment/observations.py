@@ -3,6 +3,7 @@ from pathlib import Path
 
 import duckdb
 import pandas as pd
+import pyarrow as pa
 
 from wrf_ensembly import external, wrf
 from wrf_ensembly import observations as obs
@@ -10,6 +11,7 @@ from wrf_ensembly.config import Config
 from wrf_ensembly.console import logger
 from wrf_ensembly.cycling import CycleInformation
 from wrf_ensembly.experiment.paths import ExperimentPaths
+from wrf_ensembly.superobs import grid_bin
 
 
 @dataclass
@@ -234,6 +236,43 @@ class ExperimentObservations:
         df = obs.io.read_obs(input_path)
         if df.empty:
             return 0
+
+        # For each pair of instrument-quantity inside the data, check if there is a superob config definition
+        groups = []
+
+        df["instrument_quantity"] = df["instrument"] + "." + df["quantity"]
+        for iq in df["instrument_quantity"].unique():
+            group = df.loc[df["instrument_quantity"] == iq]
+
+            if iq in self.cfg.observations.superobs:
+                superob_options = self.cfg.observations.superobs[iq]
+
+                before_n = len(group)
+                group = grid_bin(
+                    group, superob_options.hoz_bin_sizes, superob_options.vert_bin_sizes
+                )
+                after_n = len(group)
+
+                print(
+                    f"{iq}: Generated {after_n} superobs from {before_n} observations."
+                )
+
+            groups.append(group)
+
+        # Reconcatenate everything into one dataframe
+        df = pd.concat(groups)
+
+        # Convert orig_coords to a pyarrow-backed column so DuckDB sees it as STRUCT
+        # (plain Python dicts get inferred as MAP, which can't be cast to STRUCT)
+        oc_type = pa.struct(
+            [
+                ("indices", pa.list_(pa.int32())),
+                ("shape", pa.list_(pa.int32())),
+                ("names", pa.list_(pa.string())),
+            ]
+        )
+        oc_array = pa.array(df["orig_coords"].tolist(), type=oc_type)
+        df["orig_coords"] = pd.ArrowDtype(oc_type).__from_arrow__(oc_array)
 
         # Grab a connection to the database and save the observations
         with self._get_duckdb(read_only=False) as con:

@@ -260,6 +260,23 @@ class AssimilationConfig:
 
 
 @dataclass
+class SuperObsConfig:
+    """Configuration related to how we generate superobservations (or superobs) for one instrument/quantity pair"""
+
+    hoz_bin_sizes: dict[str, int]
+    """
+    A dictionary where keys are dimension names (i.e. along_track) and values are how long is each bin.
+    All valid-QC observations inside the bin are combined into one superob.
+    """
+
+    vert_bin_sizes: dict[str, int]
+    """
+    A dictionary where keys are vertical dimension names (e.g. height_bin) and values are how long is each bin.
+    All valid-QC observations inside the bin are combined into one superob.
+    """
+
+
+@dataclass
 class ObservationsConfig:
     """Configuration related to observation preprocessing (mainly for the `observations preprocess-for-wrf` command)"""
 
@@ -283,6 +300,13 @@ class ObservationsConfig:
 
     boundary_error_width: float = 1.0
     """If more than 0, the error this many grid points near the boundary are inflated by `boundary_error_factor`. Set to 0 to disable."""
+
+    superobs: dict[str, SuperObsConfig] = field(default_factory=dict)
+    """
+    Superobservation configuration per instrument and quantity.
+    The key is the `instrument.quantity` string, e.g. `sonde.U`.
+    The value is a `SuperObsConfig` instance.
+    """
 
 
 @dataclass
