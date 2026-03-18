@@ -6,11 +6,15 @@ import concurrent
 import concurrent.futures
 import json
 import sys
+import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+from typing import Any
 
 import click
+import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 from rich.console import Console
 from rich.progress import Progress, track
 from rich.table import Table
@@ -18,6 +22,9 @@ from rich.table import Table
 from wrf_ensembly import experiment, external, observations, wrf
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import console, logger
+from wrf_ensembly.observations import plotting
+from wrf_ensembly.observations.operations import _build_subtitle
+from wrf_ensembly.observations.plotting import plot_observation_locations_on_map
 from wrf_ensembly.utils import determine_jobs
 
 
@@ -539,3 +546,97 @@ def plot_compare_obs_to_grid(
 
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     logger.info(f"Saved obs vs grid plot to {output_path}")
+
+
+@observations_cli.command()
+@click.argument("filename", type=str)
+@click.option("--dpi", type=int, default=200, help="DPI for output file")
+@click.option("--vmin", type=float, default=None, help="Override colorbar minimum")
+@click.option("--vmax", type=float, default=None, help="Override colorbar maximum")
+@click.option(
+    "--ylim",
+    type=(float, float),
+    default=(None, None),
+    help="Override y-axis limits (low high)",
+)
+@click.option("--qc", type=int, default=None, help="Filter to specific QC flag value")
+@click.option("--no-robust", is_flag=True, help="Disable robust color scaling")
+@pass_experiment_path
+def plot(
+    experiment_path: Path,
+    filename: str,
+    dpi: int = 200,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    ylim: tuple[float | None, float | None] = (None, None),
+    qc: int | None = None,
+    no_robust: bool = False,
+):
+    """
+    Plot observations from the experiment's duckdb database, filtered by their original filename.
+
+    FILENAME is the orig_filename value used to filter observations (not a full path).
+    Plots are saved to the experiment's plots directory.
+    """
+
+    logger.setup("observations-plot-file", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    t = time.process_time()
+    logger.info(f"Reading observations for filename '{filename}'...")
+    df = exp.obs.get_observations_by_filename(filename)
+    logger.info(f"Done in {time.process_time() - t:.2f}s")
+
+    if df is None or df.empty:
+        logger.error(f"No observations found with orig_filename = '{filename}'")
+        return
+
+    if qc is not None:
+        df = df[df["qc_flag"] == qc]
+        if df.empty:
+            logger.error(f"No observations with qc_flag == {qc}")
+            return
+
+    plot_kwargs: dict[str, Any] = {}
+    if vmin is not None:
+        plot_kwargs["vmin"] = vmin
+    if vmax is not None:
+        plot_kwargs["vmax"] = vmax
+    if no_robust:
+        plot_kwargs["robust"] = False
+
+    output_dir = exp.paths.plots / filename
+    output_dir.mkdir(exist_ok=True, parents=True)
+
+    stem = Path(filename).stem
+    instrument_quantity = (df["instrument"] + "." + df["quantity"]).unique()
+    for iq in instrument_quantity:
+        logger.info(f"Plotting for {iq}")
+        group = df[df["instrument"] + "." + df["quantity"] == iq]
+        fig = plotting.plot_observations(group, plot_kwargs=plot_kwargs)
+
+        if ylim != (None, None):
+            for ax in fig.get_axes():
+                if not isinstance(ax, Axes):
+                    continue
+                if ax.get_label() == "<colorbar>":
+                    continue
+                ax.set_ylim(*ylim)
+
+        fig.text(0.5, 1.0, stem, ha="center", va="top", fontsize=9, color="0.4")
+        subtitle = _build_subtitle(group, qc=qc)
+        fig.text(0.5, 0.0, subtitle, ha="center", va="bottom", fontsize=7, color="0.5")
+
+        output_path = output_dir / f"{stem}_{iq}.png"
+        fig.tight_layout()
+        fig.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0.3)
+        plt.close(fig)
+        logger.info(f"Saved plot to {output_path}")
+
+    logger.info("Plotting map...")
+    fig = plot_observation_locations_on_map(df, None)
+    fig.tight_layout()
+    map_path = output_dir / f"{stem}_map.png"
+    fig.savefig(map_path, dpi=dpi, bbox_inches="tight", pad_inches=0.3)
+    plt.close(fig)
+    logger.info(f"Saved map plot to {map_path}")

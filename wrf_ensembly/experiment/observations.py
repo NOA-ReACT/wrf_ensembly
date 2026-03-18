@@ -107,6 +107,31 @@ class ExperimentObservations:
             ).fetch_df()
         return result.to_dict(orient="records")
 
+    def get_observations_by_filename(self, filename: str) -> pd.DataFrame | None:
+        """
+        Retrieves all observations from the database that match the given orig_filename.
+
+        Args:
+            filename: The original filename to filter on (not a full path).
+
+        Returns:
+            A DataFrame of matching observations, or None if no observations were found.
+        """
+
+        with self._get_duckdb(read_only=True) as con:
+            result = con.execute(
+                "SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE orig_filename = ?",
+                [filename],
+            ).fetchdf()
+
+        if result.empty:
+            return None
+
+        if result["time"].dt.tz is None:
+            result["time"] = result["time"].dt.tz_localize("UTC")
+
+        return result
+
     def delete_observation_file(self, filename: str) -> int:
         """
         Removes all observations from a specific file from the database.

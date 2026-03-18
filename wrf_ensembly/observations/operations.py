@@ -254,6 +254,8 @@ def plot_file(
     qc: int | None = None,
     no_robust: bool = False,
 ):
+    """Plots the data inside an WRF-Ensembly observation file"""
+
     if output_file is None:
         output_file = obs_file.parent
     output_file.mkdir(exist_ok=True)
