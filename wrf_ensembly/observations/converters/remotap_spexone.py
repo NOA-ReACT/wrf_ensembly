@@ -86,16 +86,12 @@ def convert_remotap_spexone(
     ds_geolocation: xr.Dataset,
     ds_geophysical: xr.Dataset,
     original_filename: str,
-    across_track_bin_size: int | None = None,
-    along_track_bin_size: int | None = None,
 ) -> None | pd.DataFrame:
     """Convert a RemoTAP-spexone file to WRF-Ensembly Observation format.
 
     Args:
         ds_geolocation: xarray Dataset containing geolocation data.
         ds_geophysical: xarray Dataset containing geophysical data.
-        across_track_bin_size: Number of across-track bins to aggregate into one using mean.
-        along_track_bin_size: Number of along-track bins to aggregate into one using mean.
 
     Returns:
         A pandas DataFrame in WRF-Ensembly Observation format (correct columns etc).
@@ -108,30 +104,6 @@ def convert_remotap_spexone(
             ds_geolocation["utc_date"].to_numpy(), ds_geolocation["fracday"].to_numpy()
         ),
     )
-
-    # Apply binning if requested
-    bin_sizes = {}
-    if across_track_bin_size is not None:
-        bin_sizes["bins_across_track"] = across_track_bin_size
-    if along_track_bin_size is not None:
-        bin_sizes["bins_along_track"] = along_track_bin_size
-    if bin_sizes:
-        orig_size = (
-            ds_geolocation.sizes["bins_across_track"],
-            ds_geolocation.sizes["bins_along_track"],
-        )
-
-        ds_geolocation = ds_geolocation.coarsen(**bin_sizes, boundary="trim").mean()  # type: ignore
-        ds_geophysical = ds_geophysical.coarsen(**bin_sizes, boundary="trim").mean()  # type: ignore
-
-        new_size = (
-            ds_geolocation.sizes["bins_across_track"],
-            ds_geolocation.sizes["bins_along_track"],
-        )
-
-        print(
-            f"Binned data from size {orig_size} to {new_size} using bin sizes {bin_sizes}"
-        )
 
     latitude = ds_geolocation["latitude"].values.flatten()
     longitude = ds_geolocation["longitude"].values.flatten()
@@ -187,24 +159,10 @@ def convert_remotap_spexone(
     default=None,
     help="Path to IMERG file to mark ocean/land points as invalid",
 )
-@click.option(
-    "--across-track-bin-size",
-    type=int,
-    default=None,
-    help="Number of across-track bins to aggregate into one using mean.",
-)
-@click.option(
-    "--along-track-bin-size",
-    type=int,
-    default=None,
-    help="Number of along-track bins to aggregate into one using mean.",
-)
 def remotap_spexone(
     input_path: Path,
     output_path: Path,
     imerg_path: Path | None = None,
-    across_track_bin_size: int | None = None,
-    along_track_bin_size: int | None = None,
 ):
     """Convert RemoTAP-spexone netCDF file to WRF-Ensembly observation format.
 
@@ -217,10 +175,6 @@ def remotap_spexone(
     as invalid QC (qc_flag = 1). So if the input file is a land file, all ocean points
     will be marked as invalid, and vice versa. A threshold of >60% is used to determine
     which points are ocean based on the IMERG landseamask variable.
-
-    You can use the `--across-track-bin-size` and `--along-track-bin-size` options to
-    coarsen the data into larger bins using mean as the aggregation function. If the bin sizes
-    don't evenly divide the data dimensions, the remaining data at the edges will be discarded.
     """
 
     print(f"Converting RemoTAP-SPEX file: {input_path}")
@@ -247,8 +201,6 @@ def remotap_spexone(
         spex_geoloc,
         spex_geophys,
         original_filename=input_path.name,
-        across_track_bin_size=across_track_bin_size,
-        along_track_bin_size=along_track_bin_size,
     )
     if converted_df is None or converted_df.empty:
         print("No observations found in the input file, aborting")

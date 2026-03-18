@@ -58,15 +58,11 @@ def get_index_tuples(arr):
 
 def convert_modis(
     hdf_path: Path,
-    along_track_bin_size: int | None = None,
-    across_track_bin_size: int | None = None,
 ) -> None | pd.DataFrame:
     """Convert a MODIS AOD HDF4 file to WRF-Ensembly Observation format.
 
     Args:
         hdf_path: Path to the MODIS HDF4 file.
-        along_track_bin_size: Number of along-track bins to aggregate into one using mean.
-        across_track_bin_size: Number of across-track bins to aggregate into one using mean.
 
     Returns:
         A pandas DataFrame in WRF-Ensembly Observation format (correct columns etc).
@@ -147,21 +143,7 @@ def convert_modis(
         }
     )
 
-    # Apply binning if requested
-    bin_sizes = {}
-    if along_track_bin_size is not None:
-        bin_sizes["along_track"] = along_track_bin_size
-    if across_track_bin_size is not None:
-        bin_sizes["across_track"] = across_track_bin_size
-    if bin_sizes:
-        orig_size = (ds.sizes["along_track"], ds.sizes["across_track"])
-        ds = ds.coarsen(**bin_sizes, boundary="trim").mean()  # type: ignore
-        new_size = (ds.sizes["along_track"], ds.sizes["across_track"])
-        print(
-            f"Binned data from size {orig_size} to {new_size} using bin sizes {bin_sizes}"
-        )
-
-    # Extract binned data
+    # Extract data
     latitude = ds["latitude"].values.flatten()
     longitude = ds["longitude"].values.flatten()
     scan_time = ds["scan_time"].values.flatten()
@@ -222,23 +204,9 @@ def convert_modis(
 @click.command()
 @click.argument("input_path", type=click.Path(exists=True, path_type=Path))
 @click.argument("output_path", type=click.Path(path_type=Path))
-@click.option(
-    "--along-track-bin-size",
-    type=int,
-    default=None,
-    help="Number of along-track bins to aggregate into one using mean.",
-)
-@click.option(
-    "--across-track-bin-size",
-    type=int,
-    default=None,
-    help="Number of across-track bins to aggregate into one using mean.",
-)
 def modis(
     input_path: Path,
     output_path: Path,
-    along_track_bin_size: int | None = None,
-    across_track_bin_size: int | None = None,
 ):
     """Convert MODIS AOD HDF4 file to WRF-Ensembly observation format.
 
@@ -249,21 +217,13 @@ def modis(
     This converter extracts the AOD_550_Dark_Target_Deep_Blue_Combined variable
     which contains the combined Dark Target and Deep Blue AOT at 0.55 micron for
     land and ocean. Only observations with QA flag >= 2 (Good or Very Good) are kept.
-
-    You can use the `--along-track-bin-size` and `--across-track-bin-size` options to
-    coarsen the data into larger bins using mean as the aggregation function. If the bin sizes
-    don't evenly divide the data dimensions, the remaining data at the edges will be discarded.
     """
 
     print(f"Converting MODIS AOD file: {input_path}")
     print(f"Output path: {output_path}")
 
     # Convert the data
-    converted_df = convert_modis(
-        input_path,
-        along_track_bin_size=along_track_bin_size,
-        across_track_bin_size=across_track_bin_size,
-    )
+    converted_df = convert_modis(input_path)
 
     if converted_df is None or converted_df.empty:
         print("No valid observations found in the input file, aborting")

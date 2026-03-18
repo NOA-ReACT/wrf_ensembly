@@ -52,16 +52,12 @@ def get_index_tuples(arr):
 def convert_viirs(
     ds: xr.Dataset,
     original_filename: str,
-    along_track_bin_size: int | None = None,
-    across_track_bin_size: int | None = None,
 ) -> None | pd.DataFrame:
     """Convert a VIIRS AOD file to WRF-Ensembly Observation format.
 
     Args:
         ds: xarray Dataset containing VIIRS data.
         original_filename: Name of the original file.
-        along_track_bin_size: Number of along-track bins to aggregate into one using mean.
-        across_track_bin_size: Number of across-track bins to aggregate into one using mean.
 
     Returns:
         A pandas DataFrame in WRF-Ensembly Observation format (correct columns etc).
@@ -119,21 +115,7 @@ def convert_viirs(
         }
     )
 
-    # Apply binning if requested
-    bin_sizes = {}
-    if along_track_bin_size is not None:
-        bin_sizes[dim_along] = along_track_bin_size
-    if across_track_bin_size is not None:
-        bin_sizes[dim_across] = across_track_bin_size
-    if bin_sizes:
-        orig_size = (ds_binned.sizes[dim_along], ds_binned.sizes[dim_across])
-        ds_binned = ds_binned.coarsen(**bin_sizes, boundary="trim").mean()  # type: ignore
-        new_size = (ds_binned.sizes[dim_along], ds_binned.sizes[dim_across])
-        print(
-            f"Binned data from size {orig_size} to {new_size} using bin sizes {bin_sizes}"
-        )
-
-    # Extract binned data
+    # Extract data
     latitude = ds_binned["latitude"].values.flatten()
     longitude = ds_binned["longitude"].values.flatten()
     scan_time = ds_binned["scan_time"].values.flatten()
@@ -190,23 +172,9 @@ def convert_viirs(
 @click.command()
 @click.argument("input_path", type=click.Path(exists=True, path_type=Path))
 @click.argument("output_path", type=click.Path(path_type=Path))
-@click.option(
-    "--along-track-bin-size",
-    type=int,
-    default=None,
-    help="Number of along-track bins to aggregate into one using mean.",
-)
-@click.option(
-    "--across-track-bin-size",
-    type=int,
-    default=None,
-    help="Number of across-track bins to aggregate into one using mean.",
-)
 def viirs(
     input_path: Path,
     output_path: Path,
-    along_track_bin_size: int | None = None,
-    across_track_bin_size: int | None = None,
 ):
     """Convert VIIRS AOD netCDF file to WRF-Ensembly observation format.
 
@@ -216,10 +184,6 @@ def viirs(
 
     This converter extracts the Aerosol_Optical_Thickness_550_Land_Ocean_Best_Estimate
     variable which contains QA-filtered AOD retrievals at 550 nm over both land and ocean.
-
-    You can use the `--along-track-bin-size` and `--across-track-bin-size` options to
-    coarsen the data into larger bins using mean as the aggregation function. If the bin sizes
-    don't evenly divide the data dimensions, the remaining data at the edges will be discarded.
     """
 
     print(f"Converting VIIRS AOD file: {input_path}")
@@ -233,8 +197,6 @@ def viirs(
     converted_df = convert_viirs(
         ds,
         original_filename=input_path.name,
-        along_track_bin_size=along_track_bin_size,
-        across_track_bin_size=across_track_bin_size,
     )
 
     # Close the dataset
