@@ -37,44 +37,335 @@ class ModelInterpolation:
         Returns:
             Path to the output model_interpolated.parquet file, None on failure
         """
-        obs = self._load_observations()
-        obs = self._mark_da_usage(obs)
-        needed_vars = self._determine_needed_vars(obs)
 
-        if not needed_vars:
-            logger.info("No WRF variables needed for interpolation, cannot proceed!")
+        needed_combos = self._determine_needed_combos()
+        if not needed_combos:
+            logger.info("No valid instrument/quantity combos found, cannot proceed!")
             return None
 
-        obs_ds = self._observations_to_dataset(obs)
-        model_obs_df = self._interpolate_model_to_obs(obs_ds, needed_vars)
-        obs = self._add_model_values(obs, model_obs_df)
+        # Collect all WRF variable names we need (target vars + vertical coords)
+        needed_vars = set(["z", "air_pressure", "geopotential_height"])
+        for combo in needed_combos:
+            needed_vars.add(combo["wrf_var"])
 
-        return self._save_output(obs)
+        forecast_mean = self._open_forecasts(list(needed_vars))
 
-    def _load_observations(self) -> pd.DataFrame:
-        """Load observations from the experiment database.
+        result_df = self._interpolate_all(needed_combos, forecast_mean)
 
-        Filters out downsampled observations and applies instrument filters
-        from the experiment configuration.
+        result_df = self._mark_da_usage(result_df)
+
+        return self._save_output(result_df)
+
+    def _instrument_where_clause(self, prefix: str = "WHERE") -> str:
+        """Build a SQL WHERE/AND clause for instrument filtering.
+
+        Args:
+            prefix: SQL keyword to use ('WHERE' or 'AND')
 
         Returns:
-            DataFrame of observations
+            SQL clause string, or empty string if no filter is configured
         """
-        where_clause = ""
-        if self.exp.cfg.validation.instruments:
-            instruments_to_use = self.exp.cfg.validation.instruments
-            logger.info(
-                f"Filtering observations to only use instruments: {instruments_to_use}"
+        if not self.exp.cfg.validation.instruments:
+            return ""
+        instruments_list = ", ".join(
+            f"'{inst}'" for inst in self.exp.cfg.validation.instruments
+        )
+        return f"{prefix} instrument IN ({instruments_list})"
+
+    def _determine_needed_combos(self) -> list[dict]:
+        """Determine which instrument/quantity combinations need interpolation.
+
+        Queries DuckDB for distinct combinations and resolves their WRF
+        variable mappings and vertical coordinate types.
+
+        Returns:
+            List of dicts with keys: instrument, quantity, wrf_var, z_type
+        """
+        where_clause = self._instrument_where_clause()
+
+        with self.exp.obs._get_duckdb(read_only=True) as con:
+            combos = con.execute(
+                f"SELECT DISTINCT instrument, quantity, z_type FROM observations {where_clause}"
+            ).fetchall()
+
+        needed_combos = []
+        for instrument, quantity, z_type in combos:
+            quantity_info = QUANTITY_REGISTRY.get(quantity)
+            if quantity_info is None or quantity_info.model_equivalent is None:
+                logger.warning(
+                    f"Quantity {quantity} not found in observation mappings, "
+                    "cannot determine WRF variable, skipping"
+                )
+                continue
+            needed_combos.append(
+                {
+                    "instrument": instrument,
+                    "quantity": quantity,
+                    "wrf_var": quantity_info.model_equivalent,
+                    "z_type": z_type,
+                }
             )
-            instruments_list = ", ".join(f"'{inst}'" for inst in instruments_to_use)
-            where_clause = f"WHERE instrument IN ({instruments_list})"
-        obs = (
-            self.exp.obs._get_duckdb(read_only=True)
-            .execute(f"SELECT * FROM observations {where_clause}")
-            .fetchdf()
+
+        logger.info(f"Found {len(needed_combos)} instrument/quantity combinations")
+        for combo in needed_combos:
+            logger.info(
+                f"  {combo['instrument']}/{combo['quantity']} -> "
+                f"{combo['wrf_var']} (z_type={combo['z_type']})"
+            )
+
+        return needed_combos
+
+    def _open_forecasts(self, needed_vars: list[str]) -> xr.Dataset:
+        """Open forecast mean files as a single lazy xarray Dataset.
+
+        Args:
+            needed_vars: List of WRF variable names to load
+
+        Returns:
+            Lazy xarray Dataset with only the needed variables
+
+        Raises:
+            ValueError: If duplicate coordinates are found
+        """
+
+        forecast_mean = xr.open_mfdataset(
+            f"{self.exp.paths.data_forecasts}/cycle_**/forecast_mean_cycle_*.nc",
+            combine="by_coords",
+            chunks={"time": 1},
+            coords="minimal",
         )
 
-        return obs
+        available = [v for v in needed_vars if v in forecast_mean.data_vars]
+        missing = [v for v in needed_vars if v not in forecast_mean.data_vars]
+        if missing:
+            logger.warning(f"Variables not found in forecast files: {missing}")
+        forecast_mean = forecast_mean[available]
+
+        # Check for duplicate coordinates
+        for coord_name in ["t", "x", "y"]:
+            if coord_name not in forecast_mean.coords:
+                continue
+            coord_vals = forecast_mean.coords[coord_name].values
+            unique, counts = np.unique(coord_vals, return_counts=True)
+            duplicates = unique[counts > 1]
+
+            if len(duplicates) > 0:
+                print(
+                    f"Duplicate values found in forecast_mean coordinate '{coord_name}':"
+                )
+                for dup in duplicates:
+                    indices = np.where(coord_vals == dup)[0]
+                    print(f"  Value: {dup}")
+                    print(f"  Appears {len(indices)} times at indices: {indices}")
+
+                raise ValueError(
+                    f"Duplicate values found in forecast_mean coordinate '{coord_name}': {duplicates}"
+                )
+
+        return forecast_mean
+
+    def _interpolate_all(
+        self, needed_combos: list[dict], forecast_mean: xr.Dataset
+    ) -> pd.DataFrame:
+        """Interpolate model forecasts to all observation combos.
+
+        For each instrument/quantity combination, fetches observations from
+        DuckDB (numeric columns only), performs horizontal/temporal
+        interpolation, and handles vertical interpolation based on z_type.
+
+        Args:
+            needed_combos: List of combo dicts from _determine_needed_combos
+            forecast_mean: Lazy forecast Dataset
+
+        Returns:
+            DataFrame with all observations and their model_value
+        """
+        instrument_filter = self._instrument_where_clause(prefix="AND")
+        all_results = []
+
+        for combo in needed_combos:
+            instrument = combo["instrument"]
+            quantity = combo["quantity"]
+            wrf_var = combo["wrf_var"]
+            z_type = combo["z_type"]
+
+            logger.info(
+                f"Interpolating {instrument}/{quantity} ({wrf_var}, z_type={z_type})"
+            )
+
+            # Fetch numeric + geographic columns from DuckDB
+            with self.exp.obs._get_duckdb(read_only=True) as con:
+                arrays = con.execute(
+                    f"""
+                    SELECT time, x, y, z, latitude, longitude, value
+                    FROM observations
+                    WHERE instrument = ? AND quantity = ?
+                    {instrument_filter}
+                    """,
+                    [instrument, quantity],
+                ).fetchnumpy()
+
+            n_obs = len(arrays["x"])
+            if n_obs == 0:
+                logger.warning(f"No observations for {instrument}/{quantity}, skipping")
+                continue
+
+            logger.info(f"  {n_obs} observations")
+
+            times = pd.DatetimeIndex(arrays["time"]).tz_localize(None)
+            batch_t = xr.DataArray(times, dims="obs")
+            batch_x = xr.DataArray(arrays["x"], dims="obs")
+            batch_y = xr.DataArray(arrays["y"], dims="obs")
+
+            if wrf_var not in forecast_mean.data_vars:
+                logger.warning(
+                    f"Variable {wrf_var} not in forecast data, "
+                    f"skipping {instrument}/{quantity}"
+                )
+                model_vals = np.full(n_obs, np.nan)
+            elif z_type in ("columnar", "surface"):
+                # Columnar quantities (e.g., AOD) are pre-calculated in
+                # forecast files, so we just do 2D horizontal/temporal interp.
+                # Surface observations similarly only need horizontal interp.
+                model_vals = (
+                    forecast_mean[wrf_var]
+                    .interp(t=batch_t, x=batch_x, y=batch_y)
+                    .values
+                )
+            elif z_type == "height":
+                model_vals = self._interp_vertical(
+                    forecast_mean,
+                    wrf_var,
+                    "geopotential_height",
+                    batch_t,
+                    batch_x,
+                    batch_y,
+                    arrays["z"],
+                )
+            elif z_type == "pressure":
+                model_vals = self._interp_vertical(
+                    forecast_mean,
+                    wrf_var,
+                    "air_pressure",
+                    batch_t,
+                    batch_x,
+                    batch_y,
+                    arrays["z"],
+                    flip=True,  # Pressure decreases with altitude
+                )
+            else:
+                logger.warning(f"Unknown z_type '{z_type}' for {instrument}/{quantity}")
+                model_vals = np.full(n_obs, np.nan)
+
+            chunk_df = pd.DataFrame(
+                {
+                    "time": arrays["time"],
+                    "x": arrays["x"],
+                    "y": arrays["y"],
+                    "z": arrays["z"],
+                    "latitude": arrays["latitude"],
+                    "longitude": arrays["longitude"],
+                    "z_type": z_type,
+                    "value": arrays["value"],
+                    "model_value": model_vals,
+                    "instrument": instrument,
+                    "quantity": quantity,
+                }
+            )
+            all_results.append(chunk_df)
+
+        return pd.concat(all_results, ignore_index=True)
+
+    def _interp_vertical(
+        self,
+        forecast_mean: xr.Dataset,
+        wrf_var: str,
+        vertical_coord_var: str,
+        batch_t: xr.DataArray,
+        batch_x: xr.DataArray,
+        batch_y: xr.DataArray,
+        obs_z: np.ndarray,
+        flip: bool = False,
+    ) -> np.ndarray:
+        """Interpolate a 3D variable vertically to observation altitudes/pressures.
+
+        Performs horizontal/temporal interpolation first to get vertical
+        profiles at each observation location, then does 1D vertical
+        interpolation per observation.
+
+        Args:
+            forecast_mean: Lazy forecast Dataset
+            wrf_var: Name of the target variable
+            vertical_coord_var: Name of the vertical coordinate variable
+                (e.g., 'geopotential_height' for height, 'air_pressure' for
+                pressure)
+            batch_t: Time coordinates for observations
+            batch_x: X coordinates for observations
+            batch_y: Y coordinates for observations
+            obs_z: Target vertical coordinate values (height or pressure)
+            flip: If True, reverse the vertical axis before interpolation
+                (needed for pressure, which decreases with altitude)
+
+        Returns:
+            Array of interpolated values, one per observation
+        """
+        # Interpolate both the target variable and the vertical coordinate
+        # horizontally/temporally in a single compute call to avoid
+        # evaluating the dask graph twice.
+        interp_ds = (
+            forecast_mean[[wrf_var, vertical_coord_var]]
+            .interp(t=batch_t, x=batch_x, y=batch_y)
+            .compute()
+        )
+
+        profiles = interp_ds[wrf_var].values  # (n_obs, n_levels)
+        coord_profiles = interp_ds[vertical_coord_var].values  # (n_obs, n_levels)
+
+        if flip:
+            profiles = profiles[:, ::-1]
+            coord_profiles = coord_profiles[:, ::-1]
+
+        return self._vertical_interp_1d(profiles, coord_profiles, obs_z)
+
+    @staticmethod
+    def _vertical_interp_1d(
+        value_profiles: np.ndarray,
+        coord_profiles: np.ndarray,
+        obs_z: np.ndarray,
+    ) -> np.ndarray:
+        """1D vertical interpolation per observation.
+
+        For each observation, interpolates along the vertical using the
+        model's coordinate profile at that location/time.
+
+        Args:
+            value_profiles: (n_obs, n_levels) target variable profiles
+            coord_profiles: (n_obs, n_levels) vertical coordinate profiles
+            obs_z: (n_obs,) target vertical coordinate values
+
+        Returns:
+            (n_obs,) interpolated values
+        """
+        n_obs = len(obs_z)
+        result = np.empty(n_obs, dtype=np.float64)
+
+        for i in range(n_obs):
+            c = coord_profiles[i, :]
+            v = value_profiles[i, :]
+
+            valid = np.isfinite(c) & np.isfinite(v)
+            if valid.sum() < 2:
+                result[i] = np.nan
+                continue
+
+            c_valid = c[valid]
+            v_valid = v[valid]
+
+            # np.interp requires monotonically increasing x
+            sort_idx = np.argsort(c_valid)
+            result[i] = np.interp(obs_z[i], c_valid[sort_idx], v_valid[sort_idx])
+
+        return result
 
     def _mark_da_usage(self, obs: pd.DataFrame) -> pd.DataFrame:
         """Mark which observations were used in data assimilation.
@@ -99,7 +390,9 @@ class ModelInterpolation:
             start_time = pd.to_datetime(cycle.end) - pd.Timedelta(minutes=half_window)
             end_time = pd.to_datetime(cycle.end) + pd.Timedelta(minutes=half_window)
 
-            in_window = (obs["time"] >= start_time) & (obs["time"] <= end_time)
+            in_window = (obs["time"] >= start_time.to_numpy()) & (
+                obs["time"] <= end_time.to_numpy()
+            )
             if da_instruments is not None:
                 is_da_instrument = obs["instrument"].isin(da_instruments)
                 obs.loc[in_window & is_da_instrument, "used_in_da"] = True
@@ -107,141 +400,6 @@ class ModelInterpolation:
             else:
                 obs.loc[in_window, "used_in_da"] = True
                 obs.loc[in_window, "cycle"] = cycle.index
-
-        return obs
-
-    def _determine_needed_vars(self, obs: pd.DataFrame) -> list[str]:
-        """Determine which WRF variables are needed for the observations.
-
-        Args:
-            obs: Observations DataFrame
-
-        Returns:
-            List of WRF variable names needed
-        """
-        needed_vars = set()
-        for quantity in obs["quantity"].unique():
-            quantity_info = QUANTITY_REGISTRY.get(quantity)
-            if quantity_info is not None and quantity_info.model_equivalent is not None:
-                needed_vars.add(quantity_info.model_equivalent)
-            else:
-                logger.warning(
-                    f"Quantity {quantity} not found in observation mappings, "
-                    "cannot determine WRF variable"
-                )
-
-        needed_vars = list(needed_vars)
-        logger.info(f"Need to interpolate WRF variables: {needed_vars}")
-
-        return needed_vars
-
-    def _observations_to_dataset(self, obs: pd.DataFrame) -> xr.Dataset:
-        """Convert observations DataFrame to xarray Dataset for interpolation.
-
-        Args:
-            obs: Observations DataFrame
-
-        Returns:
-            xarray Dataset with time, x, y as coordinates
-        """
-        obs_ds = xr.Dataset.from_dataframe(obs).set_coords(["time", "x", "y"])
-        # Convert Timestamps to DateTimeIndex without timezone info
-        # xarray does not support tz-aware times
-        obs_ds["time"] = (
-            ("index",),
-            pd.DatetimeIndex(obs_ds["time"].values).tz_localize(None),
-        )
-        logger.debug(f"Observation dataset:\n{obs_ds}")
-
-        return obs_ds
-
-    def _interpolate_model_to_obs(
-        self, obs_ds: xr.Dataset, needed_vars: list[str]
-    ) -> pd.DataFrame:
-        """Interpolate model forecasts to observation locations and times.
-
-        Args:
-            obs_ds: Observations as xarray Dataset
-            needed_vars: List of WRF variables to interpolate
-
-        Returns:
-            DataFrame with interpolated model values
-
-        Raises:
-            ValueError: If duplicate coordinates are found in forecast_mean
-        """
-
-        # Open all model output forecast mean files as a single xarray dataset
-        # TODO: Allow mean/member selection
-        forecast_mean = xr.open_mfdataset(
-            f"{self.exp.paths.data_forecasts}/cycle_**/forecast_mean_cycle_*.nc",
-            combine="by_coords",
-            chunks={"time": 1},
-            coords="minimal",
-        )[needed_vars]
-
-        # Check forecast_mean coordinates for duplicates
-        for coord_name in ["t", "x", "y"]:
-            coord_vals = forecast_mean.coords[coord_name].values
-            unique, counts = np.unique(coord_vals, return_counts=True)
-            duplicates = unique[counts > 1]
-
-            if len(duplicates) > 0:
-                print(
-                    f"Duplicate values found in forecast_mean coordinate '{coord_name}':"
-                )
-                for dup in duplicates:
-                    indices = np.where(coord_vals == dup)[0]
-                    print(f"  Value: {dup}")
-                    print(f"  Appears {len(indices)} times at indices: {indices}")
-
-                raise ValueError(
-                    f"Duplicate values found in forecast_mean coordinate '{coord_name}': {duplicates}"
-                )
-
-        # Interpolate the model data to observation locations and times
-        model_obs = forecast_mean.interp(
-            t=obs_ds["time"], x=obs_ds["x"], y=obs_ds["y"]
-        ).compute()
-
-        model_obs_df = model_obs.to_dataframe().reset_index()
-
-        return model_obs_df
-
-    def _add_model_values(
-        self, obs: pd.DataFrame, model_obs_df: pd.DataFrame
-    ) -> pd.DataFrame:
-        """Add interpolated model values to the observations DataFrame.
-
-        For each observation, selects the appropriate WRF variable value
-        based on the observation quantity.
-
-        Args:
-            obs: Original observations DataFrame
-            model_obs_df: DataFrame with interpolated model values
-
-        Returns:
-            Observations DataFrame with 'model_value' column added
-        """
-
-        def get_column_that_matches_quantity(row):
-            # Get the quantity from the original obs dataframe
-            quantity = str(obs.loc[row["index"], "quantity"])
-            quantity_info = QUANTITY_REGISTRY.get(quantity, None)
-            var_name = (
-                quantity_info.model_equivalent if quantity_info is not None else None
-            )
-            if var_name is not None and var_name in row:
-                return row[var_name]
-            else:
-                return pd.NA
-
-        model_obs_df["model_value"] = model_obs_df.apply(
-            get_column_that_matches_quantity, axis=1
-        )
-
-        # Add the model_value to the original dataframe
-        obs["model_value"] = model_obs_df["model_value"]
 
         return obs
 
