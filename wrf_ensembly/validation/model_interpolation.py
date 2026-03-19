@@ -60,20 +60,17 @@ class ModelInterpolation:
         Returns:
             DataFrame of observations
         """
-        where_conditions = ["downsampling_info IS NULL"]
-
+        where_clause = ""
         if self.exp.cfg.validation.instruments:
             instruments_to_use = self.exp.cfg.validation.instruments
             logger.info(
                 f"Filtering observations to only use instruments: {instruments_to_use}"
             )
             instruments_list = ", ".join(f"'{inst}'" for inst in instruments_to_use)
-            where_conditions.append(f"instrument IN ({instruments_list})")
-
-        where_clause = " AND ".join(where_conditions)
+            where_clause = f"WHERE instrument IN ({instruments_list})"
         obs = (
             self.exp.obs._get_duckdb(read_only=True)
-            .execute(f"SELECT * FROM observations WHERE {where_clause}")
+            .execute(f"SELECT * FROM observations {where_clause}")
             .fetchdf()
         )
 
