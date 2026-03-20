@@ -3,13 +3,11 @@
 from pathlib import Path
 
 import click
+import coda
 import numpy as np
 import pandas as pd
 
-import coda
-
 from wrf_ensembly.observations import io as obs_io
-
 
 # Variable mappings for Mie retrievals
 mie_variables = {
@@ -50,11 +48,17 @@ rayleigh_variables = {
 }
 
 
-def convert_aeolus_l2b(path: Path) -> pd.DataFrame | None:
+def convert_aeolus_l2b(
+    path: Path,
+    include_mie: bool = True,
+    include_rayleigh: bool = True,
+) -> pd.DataFrame | None:
     """Convert an AEOLUS L2B file to WRF-Ensembly Observation format.
 
     Args:
         path: Path to the AEOLUS L2B file.
+        include_mie: Whether to include Mie wind retrievals.
+        include_rayleigh: Whether to include Rayleigh wind retrievals.
 
     Returns:
         A pandas DataFrame in WRF-Ensembly Observation format, or None if no valid data.
@@ -65,19 +69,21 @@ def convert_aeolus_l2b(path: Path) -> pd.DataFrame | None:
         cf.close()
         raise ValueError("Input file is not an AEOLUS DBL L2B file.")
 
+    retrieval_types = {}
+    if include_mie:
+        retrieval_types["mie"] = mie_variables
+    if include_rayleigh:
+        retrieval_types["rayleigh"] = rayleigh_variables
+
     # Read all variables we need from the DBL file, per retrieval type
     datasets = []
-    for name, variables in dict(mie=mie_variables, rayleigh=rayleigh_variables).items():
+    for name, variables in retrieval_types.items():
         data = {}
         for k, v in variables.items():
             try:
                 data[k] = coda.fetch(cf, *v)
             except coda.CodacError:
-                # If we can't fetch a variable, fill with NaN or appropriate default
-                if k in ["qc_pass", "observation_type"]:
-                    data[k] = np.array([])
-                else:
-                    data[k] = np.array([])
+                data[k] = np.array([])
 
         # Skip if no data available
         if len(data.get("obs", [])) == 0:
@@ -124,16 +130,16 @@ def convert_aeolus_l2b(path: Path) -> pd.DataFrame | None:
     qc_flags = np.zeros(len(df), dtype=int)
 
     # Mark observations with invalid validity flags
+    # For `validity_flag`, 1 means valid, 0 means invalid
     invalid_validity = df["qc_pass"] != 1
     qc_flags[invalid_validity] = 1
 
     # Mark observations with wrong observation type for retrieval method
-    # Rayleigh should have observation type 2 (Rayleigh cloudy)
-    # Mie should have observation type 1 (Mie clear)
-    wrong_obs_type = ~(
-        ((df["retrieval_type"] == "rayleigh") & (df["observation_type"] == 2))
-        | ((df["retrieval_type"] == "mie") & (df["observation_type"] == 1))
-    )
+    # observation_type: 0=invalid, 1=cloudy, 2=clear
+    # For rayleigh, we keep only clear (2). For mie, we keep only cloudy (1).
+    wrong_obs_type = (df["retrieval_type"] == "rayleigh") & (
+        df["observation_type"] != 2
+    ) | (df["retrieval_type"] == "mie") & (df["observation_type"] != 1)
     qc_flags[wrong_obs_type] = 2
 
     # Store QC flags for later use
@@ -163,10 +169,12 @@ def convert_aeolus_l2b(path: Path) -> pd.DataFrame | None:
     obs_df["value"] = df["obs"]
     obs_df["value_uncertainty"] = df["obs_err"]
     obs_df["qc_flag"] = df["wrf_ensembly_qc"]  # Use the QC flags we computed
-    obs_df["instrument"] = "AEOLUS_L2B"
+    obs_df["instrument"] = df["retrieval_type"].map(
+        {"mie": "AEOLUS_L2B_MIE", "rayleigh": "AEOLUS_L2B_RAYLEIGH"}
+    )
     obs_df["quantity"] = "HLOS_WIND"  # Horizontal Line of Sight wind
 
-    # Set rayleight error to 4.5 m/s and mie error to 2.5 m/s
+    # Set rayleigh error to 4.5 m/s and mie error to 2.5 m/s
     # https://doi.org/10.5194/amt-16-2691-2023
     obs_df.loc[df["retrieval_type"] == "rayleigh", "value_uncertainty"] = 4.5
     obs_df.loc[df["retrieval_type"] == "mie", "value_uncertainty"] = 2.5
@@ -204,7 +212,11 @@ def convert_aeolus_l2b(path: Path) -> pd.DataFrame | None:
 @click.command()
 @click.argument("input_path", type=click.Path(exists=True, path_type=Path))
 @click.argument("output_path", type=click.Path(path_type=Path))
-def aeolus_l2b(input_path: Path, output_path: Path):
+@click.option("--mie/--no-mie", default=True, help="Include Mie wind retrievals")
+@click.option(
+    "--rayleigh/--no-rayleigh", default=True, help="Include Rayleigh wind retrievals"
+)
+def aeolus_l2b(input_path: Path, output_path: Path, mie: bool, rayleigh: bool):
     """Convert AEOLUS L2B file to WRF-Ensembly observation format.
 
     INPUT_PATH: Path to the AEOLUS L2B file
@@ -214,7 +226,9 @@ def aeolus_l2b(input_path: Path, output_path: Path):
     print(f"Output path: {output_path}")
 
     # Convert the data
-    converted_df = convert_aeolus_l2b(input_path)
+    converted_df = convert_aeolus_l2b(
+        input_path, include_mie=mie, include_rayleigh=rayleigh
+    )
     if converted_df is None or converted_df.empty:
         print("No observations found in the input file, aborting")
         return
@@ -230,4 +244,8 @@ def aeolus_l2b(input_path: Path, output_path: Path):
     print(f"Successfully converted {total_obs} observations:")
     print(f"  - {good_obs} good quality observations (QC=0)")
     print(f"  - {bad_obs} flagged observations (QC>0)")
+    for instrument in sorted(converted_df["instrument"].unique()):
+        subset = converted_df[converted_df["instrument"] == instrument]
+        good = len(subset[subset["qc_flag"] == 0])
+        print(f"    [{instrument}] {len(subset)} total, {good} good")
     print(f"Saved to: {output_path}")
