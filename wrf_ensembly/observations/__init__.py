@@ -16,6 +16,7 @@ from .definitions import (
     QUANTITY_REGISTRY,
     AxisSpec,
     InstrumentSpec,
+    OperatorSpec,
     QuantitySpec,
 )
 from .utils import project_locations_to_wrf
@@ -31,4 +32,5 @@ __all__ = [
     "AxisSpec",
     "InstrumentSpec",
     "QuantitySpec",
+    "OperatorSpec",
 ]

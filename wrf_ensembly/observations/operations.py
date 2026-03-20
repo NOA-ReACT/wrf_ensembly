@@ -50,6 +50,7 @@ def dump_info(file_path: Path, as_json: bool):
     - Quantities present and their counts
     - Time range of observations
     - Geographical range (min/max latitude and longitude)
+    - How many observations pass QC
     """
 
     df = obs_io.read_obs(file_path)
@@ -73,6 +74,7 @@ def dump_info(file_path: Path, as_json: bool):
                 "max": df["longitude"].max(),
             },
         },
+        "qc_pass": (df["qc_flag"] == 0).sum(),
     }
 
     if as_json:
@@ -105,6 +107,10 @@ def dump_info(file_path: Path, as_json: bool):
     table.add_row(
         "Longitude Range",
         f"{info['geographical_range']['longitude']['min']} to {info['geographical_range']['longitude']['max']}",
+    )
+    table.add_row(
+        "QC Pass",
+        f"{info['qc_pass']} ({info['qc_pass'] / info['num_observations']:.1%})",
     )
     console.print(table)
 

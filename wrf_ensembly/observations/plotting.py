@@ -2,11 +2,13 @@ from typing import Any
 
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
+import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib.axes import Axes
+from matplotlib.collections import PolyCollection
 from matplotlib.figure import Figure
 
 from wrf_ensembly.observations.utils import reconstruct_array
@@ -24,6 +26,7 @@ def _plot_geom_profile_curtain(
     ds: xr.Dataset,
     inst_spec: InstrumentSpec,
     qty_spec: QuantitySpec,
+    plot_metadata: dict[str, np.ndarray],
     ax: Axes | None = None,
     **kwargs,
 ) -> Figure:
@@ -32,7 +35,6 @@ def _plot_geom_profile_curtain(
     if inst_spec.y is None:
         raise ValueError("Trying to plot a 2D Curtain but AxisSpec for y is missing!")
 
-    # Registry defaults, overridden by any kwargs passed in
     pcolormesh_kwargs = dict(
         cmap=qty_spec.cmap,
         vmin=qty_spec.vmin,
@@ -54,7 +56,77 @@ def _plot_geom_profile_curtain(
     return fig
 
 
-GEOMETRY_PLOTTERS = {Geometry.PROFILE_CURTAIN: _plot_geom_profile_curtain}
+def _plot_geom_aeolus_windresults(
+    ds: xr.Dataset,
+    inst_spec: InstrumentSpec,
+    qty_spec: QuantitySpec,
+    plot_metadata: dict[str, np.ndarray],
+    ax: Axes | None = None,
+    **kwargs,
+) -> Figure:
+    """Curtain plot for Aeolus L2B wind results using PolyCollection quads.
+
+    Each wind result is drawn as a rectangle whose x-extent is
+    [time_start, time_stop] and y-extent is [alt_bottom, alt_top], coloured
+    by the HLOS wind velocity.  This mirrors the approach used in the official
+    Aeolus VirES notebooks (PolyCollection over individual quads) and handles
+    the irregular horizontal spacing that makes pcolormesh unsuitable here.
+    """
+    fig, ax = (ax.figure, ax) if ax else plt.subplots(figsize=(12, 5))
+
+    values = ds["value"].to_numpy()
+
+    # Convert timestamps to matplotlib float dates for PolyCollection
+    t0 = mdates.date2num(plot_metadata["time_start"])
+    t1 = mdates.date2num(plot_metadata["time_stop"])
+    y0 = plot_metadata["alt_bottom"].astype(float)
+    y1 = plot_metadata["alt_top"].astype(float)
+
+    # Build quad vertices: bottom-left → top-left → top-right → bottom-right
+    quads = np.stack(
+        [
+            np.column_stack([t0, y0]),
+            np.column_stack([t0, y1]),
+            np.column_stack([t1, y1]),
+            np.column_stack([t1, y0]),
+        ],
+        axis=1,
+    )  # shape: (N, 4, 2)
+
+    vmin = kwargs.pop("vmin", qty_spec.vmin)
+    vmax = kwargs.pop("vmax", qty_spec.vmax)
+
+    # Symmetric colorbar range for wind velocity when not explicitly set
+    if vmin is None and vmax is None:
+        abs_max = np.nanpercentile(np.abs(values), 98)
+        vmin, vmax = -abs_max, abs_max
+
+    coll = PolyCollection(
+        quads,
+        array=values,
+        cmap=kwargs.pop("cmap", qty_spec.cmap),
+        clim=(vmin, vmax),
+        **kwargs,
+    )
+    ax.add_collection(coll)
+    fig.colorbar(coll, ax=ax, label=f"{qty_spec.label} [{qty_spec.units}]", pad=0.01)
+
+    ax.autoscale_view()
+    ax.xaxis_date()
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+    fig.autofmt_xdate()
+
+    ax.set_xlabel(inst_spec.x.label)
+    ax.set_ylabel(inst_spec.y.label)
+    ax.set_title(inst_spec.label, fontsize=11)
+
+    return fig
+
+
+GEOMETRY_PLOTTERS = {
+    Geometry.PROFILE_CURTAIN: _plot_geom_profile_curtain,
+    Geometry.AEOLUS_WINDRESULTS: _plot_geom_aeolus_windresults,
+}
 
 
 def plot_observations(df: pd.DataFrame, plot_kwargs: dict[str, Any] = {}) -> Figure:
@@ -62,7 +134,6 @@ def plot_observations(df: pd.DataFrame, plot_kwargs: dict[str, Any] = {}) -> Fig
     Plots the given observations using the appropriate geometry plotter
     """
 
-    # Grab instrument and quantity
     instrument_quantity = df["instrument"] + "." + df["quantity"]
     if len(instrument_quantity.unique()) != 1:
         raise ValueError(
@@ -71,13 +142,25 @@ def plot_observations(df: pd.DataFrame, plot_kwargs: dict[str, Any] = {}) -> Fig
     if len(df["orig_filename"].unique()) != 1:
         raise ValueError("Only one source file can be plotted at a time")
 
-    instrument = INSTRUMENT_REGISTRY[df.iloc[0]["instrument"]]
-    quantity = QUANTITY_REGISTRY[df.iloc[0]["quantity"]]
+    inst_spec = INSTRUMENT_REGISTRY[df.iloc[0]["instrument"]]
+    qty_spec = QUANTITY_REGISTRY[df.iloc[0]["quantity"]]
 
-    # Fold array back to original dimensions
+    # Extract metadata fields declared by the instrument spec into flat arrays.
+    # Each key becomes a numpy array aligned with the rows of df.
+    plot_metadata: dict[str, np.ndarray] = {}
+    if inst_spec.plot_metadata_keys:
+        meta_series = df["metadata"].apply(pd.Series)
+        for key in inst_spec.plot_metadata_keys:
+            if key not in meta_series.columns:
+                raise KeyError(
+                    f"Instrument {inst_spec.label!r} requires metadata key {key!r} "
+                    f"for plotting, but it is missing from the observation metadata."
+                )
+            plot_metadata[key] = meta_series[key].to_numpy()
+
     ds = reconstruct_array(df)
-    return GEOMETRY_PLOTTERS[instrument.geometry](
-        ds, instrument, quantity, **plot_kwargs
+    return GEOMETRY_PLOTTERS[inst_spec.geometry](
+        ds, inst_spec, qty_spec, plot_metadata, **plot_kwargs
     )
 
 
