@@ -82,8 +82,8 @@ def edge_taper(ny: int, nx: int, border_width: int):
     """
 
     # Compute distance of each point from the nearest edge
-    y_indices = np.indices([ny])
-    x_indices = np.indices([nx])
+    y_indices = np.arange(ny)
+    x_indices = np.arange(nx)
     dist_left = x_indices
     dist_right = nx - 1 - x_indices
     dist_top = y_indices
