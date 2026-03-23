@@ -1,6 +1,7 @@
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import Optional
 
@@ -8,6 +9,7 @@ import click
 import netCDF4
 
 from wrf_ensembly import experiment, utils
+from wrf_ensembly.experiment.experiment import _generate_perturbations_for_cycle
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import CycleState, StateTransition
@@ -193,8 +195,16 @@ def generate_perturbations(experiment_path: Path, jobs: Optional[int], force: bo
         [var.perturb_every_cycle for var in exp.cfg.perturbations.variables.values()]
     ):
         logger.info("Generating perturbations for all cycles...")
+        worker = partial(
+            _generate_perturbations_for_cycle,
+            perturbations_cfg=exp.cfg.perturbations,
+            n_members=exp.cfg.assimilation.n_members,
+            experiment_name=exp.cfg.metadata.name,
+            ic_path=exp.paths.ic_path(0, 0),
+            diag_dir=exp.paths.data_diag,
+        )
         with ProcessPoolExecutor(max_workers=jobs, max_tasks_per_child=1) as executor:
-            res = executor.map(exp.generate_perturbations, range(1, len(exp.cycles)))
+            res = executor.map(worker, range(1, len(exp.cycles)))
             for cycle_i in range(1, len(exp.cycles)):
                 next(res)  # Process one at a time to mark them
                 with exp.db as db_conn:

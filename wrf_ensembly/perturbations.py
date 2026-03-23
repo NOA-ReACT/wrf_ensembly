@@ -64,6 +64,61 @@ def generate_perturbation_field(
     return x
 
 
+def generate_perturbation_ensemble(
+    n_members: int,
+    shape: Tuple[int, ...],
+    mean: float,
+    sd: float,
+    sigma=2.5,
+    boundary=0,
+    min_value: float | None = None,
+    max_value: float | None = None,
+) -> np.ndarray:
+    """
+    Generates perturbation fields for all ensemble members at once.
+
+    Same algorithm as `generate_perturbation_field`, but generates all members in a
+    single batch and applies Gaussian smoothing only on the spatial axes (not the
+    member axis), which is significantly faster than calling `generate_perturbation_field`
+    in a loop.
+
+    Args:
+        n_members: Number of ensemble members
+        shape: The shape of a single member's field (e.g., (time, z, y, x))
+        mean: Desired mean value of each member's field, after normalization
+        sd: Desired standard deviation of each member's field, after normalization
+        sigma: Standard deviation for the Gaussian filter
+        boundary: Size of boundary to set to neutral value
+        min_value: Optional minimum value clamp
+        max_value: Optional maximum value clamp
+
+    Returns:
+        Array of shape (n_members, *shape) with perturbation fields.
+    """
+    batch_shape = (n_members, *shape)
+    x = np.random.normal(1, 10, batch_shape)
+
+    if boundary > 0:
+        for i in range(n_members):
+            x[i] = set_boundaries(x[i], boundary, 1)
+
+    # Apply Gaussian filter only on spatial axes (all axes except the first/member axis)
+    spatial_axes = tuple(range(1, len(batch_shape)))
+    x = gaussian_filter(x, sigma=sigma, axes=spatial_axes)
+
+    # Normalize per member
+    for i in range(n_members):
+        x[i] = (x[i] - x[i].mean()) / x[i].std()
+        x[i] = x[i] * sd + mean
+
+    if min_value is not None:
+        np.maximum(x, min_value, out=x)
+    if max_value is not None:
+        np.minimum(x, max_value, out=x)
+
+    return x
+
+
 def edge_taper(ny: int, nx: int, border_width: int):
     """
     Tapers the center of a 2D array to zero, leaving a border of specified width unchanged.

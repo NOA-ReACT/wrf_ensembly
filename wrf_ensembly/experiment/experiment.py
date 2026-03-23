@@ -27,6 +27,138 @@ from .paths import ExperimentPaths
 from .state_machine import CycleState, ExperimentStateMachine, StateTransition
 
 
+def _generate_perturbations_for_cycle(
+    cycle_i: int,
+    perturbations_cfg: config.PerturbationsConfig,
+    n_members: int,
+    experiment_name: str,
+    ic_path: Path,
+    diag_dir: Path,
+):
+    """
+    Generates perturbations for a given cycle and stores them in the diag directory.
+    This is a standalone function (no Experiment instance) so it can be safely pickled
+    for multiprocessing.
+
+    For cycles > 0 where all reused variables have `different_field_every_cycle=False`
+    and no new fields need generating, a symlink to cycle 0's file is created instead.
+    The midcycle taper is applied at perturbation application time rather than here.
+    """
+
+    if len(perturbations_cfg.variables) == 0:
+        logger.warning("No perturbations defined in config, skipping")
+        return
+
+    if perturbations_cfg.seed is not None:
+        logger.warning(f"Setting random seed to {perturbations_cfg.seed}")
+        np.random.seed(perturbations_cfg.seed)
+
+    pert_dir = diag_dir / "perturbations"
+    pert_dir.mkdir(parents=True, exist_ok=True)
+    pert_file = pert_dir / f"perts_cycle_{cycle_i}.nc"
+    pert_file.unlink(missing_ok=True)
+
+    if cycle_i > 0:
+        # Check which variables need new fields vs reusing cycle 0
+        needs_new_field = any(
+            pert_config.perturb_every_cycle and pert_config.different_field_every_cycle
+            for pert_config in perturbations_cfg.variables.values()
+        )
+        needs_reuse = any(
+            pert_config.perturb_every_cycle
+            and not pert_config.different_field_every_cycle
+            for pert_config in perturbations_cfg.variables.values()
+        )
+
+        if needs_reuse and not needs_new_field:
+            # All reused variables come from cycle 0 — symlink instead of copying
+            first_cycle_pert_file = pert_dir / "perts_cycle_0.nc"
+            if not first_cycle_pert_file.exists():
+                raise FileNotFoundError(
+                    f"Perturbation file for first cycle not found at {first_cycle_pert_file}"
+                )
+            pert_file.symlink_to(first_cycle_pert_file.name)
+            logger.info(
+                f"Symlinked perturbations for cycle {cycle_i} to cycle 0 (same fields)"
+            )
+            return
+
+    # Open the first wrfinput file to get the shape of each variable
+    wrfinput = xr.open_dataset(ic_path)
+
+    # Generate the perturbation fields
+    perts = xr.Dataset()
+    for var, pert_config in perturbations_cfg.variables.items():
+        if cycle_i > 0 and (
+            not pert_config.perturb_every_cycle
+            or not pert_config.different_field_every_cycle
+        ):
+            continue
+
+        logger.debug(f"\tVariable: {var}, config: {pert_config}")
+        arr = perturbations.generate_perturbation_ensemble(
+            n_members=n_members,
+            shape=wrfinput[var].shape,
+            mean=pert_config.mean,
+            sd=pert_config.sd,
+            sigma=pert_config.gaussian_sigma,
+            boundary=pert_config.boundary,
+            min_value=pert_config.min_value,
+            max_value=pert_config.max_value,
+        )
+        perts[var] = xr.DataArray(
+            arr,
+            dims=("member", *wrfinput[var].dims),
+            coords={"member": range(n_members)},
+            attrs={"cfg": json.dumps(pert_config.__dict__)},
+        )
+
+    # For cycles > 0, also include reused variables from cycle 0
+    if cycle_i > 0:
+        first_cycle_pert_file = pert_dir / "perts_cycle_0.nc"
+        if not first_cycle_pert_file.exists():
+            raise FileNotFoundError(
+                f"Perturbation file for first cycle not found at {first_cycle_pert_file}"
+            )
+        first_cycle_perts = xr.open_dataset(first_cycle_pert_file)
+        for var, pert_config in perturbations_cfg.variables.items():
+            if (
+                not pert_config.perturb_every_cycle
+                or pert_config.different_field_every_cycle
+            ):
+                continue
+
+            logger.info(f"Reusing perturbation field from first cycle for {var}")
+            if var not in first_cycle_perts:
+                raise ValueError(
+                    f"Variable {var} not found in perturbation file for first cycle"
+                )
+            perts[var] = first_cycle_perts[var]
+            perts[var].attrs = first_cycle_perts[var].attrs
+
+    # Write the dataset to a netCDF file
+    encoding = {
+        var: {
+            "zlib": True,
+            "complevel": 5,
+            "dtype": "float32",
+            "least_significant_digit": 3,
+        }
+        for var in perts.data_vars
+    }
+    # Set chunksize for all variables: 1 on member and time, full size on rest
+    for var in perts.data_vars:
+        chunks = [1, 1] + [s for s in perts[var].shape[2:]]
+        encoding[var]["chunksizes"] = chunks
+    perts.attrs["experiment_name"] = experiment_name
+    perts.attrs["cycle"] = cycle_i
+
+    logger.info(f"Writing perturbations for {cycle_i} to {pert_file}")
+    perts.to_netcdf(pert_file, encoding=encoding)
+
+    wrfinput.close()
+
+
 class Experiment:
     """
     An ensemble assimilation experiment
@@ -194,120 +326,14 @@ class Experiment:
         """
         Generates perturbations for a given cycle and stores them in `data/diag/perturbations`.
         """
-
-        if len(self.cfg.perturbations.variables) == 0:
-            logger.warning("No perturbations defined in config, skipping")
-            return
-
-        if self.cfg.perturbations.seed is not None:
-            logger.warning(f"Setting random seed to {self.cfg.perturbations.seed}")
-            np.random.seed(self.cfg.perturbations.seed)
-
-        # Open the first wrfinput file to get the shape of each variable
-        wrfinput = xr.open_dataset(self.paths.ic_path(0, 0))
-
-        pert_file = self.paths.data_diag / "perturbations" / f"perts_cycle_{cycle_i}.nc"
-        pert_file.parent.mkdir(parents=True, exist_ok=True)
-        pert_file.unlink(missing_ok=True)
-
-        # If we are working on a mid-cycle (not the first), we may need to reuse the
-        # perturbation field from the first cycle. So let's open it now.
-        if cycle_i > 0:
-            first_cycle_pert_file = (
-                self.paths.data_diag / "perturbations" / "perts_cycle_0.nc"
-            )
-            if not first_cycle_pert_file.exists():
-                raise FileNotFoundError(
-                    f"Perturbation file for first cycle not found at {first_cycle_pert_file}"
-                )
-            first_cycle_perts = xr.open_dataset(first_cycle_pert_file)
-
-        # Generate the perturbation fields for variables that get a new one this cycle
-        perts = xr.Dataset()
-        for var, pert_config in self.cfg.perturbations.variables.items():
-            if cycle_i > 0 and (
-                not pert_config.perturb_every_cycle
-                or not pert_config.different_field_every_cycle
-            ):
-                continue
-
-            logger.debug(f"\tVariable: {var}, config: {pert_config}")
-            arr = np.stack(
-                [
-                    perturbations.generate_perturbation_field(
-                        shape=wrfinput[var].shape,
-                        mean=pert_config.mean,
-                        sd=pert_config.sd,
-                        sigma=pert_config.gaussian_sigma,
-                        boundary=pert_config.boundary,
-                        min_value=pert_config.min_value,
-                        max_value=pert_config.max_value,
-                    )
-                    for _ in range(self.cfg.assimilation.n_members)
-                ],
-                axis=0,
-            )
-            perts[var] = xr.DataArray(
-                arr,
-                dims=("member", *wrfinput[var].dims),
-                coords={"member": range(self.cfg.assimilation.n_members)},
-                attrs={"cfg": json.dumps(pert_config.__dict__)},
-            )
-
-        # Now handle variables that need to copy the perturbation field from the first cycle
-        if cycle_i > 0:
-            for var, pert_config in self.cfg.perturbations.variables.items():
-                if (
-                    not pert_config.perturb_every_cycle
-                    or pert_config.different_field_every_cycle
-                ):
-                    continue
-
-                logger.info(f"Using same perturbation field as first cycle for {var}")
-
-                # Copy perturbation field from first cycle
-                if var not in first_cycle_perts:
-                    raise ValueError(
-                        f"Variable {var} not found in perturbation file for first cycle"
-                    )
-                arr = first_cycle_perts[var]
-                if pert_config.midcycle_taper_width > 0:
-                    logger.info(
-                        f"Applying mid-cycle taper with width {pert_config.midcycle_taper_width} to {var}"
-                    )
-                    taper = perturbations.edge_taper(
-                        arr.shape[-2],
-                        arr.shape[-1],
-                        pert_config.midcycle_taper_width,
-                    )
-                    if pert_config.operation == "add":
-                        arr = arr * taper
-                    elif pert_config.operation == "multiply":
-                        arr = 1 + (arr - 1) * taper
-                    else:
-                        raise ValueError(
-                            "Cannot use 'assign' operation with midcycle taper"
-                        )
-
-                perts[var] = arr
-                perts[var].attrs = first_cycle_perts[var].attrs
-
-        # Write the dataset to a netCDF file
-        encoding = {
-            var: {"zlib": True, "complevel": 5, "dtype": "float32"}
-            for var in perts.data_vars
-        }
-        # Set chunksize for all variables: 1 on member and time, full size on rest
-        for var in perts.data_vars:
-            chunks = [1, 1] + [s for s in perts[var].shape[2:]]
-            encoding[var]["chunksizes"] = chunks
-        perts.attrs["experiment_name"] = self.cfg.metadata.name
-        perts.attrs["cycle"] = cycle_i
-
-        logger.info(f"Writing perturbations for {cycle_i} to {pert_file}")
-        perts.to_netcdf(pert_file, encoding=encoding)
-
-        wrfinput.close()
+        _generate_perturbations_for_cycle(
+            cycle_i=cycle_i,
+            perturbations_cfg=self.cfg.perturbations,
+            n_members=self.cfg.assimilation.n_members,
+            experiment_name=self.cfg.metadata.name,
+            ic_path=self.paths.ic_path(0, 0),
+            diag_dir=self.paths.data_diag,
+        )
 
     def apply_perturbations(self, member_i: int):
         """
@@ -360,6 +386,25 @@ class Experiment:
                     raise ValueError(f"Variable {name} not found in member IC/BC file.")
 
                 field = perts[name].to_numpy()
+
+                # Apply midcycle taper if configured (for non-first cycles using
+                # reused perturbation fields)
+                midcycle_taper_width = cfg.get("midcycle_taper_width", 0)
+                if midcycle_taper_width > 0 and self.current_cycle_i > 0:
+                    logger.debug(
+                        f"Applying mid-cycle taper (width={midcycle_taper_width}) to {name}"
+                    )
+                    taper = perturbations.edge_taper(
+                        field.shape[-2], field.shape[-1], midcycle_taper_width
+                    )
+                    if operation == "add":
+                        field = field * taper
+                    elif operation == "multiply":
+                        field = 1 + (field - 1) * taper
+                    else:
+                        raise ValueError(
+                            "Cannot use 'assign' operation with midcycle taper"
+                        )
 
                 match operation:
                     case "add":
