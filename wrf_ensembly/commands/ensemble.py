@@ -514,6 +514,18 @@ def cycle(experiment_path: Path, use_forecast: bool, jobs: Optional[int]):
         logger.error("Not all members have advanced to the next cycle, cannot cycle!")
         sys.exit(1)
 
+    # If all members are advanced but state machine is still in ADVANCING_MEMBERS
+    # (race condition when last two members finish simultaneously), recover here.
+    if exp.state_machine.current_cycle.current_state == CycleState.ADVANCING_MEMBERS:
+        n_advanced = sum(1 for m in exp.members if m.advanced)
+        exp.state_machine.current_cycle.transition(
+            StateTransition.ALL_MEMBERS_ADVANCED,
+            n_advanced,
+            exp.cfg.assimilation.n_members,
+        )
+        exp.save_status_to_db()
+        logger.info("Recovered: all members were advanced, transitioning to MEMBERS_ADVANCED")
+
     can_cycle, error = exp.state_machine.can_cycle_to_next(
         exp.current_cycle_i, use_forecast
     )
