@@ -590,12 +590,6 @@ def plot(
         logger.error(f"No observations found with orig_filename = '{filename}'")
         return
 
-    if qc is not None:
-        df = df[df["qc_flag"] == qc]
-        if df.empty:
-            logger.error(f"No observations with qc_flag == {qc}")
-            return
-
     plot_kwargs: dict[str, Any] = {}
     if vmin is not None:
         plot_kwargs["vmin"] = vmin
@@ -624,9 +618,13 @@ def plot(
                 use_model = True
 
         if use_model:
-            fig = plotting.plot_observations_vs_model(group, plot_kwargs=plot_kwargs)
+            fig = plotting.plot_observations_vs_model(
+                group, keep_only_qc_flag=qc, plot_kwargs=plot_kwargs
+            )
         else:
-            fig = plotting.plot_observations(group, plot_kwargs=plot_kwargs)
+            fig = plotting.plot_observations(
+                group, keep_only_qc_flag=qc, plot_kwargs=plot_kwargs
+            )
 
         if ylim != (None, None):
             for ax in fig.get_axes():

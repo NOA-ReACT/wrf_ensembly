@@ -132,9 +132,13 @@ GEOMETRY_PLOTTERS = {
 }
 
 
-def plot_observations(df: pd.DataFrame, plot_kwargs: dict[str, Any] = {}) -> Figure:
+def plot_observations(
+    df: pd.DataFrame, keep_only_qc_flag=None, plot_kwargs: dict[str, Any] = {}
+) -> Figure:
     """
     Plots the given observations using the appropriate geometry plotter
+
+    If keep_only_qc_flag is passed, only observations matching this QC value will be plotted.
     """
 
     instrument_quantity = df["instrument"] + "." + df["quantity"]
@@ -164,19 +168,23 @@ def plot_observations(df: pd.DataFrame, plot_kwargs: dict[str, Any] = {}) -> Fig
             plot_metadata[key] = meta_series[key].to_numpy()
 
     ds = reconstruct_array(df)
+    if keep_only_qc_flag is not None:
+        ds["value"] = xr.where(ds["qc_flag"] == keep_only_qc_flag, ds["value"], np.nan)
     return GEOMETRY_PLOTTERS[inst_spec.geometry](
         ds, inst_spec, qty_spec, plot_metadata, **plot_kwargs
     )
 
 
 def plot_observations_vs_model(
-    df: pd.DataFrame, plot_kwargs: dict[str, Any] = {}
+    df: pd.DataFrame, keep_only_qc_flag=None, plot_kwargs: dict[str, Any] = {}
 ) -> Figure:
     """
     3-panel plot: observation, model equivalent, and O-B departure.
 
     Expects the DataFrame to contain both ``value`` and ``model_value`` columns
     with at least some non-null ``model_value`` entries.
+
+    If keep_only_qc_flag is passed, only observations matching this QC value will be plotted.
     """
 
     instrument_quantity = df["instrument"] + "." + df["quantity"]
@@ -204,6 +212,8 @@ def plot_observations_vs_model(
             plot_metadata[key] = meta_series[key].to_numpy()
 
     ds = reconstruct_array(df, value_columns=["value", "model_value"])
+    if keep_only_qc_flag is not None:
+        ds["value"] = xr.where(ds["qc_flag"] == keep_only_qc_flag, ds["value"], np.nan)
     ds["departure"] = ds["value"] - ds["model_value"]
 
     plotter = GEOMETRY_PLOTTERS[inst_spec.geometry]
