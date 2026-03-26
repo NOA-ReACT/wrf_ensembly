@@ -93,6 +93,9 @@ class QuantitySpec:
     operator: OperatorSpec | None = None
     dart_quantity: str | None = None
 
+    display_units: str | None = None
+    display_scale: float | None = None
+
     def __post_init__(self):
         if self.model_equivalent is not None and self.operator is not None:
             raise ValueError(
@@ -159,6 +162,8 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         vmin=0,
         model_equivalent="EXT355",
         dart_quantity="LIDAR_EXTINCTION_355nm",
+        display_units="1/Mm",
+        display_scale=1e6,
     ),
     "HLOS_WIND": QuantitySpec(
         label="Horizontal Line-of-Sight Wind",

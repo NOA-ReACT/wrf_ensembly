@@ -37,12 +37,13 @@ def _plot_geom_profile_curtain(
     if inst_spec.y is None:
         raise ValueError("Trying to plot a 2D Curtain but AxisSpec for y is missing!")
 
+    units = qty_spec.display_units or qty_spec.units
     pcolormesh_kwargs = dict(
         cmap=qty_spec.cmap,
         vmin=qty_spec.vmin,
         vmax=qty_spec.vmax,
         robust=True,
-        cbar_kwargs=dict(label=f"{qty_spec.label} [{qty_spec.units}]"),
+        cbar_kwargs=dict(label=f"{qty_spec.label} [{units}]"),
     )
     pcolormesh_kwargs.update(kwargs)
 
@@ -112,7 +113,9 @@ def _plot_geom_aeolus_windresults(
         **kwargs,
     )
     ax.add_collection(coll)
-    fig.colorbar(coll, ax=ax, label=f"{qty_spec.label} [{qty_spec.units}]", pad=0.01)
+
+    units = qty_spec.display_units or qty_spec.units
+    fig.colorbar(coll, ax=ax, label=f"{qty_spec.label} [{units}]", pad=0.01)
 
     ax.autoscale_view()
     ax.xaxis_date()
@@ -170,6 +173,11 @@ def plot_observations(
     ds = reconstruct_array(df)
     if keep_only_qc_flag is not None:
         ds["value"] = xr.where(ds["qc_flag"] == keep_only_qc_flag, ds["value"], np.nan)
+
+    # Apply scale factor if quantity demands it
+    if qty_spec.display_scale is not None:
+        ds["value"] *= qty_spec.display_scale
+
     return GEOMETRY_PLOTTERS[inst_spec.geometry](
         ds, inst_spec, qty_spec, plot_metadata, **plot_kwargs
     )
@@ -215,6 +223,12 @@ def plot_observations_vs_model(
     if keep_only_qc_flag is not None:
         ds["value"] = xr.where(ds["qc_flag"] == keep_only_qc_flag, ds["value"], np.nan)
     ds["departure"] = ds["value"] - ds["model_value"]
+
+    # Apply scale factor if quantity demands it
+    if qty_spec.display_scale is not None:
+        ds["value"] *= qty_spec.display_scale
+        ds["model_value"] *= qty_spec.display_scale
+        ds["departure"] *= qty_spec.display_scale
 
     plotter = GEOMETRY_PLOTTERS[inst_spec.geometry]
 
