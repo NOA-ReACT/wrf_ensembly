@@ -294,27 +294,22 @@ def cycle_info(experiment_path: Path, cycle: int, as_json: bool):
     Specifically: Number of observations per file, how many were assimilated, with percentages.
     """
 
-    logger.setup("observations-cycle-stats", experiment_path)
+    logger.setup("observations-cycle-info", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
     cycle_info = exp.cycles[cycle]
+    file_stats = exp.obs.get_cycle_file_info(cycle_info)
 
-    parquet_path = exp.paths.obs / f"cycle_{cycle_info.index:03d}.parquet"
-    if not parquet_path.is_file():
+    if file_stats.empty:
         logger.error(
             f"Cycle {cycle_info.index} has no observations in the time window {cycle_info.start} to {cycle_info.end}"
         )
-        return
-    obs = observations.io.read_obs(parquet_path)
-    if obs is None or obs.empty:
-        logger.error(f"Cycle {cycle_info.index} has no observations, cannot show stats")
         return
 
     file_stats["pct"] = file_stats["assimilated"] / file_stats["total"] * 100
     total = int(file_stats["total"].sum())
     total_assimilated = int(file_stats["assimilated"].sum())
 
-    # If JSON, dump the `stats` dict. Otherwise print some nice tables with rich
     if as_json:
         out = {
             "cycle": cycle_info.index,
@@ -559,6 +554,11 @@ def plot_compare_obs_to_grid(
 )
 @click.option("--qc", type=int, default=None, help="Filter to specific QC flag value")
 @click.option("--no-robust", is_flag=True, help="Disable robust color scaling")
+@click.option(
+    "--with-model",
+    is_flag=True,
+    help="Create 3-panel plot with observation, model equivalent, and O-B departure",
+)
 @pass_experiment_path
 def plot(
     experiment_path: Path,
@@ -569,6 +569,7 @@ def plot(
     ylim: tuple[float | None, float | None] = (None, None),
     qc: int | None = None,
     no_robust: bool = False,
+    with_model: bool = False,
 ):
     """
     Plot observations from the experiment's duckdb database, filtered by their original filename.
@@ -608,10 +609,24 @@ def plot(
 
     stem = Path(filename).stem
     instrument_quantity = (df["instrument"] + "." + df["quantity"]).unique()
+    print(instrument_quantity)
     for iq in instrument_quantity:
         logger.info(f"Plotting for {iq}")
         group = df[df["instrument"] + "." + df["quantity"] == iq]
-        fig = plotting.plot_observations(group, plot_kwargs=plot_kwargs)
+
+        use_model = False
+        if with_model:
+            if group["model_value"].isna().all():
+                logger.warning(
+                    f"No model_value data for {iq}, falling back to single panel"
+                )
+            else:
+                use_model = True
+
+        if use_model:
+            fig = plotting.plot_observations_vs_model(group, plot_kwargs=plot_kwargs)
+        else:
+            fig = plotting.plot_observations(group, plot_kwargs=plot_kwargs)
 
         if ylim != (None, None):
             for ax in fig.get_axes():
@@ -625,7 +640,8 @@ def plot(
         subtitle = _build_subtitle(group, qc=qc)
         fig.text(0.5, 0.0, subtitle, ha="center", va="bottom", fontsize=7, color="0.5")
 
-        output_path = output_dir / f"{stem}_{iq}.png"
+        suffix = "_vs_model" if use_model else ""
+        output_path = output_dir / f"{stem}_{iq}{suffix}.png"
         fig.tight_layout()
         fig.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0.3)
         plt.close(fig)

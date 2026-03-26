@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 import cartopy.crs as ccrs
@@ -28,6 +29,7 @@ def _plot_geom_profile_curtain(
     qty_spec: QuantitySpec,
     plot_metadata: dict[str, np.ndarray],
     ax: Axes | None = None,
+    target_variable: str = "value",
     **kwargs,
 ) -> Figure:
     fig, ax = (ax.figure, ax) if ax else plt.subplots(figsize=(10, 4))
@@ -44,7 +46,7 @@ def _plot_geom_profile_curtain(
     )
     pcolormesh_kwargs.update(kwargs)
 
-    ds["value"].plot.pcolormesh(
+    ds[target_variable].plot.pcolormesh(
         x=inst_spec.x.coord,
         y=inst_spec.y.coord,
         ax=ax,
@@ -62,6 +64,7 @@ def _plot_geom_aeolus_windresults(
     qty_spec: QuantitySpec,
     plot_metadata: dict[str, np.ndarray],
     ax: Axes | None = None,
+    target_variable: str = "value",
     **kwargs,
 ) -> Figure:
     """Curtain plot for Aeolus L2B wind results using PolyCollection quads.
@@ -74,7 +77,7 @@ def _plot_geom_aeolus_windresults(
     """
     fig, ax = (ax.figure, ax) if ax else plt.subplots(figsize=(12, 5))
 
-    values = ds["value"].to_numpy()
+    values = ds[target_variable].to_numpy()
 
     # Convert timestamps to matplotlib float dates for PolyCollection
     t0 = mdates.date2num(plot_metadata["time_start"])
@@ -149,7 +152,9 @@ def plot_observations(df: pd.DataFrame, plot_kwargs: dict[str, Any] = {}) -> Fig
     # Each key becomes a numpy array aligned with the rows of df.
     plot_metadata: dict[str, np.ndarray] = {}
     if inst_spec.plot_metadata_keys:
-        meta_series = df["metadata"].apply(pd.Series)
+        meta_series = df["metadata"].apply(
+            lambda x: pd.Series(json.loads(x) if isinstance(x, str) else (x or {}))
+        )
         for key in inst_spec.plot_metadata_keys:
             if key not in meta_series.columns:
                 raise KeyError(
@@ -162,6 +167,125 @@ def plot_observations(df: pd.DataFrame, plot_kwargs: dict[str, Any] = {}) -> Fig
     return GEOMETRY_PLOTTERS[inst_spec.geometry](
         ds, inst_spec, qty_spec, plot_metadata, **plot_kwargs
     )
+
+
+def plot_observations_vs_model(
+    df: pd.DataFrame, plot_kwargs: dict[str, Any] = {}
+) -> Figure:
+    """
+    3-panel plot: observation, model equivalent, and O-B departure.
+
+    Expects the DataFrame to contain both ``value`` and ``model_value`` columns
+    with at least some non-null ``model_value`` entries.
+    """
+
+    instrument_quantity = df["instrument"] + "." + df["quantity"]
+    if len(instrument_quantity.unique()) != 1:
+        raise ValueError(
+            "Only one value can be plotted at a time (one pair of instrument and quantity)"
+        )
+    if len(df["orig_filename"].unique()) != 1:
+        raise ValueError("Only one source file can be plotted at a time")
+
+    inst_spec = INSTRUMENT_REGISTRY[df.iloc[0]["instrument"]]
+    qty_spec = QUANTITY_REGISTRY[df.iloc[0]["quantity"]]
+
+    plot_metadata: dict[str, np.ndarray] = {}
+    if inst_spec.plot_metadata_keys:
+        meta_series = df["metadata"].apply(
+            lambda x: pd.Series(json.loads(x) if isinstance(x, str) else (x or {}))
+        )
+        for key in inst_spec.plot_metadata_keys:
+            if key not in meta_series.columns:
+                raise KeyError(
+                    f"Instrument {inst_spec.label!r} requires metadata key {key!r} "
+                    f"for plotting, but it is missing from the observation metadata."
+                )
+            plot_metadata[key] = meta_series[key].to_numpy()
+
+    ds = reconstruct_array(df, value_columns=["value", "model_value"])
+    ds["departure"] = ds["value"] - ds["model_value"]
+
+    plotter = GEOMETRY_PLOTTERS[inst_spec.geometry]
+
+    # Determine shared color range for obs & model panels
+    all_vals = np.concatenate(
+        [ds["value"].values.ravel(), ds["model_value"].values.ravel()]
+    )
+    all_vals = all_vals[~np.isnan(all_vals)]
+    shared_vmin = plot_kwargs.get("vmin", np.nanpercentile(all_vals, 2))
+    shared_vmax = plot_kwargs.get("vmax", np.nanpercentile(all_vals, 98))
+
+    # Diverging range for departure panel
+    dep_vals = ds["departure"].values.ravel()
+    dep_vals = dep_vals[~np.isnan(dep_vals)]
+    abs_max = np.nanpercentile(np.abs(dep_vals), 98) if len(dep_vals) > 0 else 1.0
+    dep_vmin, dep_vmax = -abs_max, abs_max
+
+    # Build shared kwargs (strip vmin/vmax since we set them per panel)
+    base_kwargs = {k: v for k, v in plot_kwargs.items() if k not in ("vmin", "vmax")}
+
+    # Single-panel default sizes
+    default_widths = {
+        Geometry.PROFILE_CURTAIN: (10, 4),
+        Geometry.AEOLUS_WINDRESULTS: (12, 5),
+    }
+    sw, sh = default_widths.get(inst_spec.geometry, (10, 4))
+    fig, axes = plt.subplots(1, 3, figsize=(sw * 3, sh))
+
+    # Panel 0: Observation
+    obs_kwargs = {
+        **base_kwargs,
+        "vmin": shared_vmin,
+        "vmax": shared_vmax,
+    }
+    plotter(
+        ds,
+        inst_spec,
+        qty_spec,
+        plot_metadata,
+        ax=axes[0],
+        target_variable="value",
+        **obs_kwargs,
+    )
+    axes[0].set_title("Observation", fontsize=11)
+
+    # Panel 1: Model equivalent
+    model_kwargs = {
+        **base_kwargs,
+        "vmin": shared_vmin,
+        "vmax": shared_vmax,
+    }
+    plotter(
+        ds,
+        inst_spec,
+        qty_spec,
+        plot_metadata,
+        ax=axes[1],
+        target_variable="model_value",
+        **model_kwargs,
+    )
+    axes[1].set_title("Model Equivalent", fontsize=11)
+
+    # Panel 2: O-B Departure
+    dep_kwargs = {
+        **base_kwargs,
+        "vmin": dep_vmin,
+        "vmax": dep_vmax,
+        "cmap": "RdBu_r",
+    }
+    plotter(
+        ds,
+        inst_spec,
+        qty_spec,
+        plot_metadata,
+        ax=axes[2],
+        target_variable="departure",
+        **dep_kwargs,
+    )
+    axes[2].set_title("O - B Departure", fontsize=11)
+
+    return fig
 
 
 def plot_observation_locations_on_map(
