@@ -66,7 +66,6 @@ def _read_feature_mask(
     )  # (brc_count, meas_count, height_bin_count)
 
 
-
 def _make_obs_df(
     timestamp_flat,
     lon_flat,
@@ -174,9 +173,15 @@ def _convert_mle(
     metadata = [
         {
             "profile_id": int(profile_idx[i]),
-            "altitude_top": float(alt_top_flat[i]) if not np.isnan(alt_top_flat[i]) else None,
-            "altitude_bottom": float(alt_bottom_flat[i]) if not np.isnan(alt_bottom_flat[i]) else None,
-            "valid_measurements_in_brc": float(valid_meas_flat[i]) if not np.isnan(valid_meas_flat[i]) else None,
+            "altitude_top": float(alt_top_flat[i])
+            if not np.isnan(alt_top_flat[i])
+            else None,
+            "altitude_bottom": float(alt_bottom_flat[i])
+            if not np.isnan(alt_bottom_flat[i])
+            else None,
+            "valid_measurements_in_brc": float(valid_meas_flat[i])
+            if not np.isnan(valid_meas_flat[i])
+            else None,
         }
         for i in range(n)
     ]
@@ -396,7 +401,9 @@ def _convert_ael_pro(
     extinction = extinction.reshape(profile_count, height_bin_count)
     timestamp = timestamp.reshape(profile_count, height_bin_count)
     qc_pass_2d = qc_pass_3d.reshape(profile_count, height_bin_count)
-    brc_ids_flat = brc_ids.ravel()  # (profile_count,) — one BRC id per flattened profile
+    brc_ids_flat = (
+        brc_ids.ravel()
+    )  # (profile_count,) — one BRC id per flattened profile
     meas_ids_flat = np.tile(np.arange(meas_count), brc_count)
 
     qc_pass = qc_pass_2d
@@ -424,8 +431,12 @@ def _convert_ael_pro(
             "profile_id": int(profile_idx[i]),
             "brc_id": int(brc_ids_per_obs[i]),
             "measurement_id": int(meas_ids_per_obs[i]),
-            "altitude_top": float(alt_top_flat[i]) if not np.isnan(alt_top_flat[i]) else None,
-            "altitude_bottom": float(alt_bottom_flat[i]) if not np.isnan(alt_bottom_flat[i]) else None,
+            "altitude_top": float(alt_top_flat[i])
+            if not np.isnan(alt_top_flat[i])
+            else None,
+            "altitude_bottom": float(alt_bottom_flat[i])
+            if not np.isnan(alt_bottom_flat[i])
+            else None,
         }
         for i in range(n)
     ]
@@ -482,9 +493,7 @@ def convert_aeolus_l2a(
     # The feature mask always covers all num_brc BRCs, which may differ from
     # num_prof_mle/num_prof_sca in some files.
     print("  Reading feature mask...")
-    feature_mask = _read_feature_mask(
-        cf, num_brc, meas_in_brc_count, height_bin_count
-    )
+    feature_mask = _read_feature_mask(cf, num_brc, meas_in_brc_count, height_bin_count)
 
     parts = []
 
