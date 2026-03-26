@@ -567,6 +567,10 @@ class PlotVariableConfig:
     level: Optional[int] = None
     """Vertical level index to select. None means the variable is 2D."""
 
+    pressure_level: Optional[float] = None
+    """Pressure level in hPa to interpolate to. Requires an `air_pressure` variable in the dataset.
+    If set, takes precedence over `level`."""
+
     extent: Optional[tuple[float, float, float, float]] = None
     """Geographical extent of the plot (in degrees, min_lon, max_lon, min_lat, max_lat)"""
 

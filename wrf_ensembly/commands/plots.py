@@ -174,7 +174,12 @@ def forecast_vs_analysis(
                 plot_type="mean",
             )
 
-            suffix = f"_level{var_cfg.level}" if var_cfg.level is not None else ""
+            if var_cfg.pressure_level is not None:
+                suffix = f"_p{var_cfg.pressure_level:g}hpa"
+            elif var_cfg.level is not None:
+                suffix = f"_level{var_cfg.level}"
+            else:
+                suffix = ""
             output_path = output_dir / f"{var_cfg.name}{suffix}.png"
             fig.savefig(output_path, dpi=plot_cfg.dpi, bbox_inches="tight")
             logger.info(f"Saved {output_path}")
@@ -366,7 +371,12 @@ def forecast(
                 )
                 continue
 
-            suffix = f"_level{var_cfg.level}" if var_cfg.level is not None else ""
+            if var_cfg.pressure_level is not None:
+                suffix = f"_p{var_cfg.pressure_level:g}hpa"
+            elif var_cfg.level is not None:
+                suffix = f"_level{var_cfg.level}"
+            else:
+                suffix = ""
 
             for t_idx in range(n_times):
                 if time_dim:

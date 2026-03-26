@@ -12,6 +12,39 @@ from wrf_ensembly.config import PlotVariableConfig
 from wrf_ensembly.diagnostics import compute_rank_histogram
 
 
+def _interp_to_pressure_level(
+    var: xr.DataArray,
+    pressure: xr.DataArray,
+    target_hpa: float,
+    level_dim: str,
+) -> xr.DataArray:
+    """Interpolate a 3D variable to a target pressure level.
+
+    Args:
+        var: 3D DataArray with a vertical dimension.
+        pressure: 3D DataArray of air pressure in Pa, same shape as var.
+        target_hpa: Target pressure level in hPa.
+        level_dim: Name of the vertical dimension in both arrays.
+
+    Returns:
+        2D DataArray with the vertical dimension removed.
+    """
+    target_pa = target_hpa * 100.0
+
+    def _interp_profile(var_profile: np.ndarray, pres_profile: np.ndarray) -> float:
+        # pressure decreases with altitude; np.interp requires ascending xp
+        return np.interp(target_pa, pres_profile[::-1], var_profile[::-1])
+
+    return xr.apply_ufunc(
+        _interp_profile,
+        var,
+        pressure,
+        input_core_dims=[[level_dim], [level_dim]],
+        vectorize=True,
+        dask="parallelized",
+    )
+
+
 def plot_forecast_vs_analysis(
     forecast_ds: xr.Dataset,
     analysis_ds: xr.Dataset,
@@ -49,13 +82,27 @@ def plot_forecast_vs_analysis(
     time_dims = {"Time", "time", "t"}
 
     # Select vertical level if specified
-    if variable_cfg.level is not None:
-        level_dim = None
-        for dim in forecast_var.dims:
-            if dim not in spatial_dims and dim not in time_dims:
-                level_dim = dim
-                break
-        if level_dim is not None:
+    level_dim = None
+    for dim in forecast_var.dims:
+        if dim not in spatial_dims and dim not in time_dims:
+            level_dim = dim
+            break
+    if level_dim is not None:
+        if variable_cfg.pressure_level is not None:
+            forecast_pres = forecast_ds["air_pressure"]
+            analysis_pres = analysis_ds["air_pressure"]
+            for tdim in time_dims:
+                if tdim in forecast_pres.dims:
+                    forecast_pres = forecast_pres.isel({tdim: 0})
+                if tdim in analysis_pres.dims:
+                    analysis_pres = analysis_pres.isel({tdim: 0})
+            forecast_var = _interp_to_pressure_level(
+                forecast_var, forecast_pres, variable_cfg.pressure_level, level_dim
+            )
+            analysis_var = _interp_to_pressure_level(
+                analysis_var, analysis_pres, variable_cfg.pressure_level, level_dim
+            )
+        elif variable_cfg.level is not None:
             forecast_var = forecast_var.isel({level_dim: variable_cfg.level})
             analysis_var = analysis_var.isel({level_dim: variable_cfg.level})
 
@@ -150,9 +197,12 @@ def plot_forecast_vs_analysis(
         if variable_cfg.extent:
             ax.set_extent(variable_cfg.extent, crs=ccrs.PlateCarree())
 
-        level_str = (
-            f" (level {variable_cfg.level})" if variable_cfg.level is not None else ""
-        )
+        if variable_cfg.pressure_level is not None:
+            level_str = f" ({variable_cfg.pressure_level} hPa)"
+        elif variable_cfg.level is not None:
+            level_str = f" (level {variable_cfg.level})"
+        else:
+            level_str = ""
         ax.set_title(f"{title}: {var_name}{level_str}")
 
         fig.colorbar(mesh, ax=ax, orientation="horizontal", pad=0.05, shrink=0.8)
@@ -200,13 +250,22 @@ def plot_forecast(
     time_dims = {"Time", "time", "t"}
 
     # Select vertical level if specified
-    if variable_cfg.level is not None:
-        level_dim = None
-        for dim in data_var.dims:
-            if dim not in spatial_dims and dim not in time_dims:
-                level_dim = dim
-                break
-        if level_dim is not None:
+    level_dim = None
+    print(data_var.dims)
+    for dim in data_var.dims:
+        if dim not in spatial_dims and dim not in time_dims:
+            level_dim = dim
+            break
+    if level_dim is not None:
+        if variable_cfg.pressure_level is not None:
+            pres_var = ds["air_pressure"]
+            for tdim in time_dims:
+                if tdim in pres_var.dims:
+                    pres_var = pres_var.isel({tdim: 0})
+            data_var = _interp_to_pressure_level(
+                data_var, pres_var, variable_cfg.pressure_level, level_dim
+            )
+        elif variable_cfg.level is not None:
             data_var = data_var.isel({level_dim: variable_cfg.level})
 
     # Squeeze out time dimension if present
@@ -258,9 +317,12 @@ def plot_forecast(
     if variable_cfg.extent:
         ax.set_extent(variable_cfg.extent, crs=ccrs.PlateCarree())
 
-    level_str = (
-        f" (level {variable_cfg.level})" if variable_cfg.level is not None else ""
-    )
+    if variable_cfg.pressure_level is not None:
+        level_str = f" ({variable_cfg.pressure_level} hPa)"
+    elif variable_cfg.level is not None:
+        level_str = f" (level {variable_cfg.level})"
+    else:
+        level_str = ""
     ax.set_title(f"{panel_title}: {var_name}{level_str}")
     fig.colorbar(mesh, ax=ax, orientation="horizontal", pad=0.05, shrink=0.8)
 
