@@ -155,7 +155,7 @@ INSTRUMENT_REGISTRY: dict[str, InstrumentSpec] = {
 QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
     "LIDAR_EXTINCTION_355nm": QuantitySpec(
         label="Lidar Extinction Coefficient @ 355nm",
-        units="1/km",
+        units="1/m",
         vmin=0,
         model_equivalent="EXT355",
         dart_quantity="LIDAR_EXTINCTION_355nm",

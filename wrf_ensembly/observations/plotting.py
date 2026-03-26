@@ -42,7 +42,7 @@ def _plot_geom_profile_curtain(
         vmin=qty_spec.vmin,
         vmax=qty_spec.vmax,
         robust=True,
-        cbar_kwargs=dict(label=qty_spec.label),
+        cbar_kwargs=dict(label=f"{qty_spec.label} [{qty_spec.units}]"),
     )
     pcolormesh_kwargs.update(kwargs)
 
