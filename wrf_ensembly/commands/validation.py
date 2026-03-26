@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import click
-import pandas as pd
 
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
@@ -22,13 +21,8 @@ def interpolate_model(experiment_path: Path):
     """
     Interpolate the model outputs to the observation locations and times.
 
-    This will create a `validation` directory in the experiment directory, containing
-    the results of the validation in parquet format.
-
-    The output file will be in WRF ensembly observation file format but include additional columns:
-    - model_value: The value from the model at the observation location and time
-    - used_in_da: A boolean indicating if the observation was used in data assimilation
-    - cycle: The index of the assimilation cycle the observation was used in (if any)
+    Updates the `model_value` column in the experiment's DuckDB observations table
+    with the interpolated model forecast value at each observation location and time.
     """
     logger.setup("validation-interpolate-model", experiment_path)
     exp = experiment.Experiment(experiment_path)
@@ -48,8 +42,8 @@ def analyze_first_departures(experiment_path: Path, instrument_quantity: tuple):
     """
     Analyze first departures (O-B) statistics for validation.
 
-    Generates statistical analysis and plots for each instrument-quantity pair in the
-    model_interpolated.parquet file. This includes:
+    Generates statistical analysis and plots for each instrument-quantity pair with
+    model-interpolated values in DuckDB. This includes:
     - Overall statistics (bias, std, RMSE)
     - Histogram of first departure values
     - Time series of mean and std deviation
@@ -74,17 +68,15 @@ def analyze_first_departures(experiment_path: Path, instrument_quantity: tuple):
         )
         proj = None
 
-    # Load model_interpolated.parquet
-    model_interpolated_file = exp.paths.data / "model_interpolated.parquet"
-    if not model_interpolated_file.exists():
+    # Load model-interpolated observations from DuckDB
+    logger.info("Loading model interpolated data from DuckDB...")
+    df = exp.obs.get_model_interpolated()
+    if df is None:
         logger.error(
-            f"Model interpolated file not found at {model_interpolated_file}. "
+            "No model-interpolated observations found in DuckDB. "
             "Run 'wrf-ensembly validation interpolate-model' first."
         )
         return
-
-    logger.info(f"Loading model interpolated data from {model_interpolated_file}")
-    df = pd.read_parquet(model_interpolated_file)
 
     # Determine which instrument-quantity pairs to analyze
     pairs_to_analyze = []

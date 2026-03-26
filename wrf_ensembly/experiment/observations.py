@@ -67,7 +67,10 @@ class ExperimentObservations:
                         ) NOT NULL,
                         orig_filename STRING NOT NULL,
                         metadata JSON,
-                        cluster_id STRING
+                        cluster_id STRING,
+                        model_value DOUBLE,
+                        used_in_da BOOLEAN NOT NULL DEFAULT FALSE,
+                        da_cycle INT
             )"""
         )
         return con
@@ -299,6 +302,34 @@ class ExperimentObservations:
         oc_array = pa.array(df["orig_coords"].tolist(), type=oc_type)
         df["orig_coords"] = pd.ArrowDtype(oc_type).__from_arrow__(oc_array)
 
+        # Ensure time is in UTC
+        if df["time"].dt.tz is None:
+            df["time"] = df["time"].dt.tz_localize("UTC")
+
+        # Mark observations that fall within a DA assimilation window
+        da_instruments = self.cfg.observations.instruments_to_assimilate
+        half_window = self.cfg.assimilation.half_window_length_minutes
+
+        df["used_in_da"] = False
+        df["da_cycle"] = pd.NA
+
+        for cycle in self.cycles:
+            start_time = pd.to_datetime(cycle.end) - pd.Timedelta(
+                minutes=half_window
+            )
+            end_time = pd.to_datetime(cycle.end) + pd.Timedelta(
+                minutes=half_window
+            )
+
+            in_window = (df["time"] >= start_time) & (df["time"] <= end_time)
+            if da_instruments is not None:
+                is_da_instrument = df["instrument"].isin(da_instruments)
+                df.loc[in_window & is_da_instrument, "used_in_da"] = True
+                df.loc[in_window & is_da_instrument, "da_cycle"] = cycle.index
+            else:
+                df.loc[in_window, "used_in_da"] = True
+                df.loc[in_window, "da_cycle"] = cycle.index
+
         # Grab a connection to the database and save the observations
         with self._get_duckdb(read_only=False) as con:
             # First, if observations from this file already exist, remove them
@@ -306,25 +337,75 @@ class ExperimentObservations:
                 f"DELETE FROM observations WHERE orig_filename = '{input_path.name}'"
             )
 
-            # Ensure time is in UTC
-            if df["time"].dt.tz is None:
-                df["time"] = df["time"].dt.tz_localize("UTC")
-
             con.register("df_view", df)
             con.execute(
                 """
                 INSERT INTO observations (
                     instrument, quantity, time, longitude, latitude, x, y, z, z_type,
-                    value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata
+                    value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata,
+                    used_in_da, da_cycle
                 )
                 SELECT
                     instrument, quantity, time, longitude, latitude, x, y, z, z_type,
-                    value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata
+                    value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata,
+                    used_in_da, da_cycle
                 FROM df_view
             """
             )
 
         return len(df.index)
+
+    def update_model_values(self, df: pd.DataFrame) -> int:
+        """
+        Update the model_value column for observations using their rowid.
+
+        The DataFrame must contain 'rowid' and 'model_value' columns.
+        All existing model_value entries are reset to NULL before applying
+        the new values.
+
+        Args:
+            df: DataFrame with 'rowid' and 'model_value' columns.
+
+        Returns:
+            The number of rows updated.
+        """
+
+        with self._get_duckdb(read_only=False) as con:
+            con.execute("UPDATE observations SET model_value = NULL")
+
+            update_df = df[["rowid", "model_value"]].copy()
+            con.register("model_values_view", update_df)
+            con.execute(
+                """
+                UPDATE observations
+                SET model_value = mv.model_value
+                FROM model_values_view mv
+                WHERE observations.rowid = mv.rowid
+                """
+            )
+
+        return len(update_df)
+
+    def get_model_interpolated(self) -> pd.DataFrame | None:
+        """
+        Retrieves all observations that have a model_value set.
+
+        Returns:
+            DataFrame of observations with model_value, or None if none exist.
+        """
+
+        with self._get_duckdb(read_only=True) as con:
+            result = con.execute(
+                "SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE model_value IS NOT NULL"
+            ).fetchdf()
+
+        if result.empty:
+            return None
+
+        if result["time"].dt.tz is None:
+            result["time"] = result["time"].dt.tz_localize("UTC")
+
+        return result
 
     def get_observations_for_cycle(
         self, cycle: CycleInformation

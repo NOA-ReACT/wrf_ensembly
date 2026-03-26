@@ -1,7 +1,5 @@
 """Model interpolation to observation locations and times."""
 
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -31,21 +29,20 @@ class ModelInterpolation:
         """
         self.exp = experiment
 
-    def run(self) -> Path | None:
+    def run(self) -> int:
         """Run the model interpolation.
 
-        Creates a parquet file containing observations with an additional
-        'model_value' column representing the interpolated model value at
-        each observation location and time.
+        Interpolates model forecasts to observation locations and stores the
+        resulting model_value in the experiment's DuckDB observations table.
 
         Returns:
-            Path to the output model_interpolated.parquet file, None on failure
+            Number of observations updated, or 0 on failure
         """
 
         needed_combos = self._determine_needed_combos()
         if not needed_combos:
             logger.info("No valid instrument/quantity combos found, cannot proceed!")
-            return None
+            return 0
 
         # Collect all WRF variable names we need (target vars + vertical coords)
         needed_vars: set[str] = {"z", "air_pressure", "geopotential_height"}
@@ -55,8 +52,6 @@ class ModelInterpolation:
         forecast_mean = self._open_forecasts(list(needed_vars))
 
         result_df = self._interpolate_all(needed_combos, forecast_mean)
-
-        result_df = self._mark_da_usage(result_df)
 
         return self._save_output(result_df)
 
@@ -219,7 +214,7 @@ class ModelInterpolation:
             with self.exp.obs._get_duckdb(read_only=True) as con:
                 arrays = con.execute(
                     f"""
-                    SELECT time, x, y, z, latitude, longitude, value
+                    SELECT rowid, time, x, y, z, latitude, longitude, value
                         {metadata_sql}
                     FROM observations
                     WHERE instrument = ? AND quantity = ?
@@ -264,17 +259,8 @@ class ModelInterpolation:
 
             chunk_df = pd.DataFrame(
                 {
-                    "time": arrays["time"],
-                    "x": arrays["x"],
-                    "y": arrays["y"],
-                    "z": arrays["z"],
-                    "latitude": arrays["latitude"],
-                    "longitude": arrays["longitude"],
-                    "z_type": z_type,
-                    "value": arrays["value"],
+                    "rowid": arrays["rowid"],
                     "model_value": model_vals,
-                    "instrument": instrument,
-                    "quantity": quantity,
                 }
             )
             all_results.append(chunk_df)
@@ -523,53 +509,15 @@ class ModelInterpolation:
 
         return result
 
-    def _mark_da_usage(self, obs: pd.DataFrame) -> pd.DataFrame:
-        """Mark which observations were used in data assimilation.
-
-        An observation is marked as used if:
-        - It falls within the DA window of a cycle
-        - Its instrument is in the instruments_to_assimilate list
+    def _save_output(self, obs: pd.DataFrame) -> int:
+        """Save the model_value column back to the DuckDB observations table.
 
         Args:
-            obs: Observations DataFrame
+            obs: DataFrame with 'rowid' and 'model_value' columns
 
         Returns:
-            DataFrame with 'used_in_da' and 'cycle' columns added
+            Number of rows updated
         """
-        da_instruments = self.exp.cfg.observations.instruments_to_assimilate
-        half_window = self.exp.cfg.assimilation.half_window_length_minutes
-
-        obs["used_in_da"] = False
-        obs["cycle"] = pd.NA
-
-        for cycle in self.exp.cycles:
-            start_time = pd.to_datetime(cycle.end) - pd.Timedelta(minutes=half_window)
-            end_time = pd.to_datetime(cycle.end) + pd.Timedelta(minutes=half_window)
-
-            in_window = (obs["time"] >= start_time.to_numpy()) & (
-                obs["time"] <= end_time.to_numpy()
-            )
-            if da_instruments is not None:
-                is_da_instrument = obs["instrument"].isin(da_instruments)
-                obs.loc[in_window & is_da_instrument, "used_in_da"] = True
-                obs.loc[in_window & is_da_instrument, "cycle"] = cycle.index
-            else:
-                obs.loc[in_window, "used_in_da"] = True
-                obs.loc[in_window, "cycle"] = cycle.index
-
-        return obs
-
-    def _save_output(self, obs: pd.DataFrame) -> Path:
-        """Save the observations with model values to a parquet file.
-
-        Args:
-            obs: Observations DataFrame with model_value column
-
-        Returns:
-            Path to the output file
-        """
-        output_path = self.exp.paths.data / "model_interpolated.parquet"
-        obs.to_parquet(output_path)
-        logger.info(f"Saved model interpolated data to {output_path}")
-
-        return output_path
+        n_updated = self.exp.obs.update_model_values(obs)
+        logger.info(f"Updated {n_updated} observations with model values in DuckDB")
+        return n_updated
