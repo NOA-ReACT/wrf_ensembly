@@ -10,6 +10,7 @@ from wrf_ensembly.diagnostics import read_obs_seq_nc
 from wrf_ensembly.experiment import experiment
 from wrf_ensembly.plotting import (
     generate_filter_stats_plots,
+    plot_forecast,
     plot_forecast_vs_analysis,
 )
 from wrf_ensembly.wrf import get_wrf_cartopy_crs
@@ -274,3 +275,161 @@ def cycle_filter_stats(experiment_path: Path, cycle: int):
             )
 
     logger.info(f"All plots saved to {base_output_dir}")
+
+
+@plots_cli.command()
+@click.argument("cycle", type=int)
+@click.option(
+    "--variables",
+    "-v",
+    multiple=True,
+    help="Plot only these variables (overrides config). Can be specified multiple times.",
+)
+@click.option(
+    "--include-spread/--no-include-spread",
+    default=None,
+    help="Generate spread plots in addition to mean plots. If not specified, uses config value.",
+)
+@pass_experiment_path
+def forecast(
+    experiment_path: Path, cycle: int, variables: tuple, include_spread: bool | None
+):
+    """
+    Generate single-panel forecast map plots for a given cycle.
+
+    Requires that `postprocess run` has been completed for the given cycle.
+    Variables to plot are configured in [plots.forecasts] in the config file,
+    or can be overridden with the --variables/-v option.
+
+    One plot is generated per variable per timestep in the forecast file.
+    Use --include-spread to also generate spread (standard deviation) plots.
+    """
+
+    logger.setup("plots-forecast", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+    plot_cfg = exp.cfg.plots.forecasts
+
+    if include_spread is None:
+        include_spread = plot_cfg.include_spread
+
+    forecast_dir = exp.paths.forecast_path(cycle)
+    forecast_mean_file = forecast_dir / f"forecast_mean_cycle_{cycle:03d}.nc"
+
+    if not forecast_mean_file.exists():
+        logger.error(f"Forecast file not found: {forecast_mean_file}")
+        return
+
+    if include_spread:
+        forecast_spread_file = forecast_dir / f"forecast_sd_cycle_{cycle:03d}.nc"
+        if not forecast_spread_file.exists():
+            logger.error(f"Forecast spread file not found: {forecast_spread_file}")
+            logger.error("Spread files are required when --include-spread is enabled")
+            return
+
+    if variables:
+        vars_to_plot = [PlotVariableConfig(name=v) for v in variables]
+    elif plot_cfg.variables:
+        vars_to_plot = plot_cfg.variables
+    else:
+        logger.error(
+            "No variables configured for plotting. "
+            "Set [plots.forecasts] variables in config or use --variables/-v."
+        )
+        return
+
+    try:
+        proj = get_wrf_cartopy_crs(exp.cfg.domain_control)
+    except NotImplementedError:
+        logger.warning(
+            "Could not create cartopy projection for this domain, falling back to PlateCarree"
+        )
+        proj = None
+
+    output_dir = exp.paths.plots / "forecasts" / f"cycle_{cycle:03d}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    forecast_mean_ds = xr.open_dataset(forecast_mean_file)
+    if include_spread:
+        forecast_spread_ds = xr.open_dataset(forecast_spread_file)
+
+    time_dims = {"Time", "time", "t"}
+    time_dim = next((d for d in time_dims if d in forecast_mean_ds.dims), None)
+    n_times = forecast_mean_ds.sizes[time_dim] if time_dim else 1
+
+    try:
+        import matplotlib.pyplot as plt
+
+        for var_cfg in vars_to_plot:
+            if var_cfg.name not in forecast_mean_ds:
+                logger.warning(
+                    f"Variable '{var_cfg.name}' not found in forecast file, skipping"
+                )
+                continue
+
+            suffix = f"_level{var_cfg.level}" if var_cfg.level is not None else ""
+
+            for t_idx in range(n_times):
+                if time_dim:
+                    ds_t = forecast_mean_ds.isel({time_dim: t_idx})
+                    time_val = forecast_mean_ds[time_dim].values[t_idx]
+                    time_str = str(time_val)[:19]
+                else:
+                    ds_t = forecast_mean_ds
+                    time_str = ""
+
+                logger.info(
+                    f"Plotting {var_cfg.name} (mean) timestep {t_idx} ({time_str})..."
+                )
+                fig = plot_forecast(
+                    ds_t,
+                    var_cfg,
+                    proj=proj,
+                    experiment_name=exp.cfg.metadata.name,
+                    cycle=cycle,
+                    time_str=time_str,
+                    plot_type="mean",
+                )
+                output_path = output_dir / f"{var_cfg.name}{suffix}_t{t_idx:03d}.png"
+                fig.savefig(output_path, dpi=plot_cfg.dpi, bbox_inches="tight")
+                logger.info(f"Saved {output_path}")
+                fig.clear()
+                plt.close(fig)
+
+                if include_spread:
+                    if var_cfg.name not in forecast_spread_ds:
+                        logger.warning(
+                            f"Variable '{var_cfg.name}' not found in forecast spread file, skipping spread plot"
+                        )
+                        continue
+
+                    if time_dim:
+                        spread_t = forecast_spread_ds.isel({time_dim: t_idx})
+                    else:
+                        spread_t = forecast_spread_ds
+
+                    logger.info(
+                        f"Plotting {var_cfg.name} (spread) timestep {t_idx} ({time_str})..."
+                    )
+                    fig = plot_forecast(
+                        spread_t,
+                        var_cfg,
+                        proj=proj,
+                        experiment_name=exp.cfg.metadata.name,
+                        cycle=cycle,
+                        time_str=time_str,
+                        plot_type="spread",
+                    )
+                    output_path = (
+                        output_dir / f"{var_cfg.name}{suffix}_t{t_idx:03d}_spread.png"
+                    )
+                    fig.savefig(output_path, dpi=plot_cfg.dpi, bbox_inches="tight")
+                    logger.info(f"Saved {output_path}")
+                    fig.clear()
+                    plt.close(fig)
+
+    finally:
+        forecast_mean_ds.close()
+        if include_spread:
+            forecast_spread_ds.close()
+
+    logger.info(f"All plots saved to {output_dir}")

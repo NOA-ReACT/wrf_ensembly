@@ -616,6 +616,20 @@ class ForecastVsAnalysisPlotsConfig:
 
 
 @dataclass
+class ForecastPlotsConfig:
+    """Configuration for forecast-only plots"""
+
+    variables: list[PlotVariableConfig] = field(default_factory=list)
+    """List of variables to plot"""
+
+    dpi: int = 150
+    """DPI for saved plot images"""
+
+    include_spread: bool = False
+    """Whether to also generate spread plots"""
+
+
+@dataclass
 class PlotsConfig:
     """Configuration for diagnostic plots"""
 
@@ -623,6 +637,9 @@ class PlotsConfig:
         default_factory=ForecastVsAnalysisPlotsConfig
     )
     """Configuration for forecast vs analysis comparison plots"""
+
+    forecasts: ForecastPlotsConfig = field(default_factory=ForecastPlotsConfig)
+    """Configuration for forecast-only plots"""
 
 
 @dataclass

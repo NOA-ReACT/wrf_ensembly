@@ -169,6 +169,113 @@ def plot_forecast_vs_analysis(
     return fig
 
 
+def plot_forecast(
+    ds: xr.Dataset,
+    variable_cfg: PlotVariableConfig,
+    proj: ccrs.Projection | None = None,
+    experiment_name: str = "",
+    cycle: int = 0,
+    time_str: str = "",
+    plot_type: Literal["mean", "spread"] = "mean",
+) -> Figure:
+    """
+    Create a single-panel map plot of a forecast variable.
+
+    Args:
+        ds: xarray Dataset with the forecast data (already time-selected).
+        variable_cfg: Configuration for the variable to plot.
+        proj: Cartopy projection for the map panel. If None, uses PlateCarree.
+        experiment_name: Name of the experiment for the figure title.
+        cycle: Cycle index for the figure title.
+        time_str: Time string for the figure title.
+        plot_type: Type of plot to create, either "mean" or "spread".
+
+    Returns:
+        A matplotlib Figure with a single panel.
+    """
+    var_name = variable_cfg.name
+    data_var = ds[var_name]
+
+    spatial_dims = {"south_north", "west_east", "x", "y"}
+    time_dims = {"Time", "time", "t"}
+
+    # Select vertical level if specified
+    if variable_cfg.level is not None:
+        level_dim = None
+        for dim in data_var.dims:
+            if dim not in spatial_dims and dim not in time_dims:
+                level_dim = dim
+                break
+        if level_dim is not None:
+            data_var = data_var.isel({level_dim: variable_cfg.level})
+
+    # Squeeze out time dimension if present
+    for dim in time_dims:
+        if dim in data_var.dims:
+            data_var = data_var.isel({dim: 0})
+
+    has_xy = "x" in ds.coords and "y" in ds.coords
+
+    if plot_type == "spread":
+        panel_title = "Forecast Spread"
+        cmap = variable_cfg.spread_cmap
+        vmin = variable_cfg.spread_vmin
+        vmax = variable_cfg.spread_vmax
+    else:
+        panel_title = "Forecast"
+        cmap = variable_cfg.cmap
+        vmin = variable_cfg.vmin
+        vmax = variable_cfg.vmax
+
+    if vmin is None:
+        vmin = float(data_var.min())
+    if vmax is None:
+        vmax = float(data_var.max())
+
+    map_proj = proj or ccrs.PlateCarree()
+    fig, ax = plt.subplots(1, 1, subplot_kw={"projection": map_proj}, figsize=(10, 6))
+
+    if has_xy:
+        mesh = ax.pcolormesh(
+            ds["x"].values,
+            ds["y"].values,
+            data_var.values,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            shading="auto",
+        )
+    else:
+        mesh = ax.pcolormesh(
+            data_var.values,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+        )
+
+    ax.coastlines()
+
+    if variable_cfg.extent:
+        ax.set_extent(variable_cfg.extent, crs=ccrs.PlateCarree())
+
+    level_str = (
+        f" (level {variable_cfg.level})" if variable_cfg.level is not None else ""
+    )
+    ax.set_title(f"{panel_title}: {var_name}{level_str}")
+    fig.colorbar(mesh, ax=ax, orientation="horizontal", pad=0.05, shrink=0.8)
+
+    suptitle_parts = []
+    if experiment_name:
+        suptitle_parts.append(experiment_name)
+    suptitle_parts.append(f"Cycle {cycle}")
+    if time_str:
+        suptitle_parts.append(time_str)
+    fig.suptitle(" | ".join(suptitle_parts), fontsize=14, fontweight="bold")
+
+    fig.tight_layout()
+    return fig
+
+
 def generate_filter_stats_plots(
     df: pd.DataFrame,
     output_dir: Path,
