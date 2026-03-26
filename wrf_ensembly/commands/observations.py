@@ -155,13 +155,17 @@ def show(experiment_path: Path):
     table.add_column("Instrument", style="cyan", no_wrap=True)
     table.add_column("Start Time", style="green")
     table.add_column("End Time", style="green")
-    table.add_column("Path", style="magenta")
+    table.add_column("Count", style="green")
+    table.add_column("Model Values", style="green")
+    table.add_column("Filename", style="magenta")
 
     for obs_file in obs_files:
         table.add_row(
             obs_file["instrument"],
             obs_file["start_time"].strftime("%Y-%m-%d %H:%M"),
             obs_file["end_time"].strftime("%Y-%m-%d %H:%M"),
+            str(obs_file["count"]),
+            str(obs_file["model_values"]),
             str(obs_file["filename"]),
         )
 
@@ -283,11 +287,11 @@ def prepare_cycles(
 @click.argument("cycle", type=int, required=True, default=None)
 @click.option("--as_json", is_flag=True, default=False, help="Output in JSON format")
 @pass_experiment_path
-def cycle_stats(experiment_path: Path, cycle: int, as_json: bool):
+def cycle_info(experiment_path: Path, cycle: int, as_json: bool):
     """
     Print a summary of the observations for a specific cycle.
 
-    Specifically: Number of observations, instruments, obs per instrument, original files.
+    Specifically: Number of observations per file, how many were assimilated, with percentages.
     """
 
     logger.setup("observations-cycle-stats", experiment_path)
@@ -298,7 +302,7 @@ def cycle_stats(experiment_path: Path, cycle: int, as_json: bool):
     parquet_path = exp.paths.obs / f"cycle_{cycle_info.index:03d}.parquet"
     if not parquet_path.is_file():
         logger.error(
-            f"Cycle {cycle_info.index} parquet file {parquet_path} does not exist, run `wrf-ensembly obs prepare-cycles` first"
+            f"Cycle {cycle_info.index} has no observations in the time window {cycle_info.start} to {cycle_info.end}"
         )
         return
     obs = observations.io.read_obs(parquet_path)
@@ -306,59 +310,53 @@ def cycle_stats(experiment_path: Path, cycle: int, as_json: bool):
         logger.error(f"Cycle {cycle_info.index} has no observations, cannot show stats")
         return
 
-    stats = {}
-    stats["count"] = len(obs)
-    stats["instruments"] = {
-        instr: {
-            "count": obs[obs["instrument"] == instr].shape[0],
-            "files": obs[obs["instrument"] == instr]["orig_filename"]
-            .value_counts()
-            .to_dict(),
-            "qc": {
-                int(qc): int((obs[obs["instrument"] == instr]["qc_flag"] == qc).sum())
-                for qc in obs[obs["instrument"] == instr]["qc_flag"].unique()
-            },
-        }
-        for instr in obs["instrument"].unique()
-    }
-    stats["quantities"] = obs["quantity"].value_counts().to_dict()
-    stats["qc"] = obs["qc_flag"].value_counts().to_dict()
+    file_stats["pct"] = file_stats["assimilated"] / file_stats["total"] * 100
+    total = int(file_stats["total"].sum())
+    total_assimilated = int(file_stats["assimilated"].sum())
 
     # If JSON, dump the `stats` dict. Otherwise print some nice tables with rich
     if as_json:
-        print(json.dumps(stats, indent=2))
+        out = {
+            "cycle": cycle_info.index,
+            "time_window": {"start": str(cycle_info.start), "end": str(cycle_info.end)},
+            "total": total,
+            "assimilated": total_assimilated,
+            "files": [
+                {
+                    "filename": row["orig_filename"],
+                    "instrument": row["instrument"],
+                    "total": int(row["total"]),
+                    "assimilated": int(row["assimilated"]),
+                    "pct": round(float(row["pct"]), 2),
+                }
+                for _, row in file_stats.iterrows()
+            ],
+        }
+        print(json.dumps(out, indent=2))
         return
 
     console.print(f"[bold]Observation stats for cycle {cycle_info.index}:[/bold]")
     console.print(f"Time window: {cycle_info.start} to {cycle_info.end}")
-    console.print(f"Total observations: {stats['count']}")
+    pct_str = f" ({total_assimilated / total * 100:.1f}%)" if total > 0 else ""
     console.print(
-        f"Valid observations (qc_flag=0): {stats['qc'].get(0, 0)} ({stats['qc'].get(0, 0) / stats['count'] * 100:.2f}%)"
+        f"Total observations: {total} | Assimilated: {total_assimilated}{pct_str}"
     )
 
-    instr_table = Table(title="Instruments")
-    instr_table.add_column("Instrument", style="cyan", no_wrap=True)
-    instr_table.add_column("Count", style="green")
-    instr_table.add_column("Valid QC (qc_flag=0)", style="green")
-    for instr, info in stats["instruments"].items():
-        instr_table.add_row(instr, str(info["count"]), str(info["qc"].get(0, 0)))
-    console.print(instr_table)
-
-    quantities_table = Table(title="Quantities")
-    quantities_table.add_column("Quantity", style="cyan", no_wrap=True)
-    quantities_table.add_column("Count", style="green")
-    for qty, count in stats["quantities"].items():
-        quantities_table.add_row(qty, str(count))
-    console.print(quantities_table)
-
-    # Print files per instrument
-    for instr, info in stats["instruments"].items():
-        files_table = Table(title=f"Files for instrument {instr}")
-        files_table.add_column("File", style="cyan")
-        files_table.add_column("Count", style="green")
-        for fname, count in info["files"].items():
-            files_table.add_row(fname, str(count))
-        console.print(files_table)
+    files_table = Table(title="Observations by file")
+    files_table.add_column("File", style="cyan")
+    files_table.add_column("Instrument", style="magenta", no_wrap=True)
+    files_table.add_column("Total", style="white", justify="right")
+    files_table.add_column("Assimilated", style="green", justify="right")
+    files_table.add_column("%", style="green", justify="right")
+    for _, row in file_stats.iterrows():
+        files_table.add_row(
+            row["orig_filename"],
+            row["instrument"],
+            str(int(row["total"])),
+            str(int(row["assimilated"])),
+            f"{row['pct']:.1f}%",
+        )
+    console.print(files_table)
 
 
 @observations_cli.command()

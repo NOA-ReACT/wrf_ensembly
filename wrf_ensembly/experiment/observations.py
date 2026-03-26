@@ -102,7 +102,8 @@ class ExperimentObservations:
                     instrument as instrument,
                     MIN(time AT TIME ZONE 'UTC') as start_time,
                     MAX(time AT TIME ZONE 'UTC') as end_time,
-                    COUNT(*) as count
+                    COUNT(*) as count,
+                    COUNT(model_value) as model_values
                 FROM observations
                 GROUP BY orig_filename, instrument
                 ORDER BY instrument, start_time
@@ -314,12 +315,8 @@ class ExperimentObservations:
         df["da_cycle"] = pd.NA
 
         for cycle in self.cycles:
-            start_time = pd.to_datetime(cycle.end) - pd.Timedelta(
-                minutes=half_window
-            )
-            end_time = pd.to_datetime(cycle.end) + pd.Timedelta(
-                minutes=half_window
-            )
+            start_time = pd.to_datetime(cycle.end) - pd.Timedelta(minutes=half_window)
+            end_time = pd.to_datetime(cycle.end) + pd.Timedelta(minutes=half_window)
 
             in_window = (df["time"] >= start_time) & (df["time"] <= end_time)
             if da_instruments is not None:
@@ -407,6 +404,35 @@ class ExperimentObservations:
 
         return result
 
+    def get_cycle_file_info(self, cycle: CycleInformation) -> pd.DataFrame:
+        """
+        Returns per-file observation statistics for a cycle's time window (start to end).
+
+        Each row represents one (orig_filename, instrument) combination and includes:
+        - total: total observations in the cycle time window
+        - assimilated: observations marked as used_in_da for this cycle
+
+        Args:
+            cycle: The cycle whose start/end times define the time window.
+        """
+
+        with self._get_duckdb(read_only=True) as con:
+            result = con.execute(
+                """
+                SELECT
+                    orig_filename,
+                    instrument,
+                    COUNT(*) AS total,
+                    COUNT(*) FILTER (WHERE used_in_da AND da_cycle = ?) AS assimilated
+                FROM observations
+                WHERE time >= ? AND time <= ?
+                GROUP BY orig_filename, instrument
+                ORDER BY instrument, orig_filename
+                """,
+                [cycle.index, str(cycle.start), str(cycle.end)],
+            ).fetchdf()
+        return result
+
     def get_observations_for_cycle(
         self, cycle: CycleInformation
     ) -> pd.DataFrame | None:
@@ -434,7 +460,7 @@ class ExperimentObservations:
         # Query the observations with duck db, find only files that overlap with the time window and instrument list
         with self._get_duckdb(read_only=True) as con:
             observations = con.execute(
-                f"SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}' AND downsampling_info IS NULL"
+                f"SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}'"
             ).fetchdf()
 
         if instruments is not None:
