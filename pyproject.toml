@@ -59,3 +59,13 @@ dev = [
     "black>=25.12.0",
     "ruff>=0.14.13",
 ]
+
+[tool.basedpyright]
+pythonVersion = "3.14"
+reportAttributeAccessIssue = "none"
+reportUnknownMemberType = "none"
+reportUnknownVariableType = "none"
+reportUnknownArgumentType = "none"
+reportMissingTypeArgument = "none"
+reportArgumentType = "none"
+reportAny = "none"
