@@ -1,6 +1,6 @@
 [project]
 name = "wrf-ensembly"
-version = "1.5.0"
+version = "1.6.0"
 description = "Support scripts for using DART w/ WRF"
 authors = [{ name = "Thanasis Georgiou", email = "ageorgiou@noa.gr" }]
 readme = "README.md"
@@ -28,6 +28,7 @@ dependencies = [
   "dask>=2025.9.1",
   "scikit-learn>=1.7.2",
   "numpy>=2.3.2",
+  "pandas-stubs>=3.0.0.260204",
 ]
 
 [project.scripts]
