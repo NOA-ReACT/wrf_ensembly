@@ -68,7 +68,8 @@ class ExperimentObservations:
                         orig_filename STRING NOT NULL,
                         metadata JSON,
                         cluster_id STRING,
-                        model_value DOUBLE,
+                        model_forecast DOUBLE,
+                        model_analysis DOUBLE,
                         used_in_da BOOLEAN NOT NULL DEFAULT FALSE,
                         da_cycle INT
             )"""
@@ -103,7 +104,7 @@ class ExperimentObservations:
                     MIN(time AT TIME ZONE 'UTC') as start_time,
                     MAX(time AT TIME ZONE 'UTC') as end_time,
                     COUNT(*) as count,
-                    COUNT(model_value) as model_values
+                    COUNT(model_forecast) as model_values
                 FROM observations
                 GROUP BY orig_filename, instrument
                 ORDER BY instrument, start_time
@@ -179,7 +180,9 @@ class ExperimentObservations:
         if not self.cfg.data.per_member_meteorology:
             wrfinput_path = self.paths.data_icbc / "wrfinput_d01_cycle_0"
         else:
-            wrfinput_path = self.paths.data_icbc / "member_00" / "wrfinput_d01_cycle_0"
+            wrfinput_path = (
+                self.paths.data_icbc / "member_00" / "wrfinput_d01_member_00_cycle_0"
+            )
         if not wrfinput_path.exists():
             raise FileNotFoundError(
                 f"wrfinput file not found at {wrfinput_path}, cannot trim observations spatially"
@@ -352,30 +355,32 @@ class ExperimentObservations:
 
         return len(df.index)
 
-    def update_model_values(self, df: pd.DataFrame) -> int:
+    def update_model_source_values(self, df: pd.DataFrame, source: str) -> int:
         """
-        Update the model_value column for observations using their rowid.
+        Update model_forecast or model_analysis for observations using their rowid.
 
         The DataFrame must contain 'rowid' and 'model_value' columns.
-        All existing model_value entries are reset to NULL before applying
-        the new values.
+        All existing entries for the target column are reset to NULL before
+        applying the new values.
 
         Args:
             df: DataFrame with 'rowid' and 'model_value' columns.
+            source: Either 'forecast' or 'analysis', selects the target column.
 
         Returns:
             The number of rows updated.
         """
+        col = f"model_{source}"
 
         with self._get_duckdb(read_only=False) as con:
-            con.execute("UPDATE observations SET model_value = NULL")
+            con.execute(f"UPDATE observations SET {col} = NULL")
 
             update_df = df[["rowid", "model_value"]].copy()
             con.register("model_values_view", update_df)
             con.execute(
-                """
+                f"""
                 UPDATE observations
-                SET model_value = mv.model_value
+                SET {col} = mv.model_value
                 FROM model_values_view mv
                 WHERE observations.rowid = mv.rowid
                 """
@@ -393,7 +398,7 @@ class ExperimentObservations:
 
         with self._get_duckdb(read_only=True) as con:
             result = con.execute(
-                "SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE model_value IS NOT NULL"
+                "SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE model_forecast IS NOT NULL"
             ).fetchdf()
 
         if result.empty:

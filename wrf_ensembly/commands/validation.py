@@ -21,8 +21,9 @@ def interpolate_model(experiment_path: Path):
     """
     Interpolate the model outputs to the observation locations and times.
 
-    Updates the `model_value` column in the experiment's DuckDB observations table
-    with the interpolated model forecast value at each observation location and time.
+    Updates the `model_forecast` and `model_analysis` columns in the experiment's
+    DuckDB observations table with the interpolated model values at each observation
+    location and time. Analysis interpolation is skipped if no analysis mean files exist.
     """
     logger.setup("validation-interpolate-model", experiment_path)
     exp = experiment.Experiment(experiment_path)

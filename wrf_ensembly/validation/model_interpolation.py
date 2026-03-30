@@ -1,5 +1,6 @@
 """Model interpolation to observation locations and times."""
 
+import glob
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -32,11 +33,12 @@ class ModelInterpolation:
     def run(self) -> int:
         """Run the model interpolation.
 
-        Interpolates model forecasts to observation locations and stores the
-        resulting model_value in the experiment's DuckDB observations table.
+        Interpolates model forecasts and analyses to observation locations and
+        stores the results in the experiment's DuckDB observations table as
+        model_forecast and model_analysis columns.
 
         Returns:
-            Number of observations updated, or 0 on failure
+            Total number of observations updated across both sources, or 0 on failure
         """
 
         needed_combos = self._determine_needed_combos()
@@ -49,11 +51,17 @@ class ModelInterpolation:
         for combo in needed_combos:
             needed_vars.update(combo["wrf_vars"])
 
-        forecast_mean = self._open_forecasts(list(needed_vars))
+        n_updated = 0
 
-        result_df = self._interpolate_all(needed_combos, forecast_mean)
+        for source in ("forecast", "analysis"):
+            ds = self._open_files(source, list(needed_vars))
+            if ds is None:
+                logger.warning(f"No {source} files found, skipping {source} interpolation")
+                continue
+            result_df = self._interpolate_all(needed_combos, ds)
+            n_updated += self._save_output(result_df, source)
 
-        return self._save_output(result_df)
+        return n_updated
 
     def _instrument_where_clause(self, prefix: str = "WHERE") -> str:
         """Build a SQL WHERE/AND clause for instrument filtering.
@@ -119,21 +127,30 @@ class ModelInterpolation:
 
         return needed_combos
 
-    def _open_forecasts(self, needed_vars: list[str]) -> xr.Dataset:
-        """Open forecast mean files as a single lazy xarray Dataset.
+    def _open_files(self, source: str, needed_vars: list[str]) -> xr.Dataset | None:
+        """Open forecast or analysis mean files as a single lazy xarray Dataset.
 
         Args:
+            source: Either 'forecast' or 'analysis'
             needed_vars: List of WRF variable names to load
 
         Returns:
-            Lazy xarray Dataset with only the needed variables
+            Lazy xarray Dataset with only the needed variables, or None if no
+            files are found
 
         Raises:
             ValueError: If duplicate coordinates are found
         """
+        if source == "forecast":
+            glob_pattern = f"{self.exp.paths.data_forecasts}/cycle_**/{source}_mean_cycle_*.nc"
+        else:
+            glob_pattern = f"{self.exp.paths.data_analysis}/cycle_**/{source}_mean_cycle_*.nc"
+
+        if not glob.glob(glob_pattern):
+            return None
 
         forecast_mean = xr.open_mfdataset(
-            f"{self.exp.paths.data_forecasts}/cycle_**/forecast_mean_cycle_*.nc",
+            glob_pattern,
             combine="by_coords",
             chunks={"time": 1},
             coords="minimal",
@@ -509,15 +526,16 @@ class ModelInterpolation:
 
         return result
 
-    def _save_output(self, obs: pd.DataFrame) -> int:
-        """Save the model_value column back to the DuckDB observations table.
+    def _save_output(self, obs: pd.DataFrame, source: str) -> int:
+        """Save interpolated values to the DuckDB observations table.
 
         Args:
             obs: DataFrame with 'rowid' and 'model_value' columns
+            source: Either 'forecast' or 'analysis'; selects the target column
 
         Returns:
             Number of rows updated
         """
-        n_updated = self.exp.obs.update_model_values(obs)
-        logger.info(f"Updated {n_updated} observations with model values in DuckDB")
+        n_updated = self.exp.obs.update_model_source_values(obs, source)
+        logger.info(f"Updated {n_updated} observations with {source} model values in DuckDB")
         return n_updated

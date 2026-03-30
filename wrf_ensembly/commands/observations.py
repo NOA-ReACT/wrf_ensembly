@@ -165,7 +165,7 @@ def show(experiment_path: Path):
             obs_file["start_time"].strftime("%Y-%m-%d %H:%M"),
             obs_file["end_time"].strftime("%Y-%m-%d %H:%M"),
             str(obs_file["count"]),
-            str(obs_file["model_values"]),
+            str(obs_file["model_forecasts"]),
             str(obs_file["filename"]),
         )
 
@@ -639,9 +639,9 @@ def plot(
 
         use_model = False
         if with_model:
-            if group["model_value"].isna().all():
+            if group["model_forecast"].isna().all():
                 logger.warning(
-                    f"No model_value data for {iq}, falling back to single panel"
+                    f"No model_forecast data for {iq}, falling back to single panel"
                 )
             else:
                 use_model = True

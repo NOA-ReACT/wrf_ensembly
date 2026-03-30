@@ -85,7 +85,7 @@ class FirstDeparturesAnalysis:
         """Run the complete first departures analysis.
 
         Args:
-            df: DataFrame with observations including 'value', 'model_value', and 'departure' columns
+            df: DataFrame with observations including 'value', 'model_forecast', and 'departure' columns
 
         Returns:
             Dictionary containing paths to generated outputs and computed statistics
@@ -96,7 +96,7 @@ class FirstDeparturesAnalysis:
 
         # Compute O-B if not already present
         if "departure" not in df.columns:
-            df["departure"] = df["value"] - df["model_value"]
+            df["departure"] = df["value"] - df["model_forecast"]
 
         # Remove any regions marked as excluded (cfg option `exclude_bboxes`)
         # After adding the new column so we avoid a `.copy()` and any 'assigning a view' problems
@@ -379,7 +379,7 @@ class FirstDeparturesAnalysis:
         """Analyze first departures by regime.
 
         Args:
-            df: DataFrame with 'model_value' and 'departure' columns
+            df: DataFrame with 'model_forecast' and 'departure' columns
 
         Returns:
             Tuple of (statistics DataFrame, path to saved plot)
@@ -395,7 +395,7 @@ class FirstDeparturesAnalysis:
         # Create regime bins
         df = df.copy()
         df["regime"] = pd.cut(
-            df["model_value"],
+            df["model_forecast"],
             bins=self.regime_config.bins,
             labels=self.regime_config.labels,
         )

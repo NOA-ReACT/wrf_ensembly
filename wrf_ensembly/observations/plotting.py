@@ -189,8 +189,8 @@ def plot_observations_vs_model(
     """
     3-panel plot: observation, model equivalent, and O-B departure.
 
-    Expects the DataFrame to contain both ``value`` and ``model_value`` columns
-    with at least some non-null ``model_value`` entries.
+    Expects the DataFrame to contain both ``value`` and ``model_forecast`` columns
+    with at least some non-null ``model_forecast`` entries.
 
     If keep_only_qc_flag is passed, only observations matching this QC value will be plotted.
     """
@@ -219,22 +219,22 @@ def plot_observations_vs_model(
                 )
             plot_metadata[key] = meta_series[key].to_numpy()
 
-    ds = reconstruct_array(df, value_columns=["value", "model_value"])
+    ds = reconstruct_array(df, value_columns=["value", "model_forecast"])
     if keep_only_qc_flag is not None:
         ds["value"] = xr.where(ds["qc_flag"] == keep_only_qc_flag, ds["value"], np.nan)
-    ds["departure"] = ds["value"] - ds["model_value"]
+    ds["departure"] = ds["value"] - ds["model_forecast"]
 
     # Apply scale factor if quantity demands it
     if qty_spec.display_scale is not None:
         ds["value"] *= qty_spec.display_scale
-        ds["model_value"] *= qty_spec.display_scale
+        ds["model_forecast"] *= qty_spec.display_scale
         ds["departure"] *= qty_spec.display_scale
 
     plotter = GEOMETRY_PLOTTERS[inst_spec.geometry]
 
     # Determine shared color range for obs & model panels
     all_vals = np.concatenate(
-        [ds["value"].values.ravel(), ds["model_value"].values.ravel()]
+        [ds["value"].values.ravel(), ds["model_forecast"].values.ravel()]
     )
     all_vals = all_vals[~np.isnan(all_vals)]
     shared_vmin = plot_kwargs.get("vmin", np.nanpercentile(all_vals, 2))
@@ -286,7 +286,7 @@ def plot_observations_vs_model(
         qty_spec,
         plot_metadata,
         ax=axes[1],
-        target_variable="model_value",
+        target_variable="model_forecast",
         **model_kwargs,
     )
     axes[1].set_title("Model Equivalent", fontsize=11)
