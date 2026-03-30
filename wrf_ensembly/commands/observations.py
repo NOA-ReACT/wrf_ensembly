@@ -284,6 +284,35 @@ def prepare_cycles(
 
 
 @observations_cli.command()
+@pass_experiment_path
+def cycle_summary(experiment_path: Path):
+    """
+    Print a table showing observation counts for all cycles.
+
+    Columns: cycle number, total observations available, observations to be assimilated.
+    """
+
+    logger.setup("observations-cycle-summary", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    df = exp.obs.get_cycle_summary(exp.cycles)
+
+    table = Table(title="Observations per Cycle")
+    table.add_column("Cycle", style="cyan", justify="right")
+    table.add_column("Total", style="white", justify="right")
+    table.add_column("To Assimilate", style="green", justify="right")
+
+    for _, row in df.iterrows():
+        table.add_row(
+            str(int(row["cycle_index"])),
+            str(row["total"]),
+            str(row["to_assimilate"]),
+        )
+
+    console.print(table)
+
+
+@observations_cli.command()
 @click.argument("cycle", type=int, required=True, default=None)
 @click.option("--as_json", is_flag=True, default=False, help="Output in JSON format")
 @pass_experiment_path

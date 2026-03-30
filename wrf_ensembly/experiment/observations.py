@@ -404,6 +404,39 @@ class ExperimentObservations:
 
         return result
 
+    def get_cycle_summary(self, cycles: list[CycleInformation]) -> pd.DataFrame:
+        """
+        Returns a summary of observations per cycle: total count and how many are to be assimilated.
+
+        Args:
+            cycles: List of cycles to summarize.
+
+        Returns:
+            DataFrame with columns: cycle_index, total, to_assimilate
+        """
+        rows = []
+        with self._get_duckdb(read_only=True) as con:
+            for cycle in cycles:
+                result = con.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS total,
+                        COUNT(*) FILTER (WHERE used_in_da AND da_cycle = ?) AS to_assimilate
+                    FROM observations
+                    WHERE time >= ? AND time <= ?
+                    """,
+                    [cycle.index, str(cycle.start), str(cycle.end)],
+                ).fetchone()
+                total, to_assimilate = result if result else (0, 0)
+                rows.append(
+                    {
+                        "cycle_index": cycle.index,
+                        "total": int(total),
+                        "to_assimilate": int(to_assimilate),
+                    }
+                )
+        return pd.DataFrame(rows, columns=["cycle_index", "total", "to_assimilate"])
+
     def get_cycle_file_info(self, cycle: CycleInformation) -> pd.DataFrame:
         """
         Returns per-file observation statistics for a cycle's time window (start to end).
