@@ -556,12 +556,6 @@ class PostprocessConfig:
     If enabled, you will get a `forecast_mean`, `forecast_sd` and `forecast_member_{d}` file for each cycle.
     """
 
-    ncrcat_cmd = "ncrcat"
-    """
-    Path to the NCO executable or command needed to run ncrcat (e.g. micromamba run ncrcat).
-    If not set, will use the one in the PATH environment variable.
-    """
-
 
 @dataclass
 class PlotVariableConfig:

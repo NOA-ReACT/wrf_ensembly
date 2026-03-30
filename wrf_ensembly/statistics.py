@@ -61,7 +61,7 @@ class NetCDFVariable:
 
 
 # List of coordinate variables name in wrf-ensembly forecast files.
-COORDINATE_VARIABLES = {"XLAT", "XLONG", "x", "y", "z", "t"}
+COORDINATE_VARIABLES = {"XLAT", "XLONG", "x", "y", "z", "t", "longitude", "latitude"}
 
 
 @dataclass
@@ -71,6 +71,39 @@ class NetCDFFile:
     dimensions: dict[str, int]
     variables: dict[str, NetCDFVariable]
     global_attributes: dict[str, str]
+
+
+def add_member_dimension(template: NetCDFFile, n_members: int) -> NetCDFFile:
+    """
+    Return a copy of the template with a 'member' dimension added to all
+    time-varying non-coordinate variables (those with 't' in their dims).
+
+    Coordinate variables and non-time-varying variables are left unchanged.
+    """
+    new_dims = {**template.dimensions, "member": n_members}
+    new_vars: dict[str, NetCDFVariable] = {}
+
+    for var_name, var in template.variables.items():
+        if var_name in COORDINATE_VARIABLES or "t" not in var.dimensions:
+            new_vars[var_name] = var
+        else:
+            t_idx = var.dimensions.index("t")
+            new_dims_list = list(var.dimensions)
+            new_dims_list.insert(t_idx + 1, "member")
+            new_var = NetCDFVariable(
+                name=var.name,
+                dimensions=tuple(new_dims_list),
+                attributes=var.attributes,
+                dtype=var.dtype,
+            )
+            new_var.constant_value = var.constant_value
+            new_vars[var_name] = new_var
+
+    return NetCDFFile(
+        dimensions=new_dims,
+        variables=new_vars,
+        global_attributes=template.global_attributes,
+    )
 
 
 def get_structure(file: Path) -> NetCDFFile:
@@ -311,10 +344,14 @@ def get_structure_from_xarray(
                 dtype=var.dtype,
             )
 
-            # Store constant values for coordinate variables and non-numeric types
+            # Store constant values for coordinate variables, non-numeric types,
+            # and any variable with no time dimension (e.g. latitude/longitude after
+            # xwrf renaming). These are ensemble-invariant and written as-is to both
+            # mean and sd output files so that sd files remain self-contained.
             if (
                 not np.issubdtype(var.dtype, np.number)
                 or var_name in COORDINATE_VARIABLES
+                or "t" not in var.dims
             ):
                 nc_var.constant_value = var.values
 
@@ -345,6 +382,12 @@ def create_welford_accumulators(template_ds: xr.Dataset) -> dict[str, WelfordSta
 
         var = template_ds[var_name]
         if not np.issubdtype(var.dtype, np.number):
+            continue
+
+        # Skip variables with no time dimension — they are constant across members
+        # (e.g. latitude/longitude after xwrf processing) and should not have
+        # statistics computed. They are written as constants via the template.
+        if "t" not in var.dims:
             continue
 
         shape = var.shape
