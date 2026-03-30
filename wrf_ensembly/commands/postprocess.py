@@ -176,9 +176,11 @@ def run(
         logger.warning("No forecast files found to process")
     else:
         if isinstance(forecast_result, tuple):
-            logger.info(
-                f"Forecast output: {forecast_result[0].name}, {forecast_result[1].name}"
-            )
+            mean_p, sd_p, *rest = forecast_result
+            msg = f"Forecast output: {mean_p.name}, {sd_p.name}"
+            if rest and rest[0] is not None:
+                msg += f", {rest[0].name}"
+            logger.info(msg)
         else:
             logger.info(f"Forecast output: {forecast_result.name}")
 
@@ -191,9 +193,11 @@ def run(
         logger.warning("No analysis files found to process")
     else:
         if isinstance(analysis_result, tuple):
-            logger.info(
-                f"Analysis output: {analysis_result[0].name}, {analysis_result[1].name}"
-            )
+            mean_p, sd_p, *rest = analysis_result
+            msg = f"Analysis output: {mean_p.name}, {sd_p.name}"
+            if rest and rest[0] is not None:
+                msg += f", {rest[0].name}"
+            logger.info(msg)
         else:
             logger.info(f"Analysis output: {analysis_result.name}")
 

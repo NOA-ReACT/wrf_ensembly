@@ -88,7 +88,8 @@ class XWRFPostProcessor(DataProcessor):
     - Renames the coordinates to standard names (longitude, latitude)
     - Fixes `coordianates` attributes for de-staggered variables
     - Removes unused variables like CLAT
-    - Filters variables based on a configurable pattern (postprocess.variables_to_keep)
+    - Filters variables based on a configurable pattern (postprocess.variables_to_keep
+      and variables_to_keep_per_member)
     """
 
     def __init__(self, **kwargs):

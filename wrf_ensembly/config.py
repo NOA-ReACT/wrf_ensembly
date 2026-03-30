@@ -468,13 +468,19 @@ class ProcessorConfig:
 
 @dataclass
 class PostprocessConfig:
-    variables_to_keep: Optional[list[str]] = None
+    variables_to_keep: list[str] | None = None
     """
     Optionally, filter the variables in a file by a list of regular expressions. If None, all variables are kept.
     This filtering is applied during the `postprocess process-pipeline` step.
     """
 
-    # --- Native compression settings (netCDF4-python) ---
+    variables_to_keep_ensemble: list[str] | None = None
+    """
+    Optionally, filter the variables stored in the per-member ensemble file by a list of regular
+    expressions. If None, all variables (after applying `variables_to_keep`) are kept. Use this
+    to limit the size of the ensemble file, which can become large with many members.
+    Only used when `keep_per_member = true`.
+    """
 
     compression: str = "zlib"
     """
@@ -501,7 +507,7 @@ class PostprocessConfig:
     Set to zero to disable quantization entirely. Requires netcdf-c >= 4.9.0.
     """
 
-    significant_digits_overrides: Dict[str, int] = field(
+    significant_digits_overrides: dict[str, int] = field(
         default_factory=lambda: {"Z.*": 6, "X.*": 6}
     )
     """
