@@ -1,6 +1,7 @@
 """Model interpolation to observation locations and times."""
 
 import glob
+
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -21,6 +22,8 @@ class ModelInterpolation:
     and complex observation operators (via QuantitySpec.operator) that combine
     multiple model fields and observation metadata.
     """
+
+    exp: Experiment
 
     def __init__(self, experiment: Experiment):
         """Initialize with an experiment.
@@ -54,11 +57,14 @@ class ModelInterpolation:
         n_updated = 0
 
         for source in ("forecast", "analysis"):
+            logger.info(f"Interpolating with {source} files")
             ds = self._open_files(source, list(needed_vars))
             if ds is None:
-                logger.warning(f"No {source} files found, skipping {source} interpolation")
+                logger.warning(
+                    f"No {source} files found, skipping {source} interpolation"
+                )
                 continue
-            result_df = self._interpolate_all(needed_combos, ds)
+            result_df = self._interpolate_all(needed_combos, ds, source)
             n_updated += self._save_output(result_df, source)
 
         return n_updated
@@ -102,8 +108,7 @@ class ModelInterpolation:
             quantity_info = QUANTITY_REGISTRY.get(quantity)
             if quantity_info is None or not quantity_info.has_model_mapping:
                 logger.warning(
-                    f"Quantity {quantity} not found in observation mappings or "
-                    "has no model mapping, skipping"
+                    f"Quantity {quantity} not found in observation mappings or has no model mapping, skipping"
                 )
                 continue
 
@@ -142,9 +147,13 @@ class ModelInterpolation:
             ValueError: If duplicate coordinates are found
         """
         if source == "forecast":
-            glob_pattern = f"{self.exp.paths.data_forecasts}/cycle_**/{source}_mean_cycle_*.nc"
+            glob_pattern = (
+                f"{self.exp.paths.data_forecasts}/cycle_**/{source}_mean_cycle_*.nc"
+            )
         else:
-            glob_pattern = f"{self.exp.paths.data_analysis}/cycle_**/{source}_mean_cycle_*.nc"
+            glob_pattern = (
+                f"{self.exp.paths.data_analysis}/cycle_**/{source}_mean_cycle_*.nc"
+            )
 
         if not glob.glob(glob_pattern):
             return None
@@ -186,7 +195,10 @@ class ModelInterpolation:
         return forecast_mean
 
     def _interpolate_all(
-        self, needed_combos: list[dict], forecast_mean: xr.Dataset
+        self,
+        needed_combos: list[dict],
+        forecast_mean: xr.Dataset,
+        source: str = "forecast",
     ) -> pd.DataFrame:
         """Interpolate model forecasts to all observation combos.
 
@@ -197,6 +209,9 @@ class ModelInterpolation:
         Args:
             needed_combos: List of combo dicts from _determine_needed_combos
             forecast_mean: Lazy forecast Dataset
+            source: Either 'forecast' or 'analysis'. For analysis, observation
+                times are snapped to the nearest available time in the dataset
+                since analysis files have only one timestep per cycle.
 
         Returns:
             DataFrame with all observations and their model_value
@@ -211,8 +226,7 @@ class ModelInterpolation:
             quantity_info = QUANTITY_REGISTRY[quantity]
 
             logger.info(
-                f"Interpolating {instrument}/{quantity} "
-                f"(vars={combo['wrf_vars']}, z_type={z_type})"
+                f"Interpolating {instrument}/{quantity}(vars={combo['wrf_vars']}, z_type={z_type})"
             )
 
             # Determine if we need to fetch metadata from DuckDB
@@ -249,6 +263,25 @@ class ModelInterpolation:
 
             times = pd.DatetimeIndex(arrays["time"]).tz_localize(None)
             batch_t = xr.DataArray(times, dims="obs")
+
+            # Analysis files have one timestep per cycle, so temporal
+            # interpolation won't work. Snap each obs time to the nearest
+            # available time in the dataset instead.
+            if source == "analysis":
+                ds_times = pd.DatetimeIndex(forecast_mean["t"].values)
+                nearest_idx = ds_times.get_indexer(times, method="nearest")
+                batch_t = xr.DataArray(ds_times[nearest_idx], dims="obs")
+
+            # For forecast files, we clamp the batch time to the end of the cycle
+            # so the plot correctly shows observation that might be after the end.
+            # Otherwise the plot would always end at cycle end, even though we assimilate
+            # for at least 30 minutes afterwards
+            if source == "forecast":
+                cycle_end = forecast_mean.t.max()
+                batch_t = xr.where(batch_t > cycle_end, cycle_end, batch_t)
+                print("cycle_end:", cycle_end)
+                print("Max time,", batch_t.max())
+
             batch_x = xr.DataArray(arrays["x"], dims="obs")
             batch_y = xr.DataArray(arrays["y"], dims="obs")
 
@@ -386,8 +419,7 @@ class ModelInterpolation:
         ]
         if missing_fields:
             logger.warning(
-                f"Model fields {missing_fields} not in forecast data, "
-                "operator cannot run"
+                f"Model fields {missing_fields} not in forecast data, operator cannot run"
             )
             return np.full(n_obs, np.nan)
 
@@ -537,5 +569,7 @@ class ModelInterpolation:
             Number of rows updated
         """
         n_updated = self.exp.obs.update_model_source_values(obs, source)
-        logger.info(f"Updated {n_updated} observations with {source} model values in DuckDB")
+        logger.info(
+            f"Updated {n_updated} observations with {source} model values in DuckDB"
+        )
         return n_updated
