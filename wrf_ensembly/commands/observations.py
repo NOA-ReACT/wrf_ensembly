@@ -637,41 +637,56 @@ def plot(
         logger.info(f"Plotting for {iq}")
         group = df[df["instrument"] + "." + df["quantity"] == iq]
 
-        use_model = False
+        # Build list of (model_column, suffix) pairs to plot
+        model_plots: list[tuple[str, str]] = []
         if with_model:
-            if group["model_forecast"].isna().all():
-                logger.warning(
-                    f"No model_forecast data for {iq}, falling back to single panel"
-                )
-            else:
-                use_model = True
+            for col, suffix in [
+                ("model_forecast", "_vs_forecast"),
+                ("model_analysis", "_vs_analysis"),
+            ]:
+                if col in group.columns and not group[col].isna().all():
+                    model_plots.append((col, suffix))
+                else:
+                    logger.warning(f"No {col} data for {iq}, skipping")
 
-        if use_model:
+            if not model_plots:
+                logger.warning(f"No model data for {iq}, falling back to single panel")
+
+        # Always plot observations-only
+        figures: list[tuple[Figure, str]] = []
+        fig = plotting.plot_observations(
+            group, keep_only_qc_flag=qc, plot_kwargs=plot_kwargs
+        )
+        figures.append((fig, ""))
+
+        for col, suffix in model_plots:
             fig = plotting.plot_observations_vs_model(
-                group, keep_only_qc_flag=qc, plot_kwargs=plot_kwargs
+                group,
+                model_column=col,
+                keep_only_qc_flag=qc,
+                plot_kwargs=plot_kwargs,
             )
-        else:
-            fig = plotting.plot_observations(
-                group, keep_only_qc_flag=qc, plot_kwargs=plot_kwargs
+            figures.append((fig, suffix))
+
+        for fig, suffix in figures:
+            if ylim != (None, None):
+                for ax in fig.get_axes():
+                    if not isinstance(ax, Axes):
+                        continue
+                    if ax.get_label() == "<colorbar>":
+                        continue
+                    ax.set_ylim(*ylim)
+
+            fig.text(0.5, 1.0, stem, ha="center", va="top", fontsize=9, color="0.4")
+            subtitle = _build_subtitle(group, qc=qc)
+            fig.text(
+                0.5, 0.0, subtitle, ha="center", va="bottom", fontsize=7, color="0.5"
             )
 
-        if ylim != (None, None):
-            for ax in fig.get_axes():
-                if not isinstance(ax, Axes):
-                    continue
-                if ax.get_label() == "<colorbar>":
-                    continue
-                ax.set_ylim(*ylim)
-
-        fig.text(0.5, 1.0, stem, ha="center", va="top", fontsize=9, color="0.4")
-        subtitle = _build_subtitle(group, qc=qc)
-        fig.text(0.5, 0.0, subtitle, ha="center", va="bottom", fontsize=7, color="0.5")
-
-        suffix = "_vs_model" if use_model else ""
-        output_path = output_dir / f"{stem}_{iq}{suffix}.png"
-        fig.tight_layout()
-        fig.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0.3)
-        plt.close(fig)
+            output_path = output_dir / f"{stem}_{iq}{suffix}.png"
+            fig.tight_layout()
+            fig.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0.3)
+            plt.close(fig)
         logger.info(f"Saved plot to {output_path}")
 
     logger.info("Plotting map...")

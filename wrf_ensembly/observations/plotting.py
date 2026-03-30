@@ -184,16 +184,36 @@ def plot_observations(
 
 
 def plot_observations_vs_model(
-    df: pd.DataFrame, keep_only_qc_flag=None, plot_kwargs: dict[str, Any] = {}
+    df: pd.DataFrame,
+    model_column: str = "model_forecast",
+    keep_only_qc_flag: int | None = None,
+    plot_kwargs: dict[str, Any] | None = None,
 ) -> Figure:
     """
-    3-panel plot: observation, model equivalent, and O-B departure.
+    Plot observation, model equivalent, and O-B departure side-by-side.
 
-    Expects the DataFrame to contain both ``value`` and ``model_forecast`` columns
-    with at least some non-null ``model_forecast`` entries.
+    Creates a 3-panel plot comparing observations with their model equivalents
+    and the observation-minus-background (O-B) departure values.
 
-    If keep_only_qc_flag is passed, only observations matching this QC value will be plotted.
+    Args:
+        df: DataFrame containing observation data with columns `value`, instrument,
+            quantity, and optionally a model forecast column.
+        model_column: Name of the column containing model forecast values (default: model_forecast).
+        keep_only_qc_flag: If provided, only observations with this QC flag value will be plotted; others will be masked as NaN (default: None).
+        plot_kwargs: Additional keyword arguments to pass to the geometry plotter.
+
+    Returns:
+        A matplotlib Figure object with three subplots: observation, model equivalent,
+        and O-B departure.
+
+    Raises:
+        ValueError: If the DataFrame contains multiple instruments, quantities,
+            or source files.
+        KeyError: If required metadata keys are missing from the observation data.
     """
+
+    if plot_kwargs is None:
+        plot_kwargs = {}
 
     instrument_quantity = df["instrument"] + "." + df["quantity"]
     if len(instrument_quantity.unique()) != 1:
@@ -219,22 +239,22 @@ def plot_observations_vs_model(
                 )
             plot_metadata[key] = meta_series[key].to_numpy()
 
-    ds = reconstruct_array(df, value_columns=["value", "model_forecast"])
+    ds = reconstruct_array(df, value_columns=["value", model_column])
     if keep_only_qc_flag is not None:
         ds["value"] = xr.where(ds["qc_flag"] == keep_only_qc_flag, ds["value"], np.nan)
-    ds["departure"] = ds["value"] - ds["model_forecast"]
+    ds["departure"] = ds["value"] - ds[model_column]
 
     # Apply scale factor if quantity demands it
     if qty_spec.display_scale is not None:
         ds["value"] *= qty_spec.display_scale
-        ds["model_forecast"] *= qty_spec.display_scale
+        ds[model_column] *= qty_spec.display_scale
         ds["departure"] *= qty_spec.display_scale
 
     plotter = GEOMETRY_PLOTTERS[inst_spec.geometry]
 
     # Determine shared color range for obs & model panels
     all_vals = np.concatenate(
-        [ds["value"].values.ravel(), ds["model_forecast"].values.ravel()]
+        [ds["value"].values.ravel(), ds[model_column].values.ravel()]
     )
     all_vals = all_vals[~np.isnan(all_vals)]
     shared_vmin = plot_kwargs.get("vmin", np.nanpercentile(all_vals, 2))
@@ -286,7 +306,7 @@ def plot_observations_vs_model(
         qty_spec,
         plot_metadata,
         ax=axes[1],
-        target_variable="model_forecast",
+        target_variable=model_column,
         **model_kwargs,
     )
     axes[1].set_title("Model Equivalent", fontsize=11)
