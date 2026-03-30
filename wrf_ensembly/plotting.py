@@ -161,6 +161,12 @@ def plot_forecast_vs_analysis(
         if main_vmax is None:
             main_vmax = combined_max
 
+    # If diff vmin and vmix are not defined, ensure that the center of the colorbar is 0
+    if variable_cfg.diff_vmin is None and variable_cfg.diff_vmax is None:
+        max_abs = np.abs(diff_var).max()
+        variable_cfg.diff_vmin = -max_abs
+        variable_cfg.diff_vmax = max_abs
+
     panels = [
         (forecast_title, forecast_var, main_cmap, main_vmin, main_vmax),
         (analysis_title, analysis_var, main_cmap, main_vmin, main_vmax),
