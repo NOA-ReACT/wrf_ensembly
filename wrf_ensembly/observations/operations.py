@@ -290,7 +290,9 @@ def plot_file(
     for iq in instrument_quantity:
         print(f"Plotting for {iq}")
         group = df[df["instrument"] + "." + df["quantity"] == iq]
-        fig = plotting.plot_observations(group, plot_kwargs=plot_kwargs)
+        fig = plotting.plot_observations(
+            group, keep_only_qc_flag=qc, plot_kwargs=plot_kwargs
+        )
 
         if ylim != (None, None):
             for ax in fig.get_axes():
