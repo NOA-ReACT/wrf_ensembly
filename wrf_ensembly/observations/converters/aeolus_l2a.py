@@ -325,6 +325,7 @@ def _convert_ael_pro(
     alt_bottom = np.zeros((brc_count, meas_count, height_bin_count))
     extinction = np.zeros((brc_count, meas_count, height_bin_count))
     error_extinction = np.zeros((brc_count, meas_count, height_bin_count))
+    classification = np.zeros((brc_count, meas_count, height_bin_count))
     # quality_index is per measurement (scalar), broadcast to all bins later
     quality_index = np.zeros((brc_count, meas_count))
 
@@ -353,9 +354,29 @@ def _convert_ael_pro(
                 -1,
                 "error_extinction",
             )
+            classification[i, m] = coda.fetch(
+                cf,
+                "ael_pro_opt_properties",
+                i,
+                "measurement_ael_pro_optical_properties",
+                m,
+                "height_bin_ael_pro_optical_properties",
+                -1,
+                "classification",
+            )
             quality_index[i, m] = coda.fetch(
                 cf, "ael_pro_pcd", i, "measurement_ael_pro_pcd", m, "quality_index"
             )
+
+    # In classification, aerosol-related keys are:
+    # 3 and 103: Tropospheric Aerosol
+    # 13 and 213: Stratospheric aerosol
+    is_aerosol = (
+        (classification == 3)
+        | (classification == 103)
+        | (classification == 13)
+        | (classification == 213)
+    )
 
     # Broadcast quality_index to all height bins
     quality_index_bins = quality_index[:, :, np.newaxis] * np.ones(
@@ -374,7 +395,8 @@ def _convert_ael_pro(
     qc_pass_3d = (
         ((quality_index_bins.astype(int) & _AEL_PRO_PROBLEM_BITS) == 0)
         & (extinction != -1)
-        & feature_mask
+        & is_aerosol
+        # & feature_mask
     )
 
     # Replace -1 sentinels with NaN
