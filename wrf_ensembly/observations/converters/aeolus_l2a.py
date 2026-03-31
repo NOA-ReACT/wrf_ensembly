@@ -309,8 +309,8 @@ def _convert_ael_pro(
     brc_count: int,
     meas_count: int,
     height_bin_count: int,
-    feature_mask: np.ndarray,
     path: Path,
+    subsample_to_brc: bool = False,
 ) -> pd.DataFrame | None:
     """Convert the AEL-PRO product.
 
@@ -396,7 +396,6 @@ def _convert_ael_pro(
         ((quality_index_bins.astype(int) & _AEL_PRO_PROBLEM_BITS) == 0)
         & (extinction != -1)
         & is_aerosol
-        # & feature_mask
     )
 
     # Replace -1 sentinels with NaN
@@ -413,22 +412,34 @@ def _convert_ael_pro(
         (brc_count, meas_count)
     )
 
-    # Flatten (brc, meas, H) → (brc*meas, H)
-    profile_count = brc_count * meas_count
-    lat = lat.reshape(profile_count, height_bin_count)
-    lon = lon.reshape(profile_count, height_bin_count)
-    alt = alt.reshape(profile_count, height_bin_count)
-    alt_top = alt_top.reshape(profile_count, height_bin_count)
-    alt_bottom = alt_bottom.reshape(profile_count, height_bin_count)
-    extinction = extinction.reshape(profile_count, height_bin_count)
-    timestamp = timestamp.reshape(profile_count, height_bin_count)
-    qc_pass_2d = qc_pass_3d.reshape(profile_count, height_bin_count)
-    brc_ids_flat = (
-        brc_ids.ravel()
-    )  # (profile_count,) — one BRC id per flattened profile
-    meas_ids_flat = np.tile(np.arange(meas_count), brc_count)
-
-    qc_pass = qc_pass_2d
+    if subsample_to_brc:
+        # Average over meas dimension → (brc, H)
+        profile_count = brc_count
+        lat = np.nanmean(lat, axis=1)
+        lon = np.nanmean(lon, axis=1)
+        alt = np.nanmean(alt, axis=1)
+        alt_top = np.nanmean(alt_top, axis=1)
+        alt_bottom = np.nanmean(alt_bottom, axis=1)
+        extinction = np.nanmean(extinction, axis=1)
+        timestamp = np.nanmean(timestamp, axis=1)
+        qc_pass = qc_pass_3d.all(axis=1)  # strict: all meas must pass
+        brc_ids_flat = np.arange(brc_count)
+        meas_ids_flat = np.full(brc_count, -1)
+    else:
+        # Flatten (brc, meas, H) → (brc*meas, H)
+        profile_count = brc_count * meas_count
+        lat = lat.reshape(profile_count, height_bin_count)
+        lon = lon.reshape(profile_count, height_bin_count)
+        alt = alt.reshape(profile_count, height_bin_count)
+        alt_top = alt_top.reshape(profile_count, height_bin_count)
+        alt_bottom = alt_bottom.reshape(profile_count, height_bin_count)
+        extinction = extinction.reshape(profile_count, height_bin_count)
+        timestamp = timestamp.reshape(profile_count, height_bin_count)
+        qc_pass = qc_pass_3d.reshape(profile_count, height_bin_count)
+        brc_ids_flat = (
+            brc_ids.ravel()
+        )  # (profile_count,) — one BRC id per flattened profile
+        meas_ids_flat = np.tile(np.arange(meas_count), brc_count)
 
     profile_idx = np.repeat(np.arange(profile_count), height_bin_count)
     bin_idx = np.tile(np.arange(height_bin_count), profile_count)
@@ -486,6 +497,7 @@ def convert_aeolus_l2a(
     include_mle: bool = True,
     include_sca: bool = True,
     include_ael_pro: bool = True,
+    ael_pro_subsample_to_brc: bool = False,
 ) -> pd.DataFrame | None:
     """Convert an AEOLUS L2A file to WRF-Ensembly Observation format.
 
@@ -494,6 +506,8 @@ def convert_aeolus_l2a(
         include_mle: Include the SCA-MLE product (instrument: AEOLUS_L2A_MLE).
         include_sca: Include the SCA product (instrument: AEOLUS_L2A_SCA).
         include_ael_pro: Include the AEL-PRO product (instrument: AEOLUS_L2A_AEL_PRO).
+        ael_pro_subsample_to_brc: Average AEL-PRO measurements within each BRC
+            instead of flattening to individual measurement profiles.
 
     Returns:
         A pandas DataFrame in WRF-Ensembly Observation format, or None if no valid data.
@@ -549,16 +563,15 @@ def convert_aeolus_l2a(
 
     if include_ael_pro:
         print(
-            f"  Converting AEL-PRO product "
-            f"({num_brc} BRCs × {meas_in_brc_count} measurements × {height_bin_count} bins)..."
+            f"  Converting AEL-PRO product ({num_brc} BRCs × {meas_in_brc_count} measurements × {height_bin_count} bins)..."
         )
         df = _convert_ael_pro(
             cf,
             num_brc,
             meas_in_brc_count,
             height_bin_count,
-            feature_mask,
             path,
+            subsample_to_brc=ael_pro_subsample_to_brc,
         )
         if df is not None:
             parts.append(df)
@@ -586,12 +599,18 @@ def convert_aeolus_l2a(
     default=True,
     help="Include AEL-PRO product (AEOLUS_L2A_AEL_PRO).",
 )
+@click.option(
+    "--ael-pro-subsample-to-brc/--no-ael-pro-subsample-to-brc",
+    default=False,
+    help="Average AEL-PRO measurements within each BRC instead of flattening.",
+)
 def aeolus_l2a(
     input_path: Path,
     output_path: Path,
     mle: bool,
     sca: bool,
     ael_pro: bool,
+    ael_pro_subsample_to_brc: bool,
 ):
     """Convert AEOLUS L2A file to WRF-Ensembly observation format.
 
@@ -606,6 +625,7 @@ def aeolus_l2a(
         include_mle=mle,
         include_sca=sca,
         include_ael_pro=ael_pro,
+        ael_pro_subsample_to_brc=ael_pro_subsample_to_brc,
     )
     if converted_df is None or converted_df.empty:
         print("No observations found in the input file, aborting")
