@@ -389,9 +389,9 @@ def _convert_ael_pro(
     #   Bit 3 (0x08): maximum iterations reached (obs level)
     #   Bit 4 (0x10): maximum iterations reached (measurement level)
     #   Bit 5 (0x20): low SNR in retrieved extinction
-    # Reject if any of bits 0–5 are set.
+    # Reject if any of bits 0-3 and 5 are set. Bit 4 is set way too often so we ignore it.
     # Also apply the per-measurement feature mask directly (AEL-PRO resolution matches).
-    _AEL_PRO_PROBLEM_BITS = 0x3F
+    _AEL_PRO_PROBLEM_BITS = 0x2F
     qc_pass_3d = (
         ((quality_index_bins.astype(int) & _AEL_PRO_PROBLEM_BITS) == 0)
         & (extinction != -1)
