@@ -250,6 +250,10 @@ def _build_subtitle(df: pd.DataFrame, qc: int | None = None) -> str:
 )
 @click.option("--qc", type=int, default=None, help="Filter to specific QC flag value")
 @click.option("--no-robust", is_flag=True, help="Disable robust color scaling")
+@click.option(
+    "--start-time", type=str, default=None, help="Start time filter (ISO format)"
+)
+@click.option("--end-time", type=str, default=None, help="End time filter (ISO format)")
 def plot_file(
     obs_file: Path,
     output_file: Path | None = None,
@@ -259,6 +263,8 @@ def plot_file(
     ylim: tuple[float | None, float | None] = (None, None),
     qc: int | None = None,
     no_robust: bool = False,
+    start_time: str | None = None,
+    end_time: str | None = None,
 ):
     """Plots the data inside an WRF-Ensembly observation file"""
 
@@ -271,11 +277,13 @@ def plot_file(
     df = obs_io.read_obs(obs_file)
     print(f"done in {time.process_time() - t:.2f}s")
 
-    if qc is not None:
-        df = df[df["qc_flag"] == qc]
-        if df.empty:
-            print(f"No observations with qc_flag == {qc}")
-            return
+    if start_time is not None:
+        df = df[df["time"] >= pd.to_datetime(start_time, utc=True)]
+    if end_time is not None:
+        df = df[df["time"] <= pd.to_datetime(end_time, utc=True)]
+    if df.empty:
+        print("No observations in the specified time range")
+        return
 
     # Build kwargs that override registry defaults
     plot_kwargs: dict[str, Any] = {}
