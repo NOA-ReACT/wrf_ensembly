@@ -186,13 +186,9 @@ def generate_make_analysis_jobfile(
 
     base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path} ensemble {{subcommand}}"
     commands = [
-        f"if [ -f {obs_file} ]; then",
         _build_command(base_cmd, "filter"),
         _build_command(base_cmd, "analysis"),
         _build_command(base_cmd, "cycle"),
-        "else",
-        _build_command(base_cmd, "cycle", use_forecast=True),
-        "fi",
         f"if [ -f {pert_file} ]; then",
         _build_command(base_cmd, "apply-perturbations"),
         "fi",

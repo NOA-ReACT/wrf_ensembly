@@ -9,10 +9,10 @@ import click
 import netCDF4
 
 from wrf_ensembly import experiment, utils
-from wrf_ensembly.experiment.experiment import _generate_perturbations_for_cycle
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
-from wrf_ensembly.experiment import CycleState, StateTransition
+from wrf_ensembly.experiment import CycleState, ExperimentStateError, StateTransition
+from wrf_ensembly.experiment.experiment import _generate_perturbations_for_cycle
 
 
 @click.group(name="ensemble", cls=GroupWithStartEndPrint)
@@ -385,42 +385,13 @@ def filter(experiment_path: Path):
     exp = experiment.Experiment(experiment_path)
     exp.set_dart_environment()
 
-    from wrf_ensembly.experiment import CycleState, StateTransition
-
-    # Check if all members are advanced first
-    n_advanced = sum(1 for m in exp.members if m.advanced)
-
-    # If we're in ADVANCING_MEMBERS and all members are done, transition to MEMBERS_ADVANCED
-    if exp.state_machine.current_cycle.current_state == CycleState.ADVANCING_MEMBERS:
-        if n_advanced == exp.cfg.assimilation.n_members:
-            exp.state_machine.current_cycle.transition(
-                StateTransition.ALL_MEMBERS_ADVANCED,
-                n_advanced,
-                exp.cfg.assimilation.n_members,
-            )
-            exp.save_status_to_db()
-            logger.info("All members advanced - starting filter")
-        else:
-            logger.error(
-                f"Only {n_advanced}/{exp.cfg.assimilation.n_members} members advanced"
-            )
-            sys.exit(1)
-
-    # Validate state
-    can_run, error = exp.state_machine.can_run_filter(
-        exp.current_cycle_i, n_advanced, exp.cfg.assimilation.n_members
-    )
-    if not can_run:
-        logger.error(f"Cannot run filter: {error}")
-        logger.info(
-            f"Next required action: {exp.state_machine.current_cycle.get_required_actions()}"
-        )
+    try:
+        success = exp.filter()
+    except ExperimentStateError as e:
+        logger.error(str(e))
         sys.exit(1)
 
-    success = exp.filter()
     if success:
-        exp.state_machine.current_cycle.transition(StateTransition.FILTER_COMPLETE)
-        exp.save_status_to_db()
         logger.info("Filter complete - ready for analysis")
 
 
@@ -491,17 +462,12 @@ def analysis(experiment_path: Path):
 
 @ensemble_cli.command()
 @click.option(
-    "--use-forecast",
-    is_flag=True,
-    help="Cycle with the latest forecast instead of the analysis",
-)
-@click.option(
     "--jobs",
     type=click.IntRange(min=0, max=None),
     help="How many files to process in parallel",
 )
 @pass_experiment_path
-def cycle(experiment_path: Path, use_forecast: bool, jobs: Optional[int]):
+def cycle(experiment_path: Path, jobs: int | None):
     """
     Prepares the experiment for the next cycle by copying the cycled variables from the analysis
     to the initial conditions and preparing the namelist.
@@ -524,10 +490,10 @@ def cycle(experiment_path: Path, use_forecast: bool, jobs: Optional[int]):
             exp.cfg.assimilation.n_members,
         )
         exp.save_status_to_db()
-        logger.info("Recovered: all members were advanced, transitioning to MEMBERS_ADVANCED")
+        logger.info("All members were advanced, transitioning to MEMBERS_ADVANCED")
 
-    can_cycle, error = exp.state_machine.can_cycle_to_next(
-        exp.current_cycle_i, use_forecast
+    can_cycle, use_forecast, error = exp.state_machine.can_cycle_to_next(
+        exp.current_cycle_i
     )
     if not can_cycle:
         logger.error(f"Cannot cycle: {error}")

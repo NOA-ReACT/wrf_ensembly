@@ -11,6 +11,12 @@ from enum import Enum
 from typing import Optional
 
 
+class ExperimentStateError(Exception):
+    """Raised when an operation is attempted in an invalid experiment state."""
+
+    pass
+
+
 class CycleState(Enum):
     """
     States for a single cycle in the assimilation workflow.
@@ -280,34 +286,30 @@ class ExperimentStateMachine:
 
         return True, ""
 
-    def can_cycle_to_next(
-        self, cycle_idx: int, use_forecast: bool = False
-    ) -> tuple[bool, str]:
-        """Check if we can advance to the next cycle."""
+    def can_cycle_to_next(self, cycle_idx: int) -> tuple[bool, bool, str]:
+        """
+        Check if we can advance to the next cycle.
+
+        Returns:
+            - able_to_cycle: If we are able to cycle (bool)
+            - use_forecast: Whether we should use analysis of forecast files (true for forecasts, false for analysis)
+            - error_message: An error message
+        """
         if cycle_idx != self.current_cycle_idx:
             return (
+                False,
                 False,
                 f"Cannot cycle from {cycle_idx}, currently on cycle {self.current_cycle_idx}",
             )
 
         cycle = self.cycles[cycle_idx]
 
-        # If using forecast, we can cycle from MEMBERS_ADVANCED
-        # Otherwise we need ANALYSIS_COMPLETE
-        valid_states = (
-            [CycleState.MEMBERS_ADVANCED, CycleState.ANALYSIS_COMPLETE]
-            if use_forecast
-            else [CycleState.ANALYSIS_COMPLETE]
-        )
-
-        if cycle.current_state not in valid_states:
-            return (
-                False,
-                f"Cannot cycle from state {cycle.current_state.value}. "
-                f"Need {'MEMBERS_ADVANCED (with --use-forecast) or ANALYSIS_COMPLETE' if use_forecast else 'ANALYSIS_COMPLETE'}",
-            )
-
-        return True, ""
+        if cycle.current_state == CycleState.ANALYSIS_COMPLETE:
+            return True, False, ""
+        elif cycle.current_state == CycleState.MEMBERS_ADVANCED:
+            return True, True, ""
+        else:
+            return False, False, f"Cannot cycle from state {cycle.current_state.value}"
 
     def advance_to_next_cycle(self):
         """Move to the next cycle."""

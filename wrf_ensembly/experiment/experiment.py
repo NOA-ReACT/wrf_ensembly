@@ -26,7 +26,12 @@ from .dataclasses import MemberStatus, RuntimeStatistics
 from .inflation import InflationConfig
 from .observations import ExperimentObservations
 from .paths import ExperimentPaths
-from .state_machine import CycleState, ExperimentStateMachine, StateTransition
+from .state_machine import (
+    CycleState,
+    ExperimentStateError,
+    ExperimentStateMachine,
+    StateTransition,
+)
 
 
 def _generate_perturbations_for_cycle(
@@ -194,7 +199,9 @@ class Experiment:
 
         self.paths = ExperimentPaths(experiment_path, self.cfg)
         self.obs = ExperimentObservations(self.cfg, self.cycles, self.paths)
-        self.inflation = InflationConfig.from_config(self.cfg, self.paths.data_inflation)
+        self.inflation = InflationConfig.from_config(
+            self.cfg, self.paths.data_inflation
+        )
 
     def load_status_from_db(self):
         """Load the status of the experiment from the database"""
@@ -574,14 +581,53 @@ class Experiment:
 
     def filter(self) -> bool:
         """
-        Run the Kalman Filter for the current cycle
+        Run the Kalman Filter for the current cycle.
+        Will do nothing if 1) there is not observation file to assimilate and 2) inflation
+        is disabled.
+
+        Checks and updates the experiment state machine. Raises ExperimentStateError if
+        the experiment is not in a valid state to run the filter.
 
         Returns:
             True if the filter was run successfully
         """
 
-        if not self.all_members_advanced:
-            logger.error("Not all members have been advanced")
+        n_advanced = sum(1 for m in self.members if m.advanced)
+
+        # Auto-recover: if in ADVANCING_MEMBERS and all members done, transition
+        if (
+            self.state_machine.current_cycle.current_state
+            == CycleState.ADVANCING_MEMBERS
+        ):
+            if n_advanced == self.cfg.assimilation.n_members:
+                self.state_machine.current_cycle.transition(
+                    StateTransition.ALL_MEMBERS_ADVANCED,
+                    n_advanced,
+                    self.cfg.assimilation.n_members,
+                )
+                self.save_status_to_db()
+                logger.info("All members advanced - starting filter")
+            else:
+                raise ExperimentStateError(
+                    f"Only {n_advanced}/{self.cfg.assimilation.n_members} members advanced"
+                )
+
+        # Validate state
+        can_run, error = self.state_machine.can_run_filter(
+            self.current_cycle_i, n_advanced, self.cfg.assimilation.n_members
+        )
+        if not can_run:
+            req_actions = self.state_machine.current_cycle.get_required_actions()
+            raise ExperimentStateError(
+                f"Cannot run filter: {error}\nNext required action: {req_actions}"
+            )
+
+        # Skip filter if no observation file and no inflation enabled
+        obs_file = self.paths.obs / f"cycle_{self.current_cycle_i:03}.obs_seq"
+        if not obs_file.exists() and not self.inflation.enabled:
+            logger.warning(
+                "No observation file and no inflation enabled, skipping filter"
+            )
             return False
 
         self.setup_dart()
@@ -591,11 +637,12 @@ class Experiment:
         obs_seq = dart_dir / "obs_seq.out"
         obs_seq.unlink(missing_ok=True)
 
-        obs_file = self.paths.obs / f"cycle_{self.current_cycle_i:03}.obs_seq"
-        if not obs_file.exists():
-            logger.error(f"Observation file for current cycle not found at {obs_file}")
-            return False
-        utils.copy(obs_file, obs_seq)
+        if obs_file.exists():
+            utils.copy(obs_file, obs_seq)
+        else:
+            logger.warning(
+                f"Observation file for current cycle not found at {obs_file}"
+            )
 
         # Write lists of input and output files
         # The input list is the latest forecast for each member
@@ -661,6 +708,10 @@ class Experiment:
 
         # Stash inflation files so we can use them next cycle
         self.inflation.stash_restart_files(self.current_cycle_i)
+
+        # Transition state
+        self.state_machine.current_cycle.transition(StateTransition.FILTER_COMPLETE)
+        self.save_status_to_db()
 
         return True
 

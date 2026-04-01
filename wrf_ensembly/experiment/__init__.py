@@ -2,7 +2,7 @@ from .database import ExperimentDatabase
 from .dataclasses import MemberStatus, RuntimeStatistics
 from .experiment import Experiment
 from .paths import ExperimentPaths
-from .state_machine import CycleState, ExperimentStateMachine, StateTransition
+from .state_machine import CycleState, ExperimentStateMachine, ExperimentStateError, StateTransition
 
 __all__ = [
     "Experiment",
@@ -12,6 +12,7 @@ __all__ = [
     "MemberStatus",
     "RuntimeStatistics",
     "CycleState",
+    "ExperimentStateError",
     "ExperimentStateMachine",
     "StateTransition",
 ]
