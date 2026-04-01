@@ -378,7 +378,7 @@ def generate_filter_stats_plots(
 
     # For scatter plots, we want ALL observations (including rejected ones)
     # to diagnose what went wrong. Only drop rows where observation itself is invalid.
-    df_scatter = df.dropna(subset=["obs", "obs_variance"])
+    df_scatter = df.dropna(subset=["obs", "obs_std"])
 
     if len(df_scatter) == 0:
         log_warning(f"No valid observations for {label}, skipping")
@@ -388,6 +388,16 @@ def generate_filter_stats_plots(
     fig = plot_filter_scatter_diagnostics(df_scatter, title_suffix=label)
     fig.savefig(output_dir / "diagnostic_scatter.png", dpi=dpi, bbox_inches="tight")
     log_info(f"Saved {output_dir / 'diagnostic_scatter.png'}")
+    plt.close(fig)
+
+    # Same but only observations that passed QC
+    fig = plot_filter_scatter_diagnostics(
+        df_scatter.loc[df_scatter["dart_qc"] == 0], title_suffix=label
+    )
+    fig.savefig(
+        output_dir / "diagnostic_scatter_dartqc_ok.png", dpi=dpi, bbox_inches="tight"
+    )
+    log_info(f"Saved {output_dir / 'diagnostic_scatter_dartqc_ok.png'}")
     plt.close(fig)
 
     # For rank histograms, only use observations with valid prior/posterior
@@ -442,14 +452,14 @@ def plot_filter_scatter_diagnostics(df: pd.DataFrame, title_suffix: str = "") ->
 
     Panels:
       (0,0) Prior mean vs observation (colored by dart_qc)
-      (0,1) Prior spread vs observation error variance
+      (0,1) Prior spread vs observation stdev
       (1,0) Posterior mean vs observation (colored by dart_qc)
-      (1,1) Posterior spread vs observation error variance
+      (1,1) Posterior spread vs observation stdev
       (2,0) Correlation matrix heatmap
       (2,1) Innovation histogram
 
     Args:
-        df: DataFrame with columns obs, obs_variance, prior_mean, prior_spread,
+        df: DataFrame with columns obs, obs_std, prior_mean, prior_spread,
             posterior_mean, posterior_spread, dart_qc.
         title_suffix: Optional suffix for the figure title.
 
@@ -514,16 +524,16 @@ def plot_filter_scatter_diagnostics(df: pd.DataFrame, title_suffix: str = "") ->
     ax.set_title("Prior Mean vs Observation")
     ax.legend(fontsize=7, markerscale=1.5, loc="best")
 
-    # (0,1) Prior spread vs obs variance
+    # (0,1) Prior spread vs obs stdev
     ax = axes[0, 1]
-    ax.scatter(df["obs_variance"], df["prior_spread"], alpha=0.5, s=10)
-    lims = _common_lims(df["obs_variance"], df["prior_spread"])
+    ax.scatter(df["obs_std"], df["prior_spread"], alpha=0.5, s=10)
+    lims = _common_lims(df["obs_std"], df["prior_spread"])
     ax.set_xlim(lims)
     ax.set_ylim(lims)
     ax.plot(lims, lims, "k--", alpha=0.3)
-    ax.set_xlabel("Obs Variance")
+    ax.set_xlabel("Obs StDev")
     ax.set_ylabel("Prior Spread")
-    ax.set_title("Prior Spread vs Obs Variance")
+    ax.set_title("Prior Spread vs Obs StDev")
 
     # (1,0) Posterior mean vs obs
     ax = axes[1, 0]
@@ -551,22 +561,22 @@ def plot_filter_scatter_diagnostics(df: pd.DataFrame, title_suffix: str = "") ->
     ax.set_title("Posterior Mean vs Observation")
     ax.legend(fontsize=7, markerscale=1.5, loc="best")
 
-    # (1,1) Posterior spread vs obs variance
+    # (1,1) Posterior spread vs obs stddev
     ax = axes[1, 1]
-    ax.scatter(df["obs_variance"], df["posterior_spread"], alpha=0.5, s=10)
-    lims = _common_lims(df["obs_variance"], df["posterior_spread"])
+    ax.scatter(df["obs_std"], df["posterior_spread"], alpha=0.5, s=10)
+    lims = _common_lims(df["obs_std"], df["posterior_spread"])
     ax.set_xlim(lims)
     ax.set_ylim(lims)
     ax.plot(lims, lims, "k--", alpha=0.3)
-    ax.set_xlabel("Obs Variance")
+    ax.set_xlabel("Obs StDev")
     ax.set_ylabel("Posterior Spread")
-    ax.set_title("Posterior Spread vs Obs Variance")
+    ax.set_title("Posterior Spread vs Obs StDev")
 
     # (2,0) Correlation matrix
     ax = axes[2, 0]
     corr_cols = [
         "obs",
-        "obs_variance",
+        "obs_std",
         "prior_mean",
         "posterior_mean",
         "prior_spread",
