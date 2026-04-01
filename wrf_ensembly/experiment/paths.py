@@ -21,6 +21,7 @@ class ExperimentPaths:
         self.data_forecasts = self.data / "forecasts"
         self.data_analysis = self.data / "analysis"
         self.data_diag = self.data / "diagnostics"
+        self.data_inflation = self.data / "inflation"
 
         self.obs = experiment_path / "obs"
         self.obs_temp = self.obs / "temp"  # Temporary files during processing
@@ -67,6 +68,7 @@ class ExperimentPaths:
         self.data_forecasts.mkdir()
         self.data_icbc.mkdir()
         self.data_diag.mkdir()
+        self.data_inflation.mkdir()
 
         self.scratch.mkdir()
         self.scratch_forecasts.mkdir()

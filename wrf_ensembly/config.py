@@ -258,6 +258,12 @@ class AssimilationConfig:
     half_window_length_minutes: int = 30
     """Half-length of the window in which observations will be considered, in minutes. For example, if set to 30, then observations from 30 minutes before and after the cycle end time will be used. Default is 30 minutes."""
 
+    use_inflation: bool = False
+    """
+    Set to true if using DART inflation to manage the inflation files (moving output files to input for next cycle) and correctly set `inf_initial_from_restart`/`inf_sd_initial_from_restart` in DART's namelist.
+    You still need to set the inflation settings correctly in the DART namelist.
+    """
+
 
 @dataclass
 class SuperObsConfig:

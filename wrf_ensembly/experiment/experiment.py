@@ -2,6 +2,7 @@ import datetime as dt
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import netCDF4
 import numpy as np
@@ -22,6 +23,7 @@ from wrf_ensembly.fortran_namelists import write_namelist
 
 from .database import ExperimentDatabase
 from .dataclasses import MemberStatus, RuntimeStatistics
+from .inflation import InflationConfig
 from .observations import ExperimentObservations
 from .paths import ExperimentPaths
 from .state_machine import CycleState, ExperimentStateMachine, StateTransition
@@ -172,6 +174,7 @@ class Experiment:
 
     db: ExperimentDatabase
     obs: ExperimentObservations
+    inflation: InflationConfig
     state_machine: ExperimentStateMachine
 
     def __init__(self, experiment_path: Path):
@@ -191,6 +194,7 @@ class Experiment:
 
         self.paths = ExperimentPaths(experiment_path, self.cfg)
         self.obs = ExperimentObservations(self.cfg, self.cycles, self.paths)
+        self.inflation = InflationConfig.from_config(self.cfg, self.paths.data_inflation)
 
     def load_status_from_db(self):
         """Load the status of the experiment from the database"""
@@ -304,10 +308,16 @@ class Experiment:
 
         dart_dir = self.cfg.directories.dart_root / "models" / "wrf" / "work"
 
-        # Write namelist
+        # Write namelist with inflation overrides
         filter_namelist_path = dart_dir / "input.nml"
         logger.info(f"Writing DART filter namelist to {filter_namelist_path}")
-        write_namelist(self.cfg.dart_namelist, filter_namelist_path)
+        dart_namelist = self.inflation.apply_namelist_overrides(
+            self.cfg.dart_namelist, self.current_cycle_i
+        )
+        write_namelist(dart_namelist, filter_namelist_path)
+
+        # Move inflation files into the DART work directory
+        self.inflation.pop_restart_files(self.current_cycle_i)
 
         # Copy files if defined in config
         for file_cfg in self.cfg.extra_dart_files:
@@ -648,6 +658,9 @@ class Experiment:
         obs_sequence.obs_seq_to_nc(
             self.cfg.directories.dart_root, obs_seq_final, obs_seq_final_nc
         )
+
+        # Stash inflation files so we can use them next cycle
+        self.inflation.stash_restart_files(self.current_cycle_i)
 
         return True
 
