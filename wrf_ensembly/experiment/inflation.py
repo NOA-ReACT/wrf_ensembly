@@ -119,6 +119,10 @@ class InflationConfig:
         if not self.enabled:
             return
 
+        # No last cycle to use for the first cycle
+        if cycle_i == 0:
+            return
+
         last_cycle = cycle_i - 1
         for filename in self.active_files:
             src = self._stashed_path(last_cycle, filename)
