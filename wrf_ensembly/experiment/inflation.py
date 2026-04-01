@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from wrf_ensembly import config
+from wrf_ensembly import config, utils
 from wrf_ensembly.console import logger
 
 
@@ -126,10 +126,10 @@ class InflationConfig:
         last_cycle = cycle_i - 1
         for filename in self.active_files:
             src = self._stashed_path(last_cycle, filename)
-            dst = self.dart_work_dir / filename
+            dst = self.dart_work_dir / filename.replace("output", "input")
             if not src.exists():
                 msg = f"Inflation is enabled but last cycle's inflation file wasn't found at {src}"
                 logger.error(msg)
                 raise FileNotFoundError(msg)
-            src.rename(dst)
+            utils.copy(src, dst)
             logger.info(f"Restored inflation file {filename} from cycle {last_cycle}")
