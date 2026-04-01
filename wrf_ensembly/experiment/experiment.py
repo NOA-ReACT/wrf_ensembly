@@ -321,6 +321,7 @@ class Experiment:
         dart_namelist = self.inflation.apply_namelist_overrides(
             self.cfg.dart_namelist, self.current_cycle_i
         )
+        dart_namelist["filter_nml"]["ens_size"] = self.cfg.assimilation.n_members
         write_namelist(dart_namelist, filter_namelist_path)
 
         # Move inflation files into the DART work directory
