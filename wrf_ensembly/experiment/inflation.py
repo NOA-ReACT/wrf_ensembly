@@ -159,9 +159,10 @@ class InflationConfig:
                 for filename in self.active_files:
                     src = self._stashed_path(source_cycle, filename)
                     dst = self.dart_work_dir / filename.replace("output", "input")
-                    utils.copy(src, dst)
+                    dst.unlink(missing_ok=True)
+                    dst.symlink_to(src)
                     logger.info(
-                        f"Restored inflation file {filename} from cycle {source_cycle}"
+                        f"Linked inflation file {filename} from cycle {source_cycle}"
                     )
                 return source_cycle
 
