@@ -79,6 +79,9 @@ def analyze_first_departures(experiment_path: Path, instrument_quantity: tuple):
         )
         return
 
+    # Keep only good QC observations to compare
+    df = df.loc[df["qc_flag"] == 0]
+
     # Determine which instrument-quantity pairs to analyze
     pairs_to_analyze = []
 
