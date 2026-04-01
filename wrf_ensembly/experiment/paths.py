@@ -47,6 +47,9 @@ class ExperimentPaths:
         self.logs = experiment_path / "logs"
         self.logs_slurm = self.logs / "slurm"
 
+        # DART working directory
+        self.dart_work_dir = cfg.directories.dart_root / "models" / "wrf" / "work"
+
         # Scratch
         self.scratch = cfg.directories.scratch_root
         if not self.scratch.is_absolute():

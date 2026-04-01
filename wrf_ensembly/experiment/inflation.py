@@ -26,10 +26,8 @@ class InflationConfig:
 
     @classmethod
     def from_config(
-        cls, cfg: config.Config, data_inflation_dir: Path
+        cls, cfg: config.Config, data_inflation_dir: Path, dart_work_dir: Path
     ) -> "InflationConfig":
-        dart_work_dir = cfg.directories.dart_root / "models" / "wrf" / "work"
-
         if not cfg.assimilation.use_inflation:
             return cls(
                 enabled=False,
@@ -40,10 +38,23 @@ class InflationConfig:
             )
 
         inf_flavor = cfg.dart_namelist["filter_nml"]["inf_flavor"]
+        if len(inf_flavor) < 2:
+            raise ValueError(
+                f"filter_nml.inf_flavor must have at least 2 elements, got {inf_flavor}"
+            )
+
+        prior_enabled = inf_flavor[0] > 0
+        posterior_enabled = inf_flavor[1] > 0
+        if not prior_enabled and not posterior_enabled:
+            raise ValueError(
+                "use_inflation is True but filter_nml.inf_flavor is [0, 0] — "
+                "set use_inflation = false or configure a non-zero inf_flavor"
+            )
+
         return cls(
             enabled=True,
-            prior_enabled=inf_flavor[0] > 0,
-            posterior_enabled=inf_flavor[1] > 0,
+            prior_enabled=prior_enabled,
+            posterior_enabled=posterior_enabled,
             dart_work_dir=dart_work_dir,
             data_inflation_dir=data_inflation_dir,
         )
@@ -58,22 +69,31 @@ class InflationConfig:
             files += ["output_postinf_mean.nc", "output_postinf_sd.nc"]
         return files
 
-    def apply_namelist_overrides(
+    def prepare_cycle(
         self, dart_namelist: dict[str, dict[str, Any]], cycle_i: int
     ) -> dict[str, dict[str, Any]]:
         """
-        Apply inflation-related overrides to the DART namelist.
+        Prepare inflation for a cycle: restore restart files from a previous cycle
+        and apply the appropriate namelist overrides.
 
-        For cycle 0, restart files don't exist yet so from_restart is always False.
-        For subsequent cycles, from_restart matches which inflation types are enabled.
+        Searches backwards through cycles to find the most recent one with inflation
+        files. If none are found, configures DART to generate initial inflation values.
+
+        Returns the modified DART namelist.
         """
+
         dart_namelist = copy.deepcopy(dart_namelist)
 
         if not self.enabled:
             return dart_namelist
 
-        if cycle_i == 0:
-            logger.info("First cycle, not using inflation restart files")
+        restart_cycle = self.pop_restart_files(cycle_i)
+        use_restart = restart_cycle is not None
+
+        if not use_restart:
+            logger.info(
+                "No inflation restart files available, DART will generate initial values"
+            )
             dart_namelist["filter_nml"]["inf_initial_from_restart"] = [False, False]
             dart_namelist["filter_nml"]["inf_sd_initial_from_restart"] = [False, False]
         else:
@@ -111,25 +131,38 @@ class InflationConfig:
                     f"Inflation enabled but filter didn't produce {filename}!"
                 )
 
-    def pop_restart_files(self, cycle_i: int):
+    def pop_restart_files(self, cycle_i: int) -> int | None:
         """
-        Restore the previous cycle's inflation output files from the data
+        Restore a previous cycle's inflation output files from the data
         directory back into the DART work directory as input for the current cycle.
+
+        Searches backwards through cycles to find the most recent one with
+        complete inflation files. Returns the cycle index used, or None if no
+        files were found (including cycle 0 where no prior cycles exist).
         """
+
         if not self.enabled:
-            return
+            return None
 
-        # No last cycle to use for the first cycle
         if cycle_i == 0:
-            return
+            return None
 
-        last_cycle = cycle_i - 1
-        for filename in self.active_files:
-            src = self._stashed_path(last_cycle, filename)
-            dst = self.dart_work_dir / filename.replace("output", "input")
-            if not src.exists():
-                msg = f"Inflation is enabled but last cycle's inflation file wasn't found at {src}"
-                logger.error(msg)
-                raise FileNotFoundError(msg)
-            utils.copy(src, dst)
-            logger.info(f"Restored inflation file {filename} from cycle {last_cycle}")
+        if not self.active_files:
+            return None
+
+        # Search backwards to find the most recent cycle with inflation files
+        for source_cycle in range(cycle_i - 1, -1, -1):
+            all_exist = all(
+                self._stashed_path(source_cycle, f).exists() for f in self.active_files
+            )
+            if all_exist:
+                for filename in self.active_files:
+                    src = self._stashed_path(source_cycle, filename)
+                    dst = self.dart_work_dir / filename.replace("output", "input")
+                    utils.copy(src, dst)
+                    logger.info(
+                        f"Restored inflation file {filename} from cycle {source_cycle}"
+                    )
+                return source_cycle
+
+        return None

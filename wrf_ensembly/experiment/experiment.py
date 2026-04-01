@@ -200,7 +200,7 @@ class Experiment:
         self.paths = ExperimentPaths(experiment_path, self.cfg)
         self.obs = ExperimentObservations(self.cfg, self.cycles, self.paths)
         self.inflation = InflationConfig.from_config(
-            self.cfg, self.paths.data_inflation
+            self.cfg, self.paths.data_inflation, self.paths.dart_work_dir
         )
 
     def load_status_from_db(self):
@@ -313,19 +313,16 @@ class Experiment:
     def setup_dart(self):
         """Prepare DART working directory by writing namelist and linking files"""
 
-        dart_dir = self.cfg.directories.dart_root / "models" / "wrf" / "work"
+        dart_dir = self.paths.dart_work_dir
 
-        # Write namelist with inflation overrides
+        # Prepare inflation: restore restart files and apply namelist overrides
         filter_namelist_path = dart_dir / "input.nml"
         logger.info(f"Writing DART filter namelist to {filter_namelist_path}")
-        dart_namelist = self.inflation.apply_namelist_overrides(
+        dart_namelist = self.inflation.prepare_cycle(
             self.cfg.dart_namelist, self.current_cycle_i
         )
         dart_namelist["filter_nml"]["ens_size"] = self.cfg.assimilation.n_members
         write_namelist(dart_namelist, filter_namelist_path)
-
-        # Move inflation files into the DART work directory
-        self.inflation.pop_restart_files(self.current_cycle_i)
 
         # Copy files if defined in config
         for file_cfg in self.cfg.extra_dart_files:
@@ -335,8 +332,9 @@ class Experiment:
             else:
                 target_path = dart_dir / file_cfg.destination_name
             if not source_path.exists():
-                logger.error(f"Extra DART file not found at {source_path}")
-                return False
+                raise FileNotFoundError(
+                    f"Extra DART file not found at {source_path}"
+                )
             utils.copy(source_path, target_path)
             logger.info(f"Copied extra DART file from {source_path} to {target_path}")
 
@@ -630,7 +628,7 @@ class Experiment:
         self.setup_dart()
 
         # Grab observations
-        dart_dir = self.cfg.directories.dart_root / "models" / "wrf" / "work"
+        dart_dir = self.paths.dart_work_dir
         obs_seq = dart_dir / "obs_seq.out"
         obs_seq.unlink(missing_ok=True)
         utils.copy(obs_file, obs_seq)
@@ -689,7 +687,7 @@ class Experiment:
         # Keep obs_seq.final for diagnostics, convert to netcdf
         obs_seq_final = dart_dir / "obs_seq.final"
         utils.copy(
-            obs_seq,
+            obs_seq_final,
             self.paths.data_diag / f"cycle_{self.current_cycle_i}.obs_seq.final",
         )
         obs_seq_final_nc = self.paths.data_diag / f"cycle_{self.current_cycle_i}.nc"
