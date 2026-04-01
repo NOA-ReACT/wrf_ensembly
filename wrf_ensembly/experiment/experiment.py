@@ -624,7 +624,8 @@ class Experiment:
 
         # Skip filter if no observation file and no inflation enabled
         obs_file = self.paths.obs / f"cycle_{self.current_cycle_i:03}.obs_seq"
-        if not obs_file.exists() and not self.inflation.enabled:
+        obs_file_exists = obs_file.exists()
+        if not obs_file_exists and not self.inflation.enabled:
             logger.warning(
                 "No observation file and no inflation enabled, skipping filter"
             )
@@ -637,12 +638,20 @@ class Experiment:
         obs_seq = dart_dir / "obs_seq.out"
         obs_seq.unlink(missing_ok=True)
 
-        if obs_file.exists():
+        if obs_file_exists:
             utils.copy(obs_file, obs_seq)
         else:
             logger.warning(
-                f"Observation file for current cycle not found at {obs_file}"
+                f"Observation file for current cycle not found at {obs_file}, made empty placeholder"
             )
+            obs_seq.write_text("""obs_sequence
+           obs_type_definitions
+                      0
+             num_copies:            1  num_qc:            0
+             num_obs:            0  max_num_obs:            0
+           observation
+             first:           -1  last:           -1
+            """)
 
         # Write lists of input and output files
         # The input list is the latest forecast for each member
@@ -696,15 +705,16 @@ class Experiment:
             return False
 
         # Keep obs_seq.final for diagnostics, convert to netcdf
-        obs_seq_final = dart_dir / "obs_seq.final"
-        utils.copy(
-            obs_seq,
-            self.paths.data_diag / f"cycle_{self.current_cycle_i}.obs_seq.final",
-        )
-        obs_seq_final_nc = self.paths.data_diag / f"cycle_{self.current_cycle_i}.nc"
-        obs_sequence.obs_seq_to_nc(
-            self.cfg.directories.dart_root, obs_seq_final, obs_seq_final_nc
-        )
+        if obs_file_exists:
+            obs_seq_final = dart_dir / "obs_seq.final"
+            utils.copy(
+                obs_seq,
+                self.paths.data_diag / f"cycle_{self.current_cycle_i}.obs_seq.final",
+            )
+            obs_seq_final_nc = self.paths.data_diag / f"cycle_{self.current_cycle_i}.nc"
+            obs_sequence.obs_seq_to_nc(
+                self.cfg.directories.dart_root, obs_seq_final, obs_seq_final_nc
+            )
 
         # Stash inflation files so we can use them next cycle
         self.inflation.stash_restart_files(self.current_cycle_i)
