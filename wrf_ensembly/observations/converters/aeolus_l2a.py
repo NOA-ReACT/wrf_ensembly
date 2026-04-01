@@ -397,6 +397,9 @@ def _convert_ael_pro(
     qc_pass_3d = (
         ((quality_index_bins.astype(int) & _AEL_PRO_PROBLEM_BITS) == 0)
         & (extinction != -1)
+        & (
+            extinction < 1000
+        )  # Reject larger than 1e-3 1/m as potential clouds. Remember we are at 1/Mm now.
         & is_aerosol
     )
 
