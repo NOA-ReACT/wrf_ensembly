@@ -94,8 +94,8 @@ def _make_obs_df(
             "z_type": "height",
             "value": extinction_flat,
             "value_uncertainty": np.maximum(
-                extinction_flat * 0.3, 3e-5
-            ),  # Assume an uncertainty floor of 30e-6 based on O-B but allow scaling up
+                extinction_flat * 0.3, 1e-5
+            ),  # Assume an uncertainty floor of 1e-5 based on O-B but allow scaling up
             "qc_flag": qc_flags,
             "instrument": instrument,
             "quantity": "LIDAR_EXTINCTION_355nm",
