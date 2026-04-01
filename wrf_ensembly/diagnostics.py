@@ -90,6 +90,9 @@ def read_obs_seq_nc(path: Path) -> pd.DataFrame:
     result["dart_qc"] = ds["qc"].isel(qc_copy=dart_qc_index).values
     result["timestamp"] = pd.to_datetime(ds["time"].values)
 
+    # Observation error is given in variance, convert to stdev
+    result["obs_std"] = np.sqrt(result["obs_variance"])
+
     # Map obs_type IDs to names
     obs_type_raw = ds["obs_type"].values
     result["obs_type"] = np.array(
