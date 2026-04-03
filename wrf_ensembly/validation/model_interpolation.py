@@ -248,7 +248,7 @@ class ModelInterpolation:
                     SELECT rowid, time, x, y, z, latitude, longitude, value
                         {metadata_sql}
                     FROM observations
-                    WHERE instrument = ? AND quantity = ?
+                    WHERE instrument = ? AND quantity = ? AND qc_flag = 0
                     {instrument_filter}
                     """,
                     [instrument, quantity],
@@ -279,8 +279,6 @@ class ModelInterpolation:
             if source == "forecast":
                 cycle_end = forecast_mean.t.max()
                 batch_t = xr.where(batch_t > cycle_end, cycle_end, batch_t)
-                print("cycle_end:", cycle_end)
-                print("Max time,", batch_t.max())
 
             batch_x = xr.DataArray(arrays["x"], dims="obs")
             batch_y = xr.DataArray(arrays["y"], dims="obs")
