@@ -273,3 +273,56 @@ def generate_postprocess_jobfile(
     logger.info(f"Wrote jobfile to {jobfile}")
 
     return jobfile
+
+
+def generate_postprocess_array_jobfile(
+    exp: experiment.Experiment,
+    first_cycle: int,
+    last_cycle: int,
+    max_parallel: int,
+    clean: bool = False,
+) -> Path:
+    """
+    Generates a SLURM job array jobfile to run postprocessing for a range of cycles.
+    Each array task processes one cycle, using $SLURM_ARRAY_TASK_ID as the cycle index.
+
+    Args:
+        exp: The experiment
+        first_cycle: First cycle index (inclusive)
+        last_cycle: Last cycle index (inclusive)
+        max_parallel: Maximum number of array tasks running simultaneously
+        clean: Whether to clean the scratch directory after postprocessing.
+
+    Returns:
+        A Path object to the jobfile
+    """
+
+    exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
+
+    jobfile = exp.paths.jobfiles / f"postprocess_array_{first_cycle}_{last_cycle}.job.sh"
+    dynamic_directives = {
+        "job-name": f"{exp.cfg.metadata.name}_postprocess",
+        "output": f"{exp.paths.logs_slurm.resolve()}/%j-%a-postprocess.out",
+        "array": f"{first_cycle}-{last_cycle}%{max_parallel}",
+    }
+
+    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} postprocess {{subcommand}}"
+    commands = [
+        _build_command(base_cmd, "run", cycle="$SLURM_ARRAY_TASK_ID"),
+    ]
+
+    if clean:
+        commands.append(_build_command(base_cmd, "clean"))
+
+    jobfile.write_text(
+        templates.generate(
+            "slurm_job.sh.j2",
+            slurm_directives=exp.cfg.slurm.directives_postprocess | dynamic_directives,
+            env_modules=exp.cfg.slurm.env_modules,
+            commands=commands,
+            pre_commands=exp.cfg.slurm.pre_commands,
+        )
+    )
+    logger.info(f"Wrote array jobfile to {jobfile}")
+
+    return jobfile

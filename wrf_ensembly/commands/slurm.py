@@ -4,10 +4,9 @@ from typing import Optional
 
 import click
 
-from wrf_ensembly import external, jobfiles
+from wrf_ensembly import experiment, external, jobfiles
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
-from wrf_ensembly import experiment
 
 
 @click.group(name="slurm", cls=GroupWithStartEndPrint)
@@ -85,7 +84,13 @@ def postprocess(experiment_path: Path, cycle: int, clean_scratch: bool):
 @click.option(
     "--last-cycle",
     type=int,
-    help="Queue postprocessing for all cycles up to this one",
+    help="Queue postprocessing for all cycles up to this one (inclusive)",
+)
+@click.option(
+    "--max-parallel",
+    type=int,
+    default=30,
+    help="Maximum number of array tasks running in parallel",
 )
 @pass_experiment_path
 def queue_all_postprocessing(
@@ -93,30 +98,29 @@ def queue_all_postprocessing(
     clean_scratch: bool,
     first_cycle: Optional[int],
     last_cycle: Optional[int],
+    max_parallel: int,
 ):
-    """Queue postprocessing for all cycles of the experiment"""
+    """Queue postprocessing for all cycles of the experiment as a SLURM job array"""
 
     logger.setup("slurm-queue-all-postprocessing", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    min_cycle = 0
-    max_cycle = len(exp.cycles)
-    if last_cycle is not None and last_cycle <= max_cycle:
-        max_cycle = last_cycle
-    if first_cycle is not None and first_cycle > 0:
-        min_cycle = first_cycle
+    min_cycle = first_cycle if first_cycle is not None and first_cycle > 0 else 0
+    max_cycle = (
+        last_cycle
+        if last_cycle is not None and last_cycle < len(exp.cycles)
+        else len(exp.cycles) - 1
+    )
 
-    for i in range(min_cycle, max_cycle):
-        logger.info(f"Queueing postprocessing for cycle {i}...")
-        jf = jobfiles.generate_postprocess_jobfile(exp, i, clean_scratch)
+    logger.info(
+        f"Queueing postprocessing array for cycles {min_cycle}-{max_cycle} (max {max_parallel} parallel)..."
+    )
+    jf = jobfiles.generate_postprocess_array_jobfile(
+        exp, min_cycle, max_cycle, max_parallel, clean_scratch
+    )
 
-        res = external.runc(
-            [
-                *exp.cfg.slurm.sbatch_command.split(" "),
-                str(jf.resolve()),
-            ]
-        )
-        logger.info(f"Queued {jf} with ID {res.output.strip()}")
+    res = external.runc([*exp.cfg.slurm.sbatch_command.split(" "), str(jf.resolve())])
+    logger.info(f"Queued {jf} with array ID {res.output.strip()}")
 
 
 @slurm_cli.command()
