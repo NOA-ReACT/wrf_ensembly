@@ -1,3 +1,4 @@
+import datetime as dt
 from pathlib import Path
 
 import click
@@ -38,8 +39,23 @@ def interpolate_model(experiment_path: Path):
     multiple=True,
     help="Specific instrument-quantity pairs to analyze in dot notation (e.g., MODIS.AOD_550nm). Can be specified multiple times. Overrides config.",
 )
+@click.option(
+    "--start-time",
+    type=click.DateTime(),
+    help="First timestamp to consider in the analysis (ISO format)",
+)
+@click.option(
+    "--end-time",
+    type=click.DateTime(),
+    help="Last timestamp to consider in the analysis (ISO format)",
+)
 @pass_experiment_path
-def analyze_first_departures(experiment_path: Path, instrument_quantity: tuple):
+def analyze_first_departures(
+    experiment_path: Path,
+    instrument_quantity: tuple[str, ...],
+    start_time: dt.datetime | None = None,
+    end_time: dt.datetime | None = None,
+):
     """
     Analyze first departures (O-B) statistics for validation.
 
@@ -71,12 +87,10 @@ def analyze_first_departures(experiment_path: Path, instrument_quantity: tuple):
 
     # Load model-interpolated observations from DuckDB
     logger.info("Loading model interpolated data from DuckDB...")
-    df = exp.obs.get_model_interpolated()
+    df = exp.obs.get_model_interpolated(start_time, end_time)
     if df is None:
-        logger.error(
-            "No model-interpolated observations found in DuckDB. "
-            "Run 'wrf-ensembly validation interpolate-model' first."
-        )
+        logger.error("No model-interpolated observations found in DuckDB.")
+        logger.error("Run 'wrf-ensembly validation interpolate-model' first.")
         return
 
     # Keep only good QC observations to compare

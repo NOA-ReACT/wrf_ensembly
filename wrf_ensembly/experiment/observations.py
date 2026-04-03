@@ -1,3 +1,4 @@
+import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -388,18 +389,33 @@ class ExperimentObservations:
 
         return len(update_df)
 
-    def get_model_interpolated(self) -> pd.DataFrame | None:
+    def get_model_interpolated(
+        self,
+        start_date: dt.datetime | None = None,
+        end_date: dt.datetime | None = None,
+    ) -> pd.DataFrame | None:
         """
         Retrieves all observations that have a model_value set.
+
+        Args:
+            start_date: If set, only return observations at or after this time.
+            end_date: If set, only return observations before or at this time.
 
         Returns:
             DataFrame of observations with model_value, or None if none exist.
         """
 
+        query = "SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE model_forecast IS NOT NULL"
+        params = []
+        if start_date is not None:
+            query += " AND time >= ?"
+            params.append(start_date)
+        if end_date is not None:
+            query += " AND time <= ?"
+            params.append(end_date)
+
         with self._get_duckdb(read_only=True) as con:
-            result = con.execute(
-                "SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE model_forecast IS NOT NULL"
-            ).fetchdf()
+            result = con.execute(query, params).fetchdf()
 
         if result.empty:
             return None
