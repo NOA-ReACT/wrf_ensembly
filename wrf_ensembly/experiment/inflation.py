@@ -124,7 +124,12 @@ class InflationConfig:
             src = self.dart_work_dir / filename
             dst = self._stashed_path(cycle_i, filename)
             if src.exists():
-                src.rename(dst)
+                # Renaming won't work across filesystems, backup plan here
+                if src.stat().st_dev != dst.stat().st_dev:
+                    src.copy(dst)
+                    src.unlink()
+                else:
+                    src.rename(dst)
                 logger.info(f"Stashed inflation file {filename} for cycle {cycle_i}")
             else:
                 logger.warning(
