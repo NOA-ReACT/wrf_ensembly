@@ -119,33 +119,26 @@ env_modules = [
 ]
 mpirun_command = "srun"
 
-[slurm.directives_large]
+[slurm.directives.default]
 partition = "compute"
 nodes = 1
+mail-user = "ageorgiou@noa.gr"
+mail-type = "END,FAIL"
+account = "pr014048_thin"
+cpus-per-task = 1
+
+[slurm.directives.advance_model]
 ntasks-per-node = 20
-mail-user = "ageorgiou@noa.gr"
-mail-type = "END,FAIL"
-account = "pr014048_thin"
-cpus-per-task = 1
 
-[slurm.directives_small]
-partition = "compute"
-nodes = 1
+[slurm.directives.preprocess]
+ntasks-per-node = 20
+
+[slurm.directives.make_analysis]
 ntasks-per-node = 1
-mail-user = "ageorgiou@noa.gr"
-mail-type = "END,FAIL"
-account = "pr014048_thin"
-cpus-per-task = 1
 
-[slurm.directives_postproce]
-partition = "compute"
-nodes = 1
+[slurm.directives.postprocess]
 ntasks-per-node = 20
 ntasks = 20
-mail-user = "ageorgiou@noa.gr"
-mail-type = "END,FAIL"
-account = "pr014048_thin"
-cpus-per-task = 1
 
 [postprocess]
 # Shuffle + deflate

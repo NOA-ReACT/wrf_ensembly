@@ -433,6 +433,24 @@ class PerturbationsConfig:
 
 
 @dataclass
+class SlurmDirectivesConfig:
+    default: dict[str, str | int] = field(default_factory=dict)
+    """SLURM directives applied to all jobs as a baseline"""
+
+    advance_model: dict[str, str | int] = field(default_factory=dict)
+    """SLURM directives for ensemble member advance jobs (overrides default)"""
+
+    preprocess: dict[str, str | int] = field(default_factory=dict)
+    """SLURM directives for preprocessing jobs (WPS, real) (overrides default)"""
+
+    make_analysis: dict[str, str | int] = field(default_factory=dict)
+    """SLURM directives for filter/analysis/cycle jobs (overrides default)"""
+
+    postprocess: dict[str, str | int] = field(default_factory=dict)
+    """SLURM directives for postprocessing jobs (overrides default)"""
+
+
+@dataclass
 class SlurmConfig:
     sbatch_command: str = "sbatch --parsable"
     """Command for sbatch (should probably include `--parsable`)"""
@@ -449,14 +467,8 @@ class SlurmConfig:
     pre_commands: list[str] = field(default_factory=list)
     """Commands to run at the start of a job"""
 
-    directives_large: dict[str, str | int] = field(default_factory=dict)
-    """SLURM directives to add to the jobfile for big jobs (i.e., ensemble member advance)"""
-
-    directives_small: dict[str, str | int] = field(default_factory=dict)
-    """SLURM directives to add to small jobs (i.e., wrf-ensembly python steps)"""
-
-    directives_postprocess: dict[str, str | int] = field(default_factory=dict)
-    """SLURM directives to add to statistics jobs"""
+    directives: SlurmDirectivesConfig = field(default_factory=SlurmDirectivesConfig)
+    """Per-job-type SLURM directives; job-specific ones override the default"""
 
 
 @dataclass

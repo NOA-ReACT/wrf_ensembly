@@ -119,33 +119,25 @@ boundary_error_width = 1.0
 pre_commands = []
 mpirun_command = "mpirun -iface lo"
 
-[slurm.directives_large]
+[slurm.directives.default]
 partition = "iridium"
 nodes = 1
-ntasks-per-node = 12
 cpus-per-task = 1
+
+[slurm.directives.advance_model]
+ntasks-per-node = 12
 mem = '20G'
 
-[slurm.directives_small]
-partition = "iridium"
-nodes = 1
+[slurm.directives.preprocess]
+ntasks-per-node = 12
+mem = '20G'
+
+[slurm.directives.make_analysis]
 ntasks-per-node = 8
-cpus-per-task = 1
 mem = '16G'
 
-[slurm.directives_statistics]
-partition = "iridium"
-nodes = 1
-ntasks-per-node = 8
-ntasks = 1
-cpus-per-task = 1
-mem = '16G'
-
-[slurm.directives_postprocess]
-partition = "iridium"
-nodes = 1
+[slurm.directives.postprocess]
 ntasks = 24
-cpus-per-task = 1
 mem = '12G'
 
 [postprocess]

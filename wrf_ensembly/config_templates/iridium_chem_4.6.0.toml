@@ -113,24 +113,23 @@ pre_commands = [
 ]
 mpirun_command = "mpirun"
 
-[slurm.directives_large]
+[slurm.directives.default]
 partition = "iridium"
 nodes = 1
+cpus-per-task = 1
+
+[slurm.directives.advance_model]
 ntasks-per-node = 24
-cpus-per-task = 1
 
-[slurm.directives_small]
-partition = "iridium"
-nodes = 1
+[slurm.directives.preprocess]
+ntasks-per-node = 24
+
+[slurm.directives.make_analysis]
 ntasks-per-node = 1
-cpus-per-task = 1
 
-[slurm.directives_statistics]
-partition = "iridium"
-nodes = 1
+[slurm.directives.postprocess]
 ntasks-per-node = 32
 ntasks = 32
-cpus-per-task = 1
 
 [postprocess]
 # Only keep dust-related variables for debugging
