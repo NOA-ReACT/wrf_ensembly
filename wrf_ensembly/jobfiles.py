@@ -95,7 +95,11 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
 
 def generate_advance_jobfiles(exp: experiment.Experiment) -> list[Path]:
     """
-    Generates a SLURM jobfile to advance a given member in a given cycle.
+    Generates individual SLURM jobfiles to advance each non-advanced member.
+
+    .. deprecated::
+        Use :func:`generate_advance_array_jobfile` instead, which generates a single
+        SLURM job array file.
 
     Returns:
         A list of Path objects to the jobfiles
@@ -133,6 +137,62 @@ def generate_advance_jobfiles(exp: experiment.Experiment) -> list[Path]:
         logger.info(f"Jobfile for member {i} written to {jobfile}")
         files.append(jobfile)
     return files
+
+
+def generate_advance_array_jobfile(
+    exp: experiment.Experiment,
+    max_parallel: int | None = None,
+) -> tuple[Path, list[int]] | None:
+    """
+    Generates a single SLURM job array jobfile to advance all non-advanced members.
+    Each array task advances one member, using $SLURM_ARRAY_TASK_ID as the member index.
+
+    Args:
+        exp: The experiment
+        max_parallel: Maximum number of array tasks running simultaneously. If None, no limit.
+
+    Returns:
+        A tuple of (Path to jobfile, list of pending member indices), or None if all
+        members are already advanced.
+    """
+
+    pending = [m.i for m in exp.members if not m.advanced]
+    if not pending:
+        logger.info("All members already advanced, no jobfile generated")
+        return None
+
+    exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
+
+    array_spec = ",".join(str(i) for i in pending)
+    if max_parallel is not None:
+        array_spec += f"%{max_parallel}"
+
+    jobfile = exp.paths.jobfiles / "advance_members_array.job.sh"
+    dynamic_directives = {
+        "job-name": f"{exp.cfg.metadata.name}_advance_members",
+        "output": f"{exp.paths.logs_slurm.resolve()}/%j-%a-advance_member.out",
+        "array": array_spec,
+    }
+
+    base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} ensemble advance-member"
+    commands = [_build_command(base_cmd, "", member="$SLURM_ARRAY_TASK_ID")]
+
+    jobfile.write_text(
+        templates.generate(
+            "slurm_job.sh.j2",
+            slurm_directives=exp.cfg.slurm.directives.default
+            | exp.cfg.slurm.directives.advance_model
+            | dynamic_directives,
+            env_modules=exp.cfg.slurm.env_modules,
+            commands=commands,
+            pre_commands=exp.cfg.slurm.pre_commands,
+        )
+    )
+    logger.info(
+        f"Wrote array jobfile to {jobfile} for members {array_spec}"
+    )
+
+    return jobfile, pending
 
 
 def generate_make_analysis_jobfile(

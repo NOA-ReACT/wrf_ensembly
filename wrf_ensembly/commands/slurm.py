@@ -27,13 +27,15 @@ def preprocessing(experiment_path: Path):
 @slurm_cli.command()
 @pass_experiment_path
 def advance_members(experiment_path: Path):
-    """Create a SLURM jobfile to advance each member of the ensemble"""
+    """Create a SLURM job array file to advance each non-advanced member of the ensemble"""
 
-    logger.setup(f"slurm-advance-members", experiment_path)
+    logger.setup("slurm-advance-members", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    logger.info(f"Writing jobfiles advancing members...")
-    jobfiles.generate_advance_jobfiles(exp)
+    logger.info("Writing array jobfile for advancing members...")
+    result = jobfiles.generate_advance_array_jobfile(exp)
+    if result is None:
+        logger.info("All members already advanced, no jobfile generated")
 
 
 @slurm_cli.command()
@@ -177,30 +179,30 @@ def run_experiment(
         logger.error("Last cycle already advanced, experiment finished")
         sys.exit(1)
 
-    # Generate all member jobfiles, queue them and keep jobids
-    jfs = jobfiles.generate_advance_jobfiles(exp)
-
-    ids = []
-    for jf in jfs:
-        cmd = slurm_command.split(" ")
-        cmd.append(str(jf.resolve()))
-
-        res = external.runc(cmd)
+    # Generate and queue the advance members job array
+    advance_job_id: int | None = None
+    result = jobfiles.generate_advance_array_jobfile(exp)
+    if result is not None:
+        jf, pending_members = result
+        res = external.runc([*slurm_command.split(" "), str(jf.resolve())])
         if res.returncode != 0:
-            logger.error("Could not queue jobfile, output:")
+            logger.error("Could not queue array jobfile, output:")
             logger.error(res.output)
             exit(1)
 
-        id = int(res.output.strip())
-        ids.append(id)
-
-        logger.info(f"Queued {jf} with ID {id}")
+        advance_job_id = int(res.output.strip())
+        logger.info(
+            f"Queued {jf} with array job ID {advance_job_id} for {len(pending_members)} members"
+        )
 
     if only_advance:
-        logger.info(f"First JobID: {min(ids)}, last JobID: {max(ids)}")
+        if advance_job_id is not None:
+            logger.info(f"Advance array JobID: {advance_job_id}")
+        else:
+            logger.info("No members needed advancing")
         return
 
-    # Generate the analysis jobfile, queue it and keep jobid
+    # Generate the analysis jobfile, queue it with dependency on the advance array
     queue_next_cycle = all_cycles
     if run_until is not None and current_cycle.index == run_until:
         logger.warning("Reached --run-until limit, will not queue next cycle")
@@ -214,14 +216,16 @@ def run_experiment(
         clean_scratch,
         run_until,
     )
-    if len(ids) > 0:
-        dependency = "--dependency=afterok:" + ":".join(map(str, ids))
-        res = external.runc([*slurm_command.split(" "), dependency, str(jf.resolve())])
+    if advance_job_id is not None:
+        res = external.runc([
+            *slurm_command.split(" "),
+            f"--dependency=afterok:{advance_job_id}",
+            str(jf.resolve()),
+        ])
     else:
         res = external.runc([*slurm_command.split(" "), str(jf.resolve())])
 
     analysis_jobid = int(res.output.strip())
-    ids.append(analysis_jobid)
     logger.info(f"Queued {jf} with ID {analysis_jobid}")
 
     if run_postprocess:
@@ -236,6 +240,3 @@ def run_experiment(
             ]
         )
         logger.info(f"Queued {jf} with ID {res.output.strip()}")
-        ids.append(int(res.output.strip()))
-
-    logger.info(f"First JobID: {min(ids)}, last JobID: {max(ids)}")
