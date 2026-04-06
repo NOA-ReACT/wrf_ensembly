@@ -125,8 +125,8 @@ class InflationConfig:
             dst = self._stashed_path(cycle_i, filename)
             if src.exists():
                 # Renaming won't work across filesystems, backup plan here
-                if src.stat().st_dev != dst.stat().st_dev:
-                    src.copy(dst)
+                if src.stat().st_dev != dst.parent.stat().st_dev:
+                    utils.copy(src, dst)
                     src.unlink()
                 else:
                     src.rename(dst)
