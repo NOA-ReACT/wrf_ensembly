@@ -282,9 +282,9 @@ def load_processor_from_string(processor_spec: str, **kwargs) -> DataProcessor:
         module = importlib.import_module(module_path)
         processor_class = getattr(module, class_name)
 
-        if not issubclass(processor_class, DataProcessor):
+        if not hasattr(processor_class, "process"):
             raise ValueError(
-                f"Class {class_name} in {module_path} is not a subclass of DataProcessor"
+                f"Class {class_name} in {module_path} does not implement required 'process' method"
             )
 
         return processor_class(**kwargs)
