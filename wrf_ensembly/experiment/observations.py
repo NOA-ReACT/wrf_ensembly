@@ -286,30 +286,30 @@ class ExperimentObservations:
         if df.empty:
             return 0
 
-        # For each pair of instrument-quantity inside the data, check if there is a superob config definition
-        groups = []
-
+        # Apply superobs only to instrument-quantity pairs that have a config definition
         df["instrument_quantity"] = df["instrument"] + "." + df["quantity"]
-        for iq in df["instrument_quantity"].unique():
-            group = df.loc[df["instrument_quantity"] == iq]
+        superob_keys = set(df["instrument_quantity"].unique()) & set(
+            self.cfg.observations.superobs.keys()
+        )
 
-            if iq in self.cfg.observations.superobs:
+        if superob_keys:
+            needs_superobs = df["instrument_quantity"].isin(superob_keys)
+            groups = [df[~needs_superobs]]
+
+            for iq in superob_keys:
+                group = df.loc[df["instrument_quantity"] == iq]
                 superob_options = self.cfg.observations.superobs[iq]
 
                 before_n = len(group)
                 group = grid_bin(
                     group, superob_options.hoz_bin_sizes, superob_options.vert_bin_sizes
                 )
-                after_n = len(group)
-
                 print(
-                    f"{iq}: Generated {after_n} superobs from {before_n} observations."
+                    f"{iq}: Generated {len(group)} superobs from {before_n} observations."
                 )
+                groups.append(group)
 
-            groups.append(group)
-
-        # Reconcatenate everything into one dataframe
-        df = pd.concat(groups)
+            df = pd.concat(groups)
 
         # Convert orig_coords to a pyarrow-backed column so DuckDB sees it as STRUCT
         # (plain Python dicts get inferred as MAP, which can't be cast to STRUCT)
