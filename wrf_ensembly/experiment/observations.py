@@ -163,7 +163,7 @@ class ExperimentObservations:
 
         with self._get_duckdb(read_only=False) as con:
             result = con.execute(
-                f"DELETE FROM observations WHERE orig_filename = '{filename}'"
+                "DELETE FROM observations WHERE orig_filename = ?", [filename]
             )
             return result.rowcount
 
@@ -347,7 +347,7 @@ class ExperimentObservations:
         with self._get_duckdb(read_only=False) as con:
             # First, if observations from this file already exist, remove them
             con.execute(
-                f"DELETE FROM observations WHERE orig_filename = '{input_path.name}'"
+                "DELETE FROM observations WHERE orig_filename = ?", [input_path.name]
             )
 
             con.register("df_view", df)
