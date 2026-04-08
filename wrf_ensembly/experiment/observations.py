@@ -75,6 +75,18 @@ class ExperimentObservations:
                         da_cycle INT
             )"""
         )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_obs_time ON observations (time)"
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_obs_filename ON observations (orig_filename)"
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_obs_instrument_time ON observations (instrument, time)"
+        )
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_obs_da ON observations (da_cycle, used_in_da)"
+        )
         return con
 
     def get_available_quantities(self) -> list[dict]:
