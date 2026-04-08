@@ -386,10 +386,13 @@ class ExperimentObservations:
         col = f"model_{source}"
 
         with self._get_duckdb(read_only=False) as con:
-            con.execute(f"UPDATE observations SET {col} = NULL")
-
             update_df = df[["rowid", "model_value"]].copy()
             con.register("model_values_view", update_df)
+
+            # Clear old values only where they exist, then set new ones
+            con.execute(
+                f"UPDATE observations SET {col} = NULL WHERE {col} IS NOT NULL"
+            )
             con.execute(
                 f"""
                 UPDATE observations
