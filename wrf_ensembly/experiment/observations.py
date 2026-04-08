@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import duckdb
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 
@@ -10,7 +11,7 @@ from wrf_ensembly import external, wrf
 from wrf_ensembly import observations as obs
 from wrf_ensembly.config import Config
 from wrf_ensembly.console import logger
-from wrf_ensembly.cycling import CycleInformation
+from wrf_ensembly.cycling import CycleInformation, cycles_to_dataframe
 from wrf_ensembly.experiment.paths import ExperimentPaths
 from wrf_ensembly.superobs import grid_bin
 
@@ -232,11 +233,14 @@ class ExperimentObservations:
             smalled_dim_index = shape.argmin()
 
             # Create a column with the groups, excluding the fastest-changing dimension
-            df_subset["group_key"] = df_subset["orig_coords"].apply(
-                lambda x: tuple(
-                    idx for i, idx in enumerate(x["indices"]) if i != smalled_dim_index
-                )
+            indices_array = np.array(
+                [oc["indices"] for oc in df_subset["orig_coords"]]
             )
+            mask = np.ones(indices_array.shape[1], dtype=bool)
+            mask[smalled_dim_index] = False
+            df_subset["group_key"] = [
+                tuple(row) for row in indices_array[:, mask]
+            ]
 
             # Find groups with at least one observation inside the domain
             valid_groups = df_subset[df_subset["in_domain"]].groupby("group_key").size()
@@ -323,26 +327,6 @@ class ExperimentObservations:
         if df["time"].dt.tz is None:
             df["time"] = df["time"].dt.tz_localize("UTC")
 
-        # Mark observations that fall within a DA assimilation window
-        da_instruments = self.cfg.observations.instruments_to_assimilate
-        half_window = self.cfg.assimilation.half_window_length_minutes
-
-        df["used_in_da"] = False
-        df["da_cycle"] = pd.NA
-
-        for cycle in self.cycles:
-            start_time = pd.to_datetime(cycle.end) - pd.Timedelta(minutes=half_window)
-            end_time = pd.to_datetime(cycle.end) + pd.Timedelta(minutes=half_window)
-
-            in_window = (df["time"] >= start_time) & (df["time"] <= end_time)
-            if da_instruments is not None:
-                is_da_instrument = df["instrument"].isin(da_instruments)
-                df.loc[in_window & is_da_instrument, "used_in_da"] = True
-                df.loc[in_window & is_da_instrument, "da_cycle"] = cycle.index
-            else:
-                df.loc[in_window, "used_in_da"] = True
-                df.loc[in_window, "da_cycle"] = cycle.index
-
         # Grab a connection to the database and save the observations
         with self._get_duckdb(read_only=False) as con:
             # First, if observations from this file already exist, remove them
@@ -355,16 +339,51 @@ class ExperimentObservations:
                 """
                 INSERT INTO observations (
                     instrument, quantity, time, longitude, latitude, x, y, z, z_type,
-                    value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata,
-                    used_in_da, da_cycle
+                    value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata
                 )
                 SELECT
                     instrument, quantity, time, longitude, latitude, x, y, z, z_type,
-                    value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata,
-                    used_in_da, da_cycle
+                    value, value_uncertainty, qc_flag, orig_coords, orig_filename, metadata
                 FROM df_view
             """
             )
+
+            # Mark observations that fall within a DA assimilation window
+            cycles_df = cycles_to_dataframe(self.cycles)
+            half_window_td = pd.Timedelta(
+                minutes=self.cfg.assimilation.half_window_length_minutes
+            )
+            cycles_df["window_start"] = cycles_df["end_time"] - half_window_td
+            cycles_df["window_end"] = cycles_df["end_time"] + half_window_td
+            con.register("cycles_windows", cycles_df)
+
+            da_instruments = self.cfg.observations.instruments_to_assimilate
+            if da_instruments is not None:
+                placeholders = ", ".join("?" * len(da_instruments))
+                con.execute(
+                    f"""
+                    UPDATE observations
+                    SET used_in_da = TRUE, da_cycle = cw.cycle_index
+                    FROM cycles_windows cw
+                    WHERE observations.orig_filename = ?
+                      AND observations.time >= cw.window_start
+                      AND observations.time <= cw.window_end
+                      AND observations.instrument IN ({placeholders})
+                    """,
+                    [input_path.name, *da_instruments],
+                )
+            else:
+                con.execute(
+                    """
+                    UPDATE observations
+                    SET used_in_da = TRUE, da_cycle = cw.cycle_index
+                    FROM cycles_windows cw
+                    WHERE observations.orig_filename = ?
+                      AND observations.time >= cw.window_start
+                      AND observations.time <= cw.window_end
+                    """,
+                    [input_path.name],
+                )
 
         return len(df.index)
 
@@ -450,16 +469,7 @@ class ExperimentObservations:
         Returns:
             DataFrame with columns: cycle_index, total, to_assimilate
         """
-        cycles_df = pd.DataFrame(
-            [
-                {
-                    "cycle_index": c.index,
-                    "start_time": pd.Timestamp(c.start).tz_convert("UTC"),
-                    "end_time": pd.Timestamp(c.end).tz_convert("UTC"),
-                }
-                for c in cycles
-            ]
-        )
+        cycles_df = cycles_to_dataframe(cycles)
 
         with self._get_duckdb(read_only=True) as con:
             con.register("cycles_view", cycles_df)

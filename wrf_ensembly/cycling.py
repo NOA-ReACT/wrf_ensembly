@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Optional
 
+import pandas as pd
+
 from wrf_ensembly import config
 
 
@@ -15,6 +17,20 @@ class CycleInformation:
 
     def __str__(self):
         return f"Cycle #{self.index}: {self.start} -> {self.end}, Offset: {self.cycle_offset.seconds // 60 // 60}h"
+
+
+def cycles_to_dataframe(cycles: list[CycleInformation]) -> pd.DataFrame:
+    """Converts a list of CycleInformation to a DataFrame with cycle_index, start_time, end_time."""
+    return pd.DataFrame(
+        [
+            {
+                "cycle_index": c.index,
+                "start_time": pd.Timestamp(c.start).tz_convert("UTC"),
+                "end_time": pd.Timestamp(c.end).tz_convert("UTC"),
+            }
+            for c in cycles
+        ]
+    )
 
 
 def get_cycle_information(cfg: config.Config) -> list[CycleInformation]:
