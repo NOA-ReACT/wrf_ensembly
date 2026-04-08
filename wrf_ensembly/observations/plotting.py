@@ -129,9 +129,74 @@ def _plot_geom_aeolus_windresults(
     return fig
 
 
+def _plot_geom_map_swath(
+    ds: xr.Dataset,
+    inst_spec: InstrumentSpec,
+    qty_spec: QuantitySpec,
+    plot_metadata: dict[str, np.ndarray],
+    ax: Axes | None = None,
+    target_variable: str = "value",
+    proj: ccrs.Projection | None = None,
+    **kwargs,
+) -> Figure:
+    """Map plot for swath data (e.g. MSG SEVIRI) using pcolormesh on a cartopy projection.
+
+    The dataset must contain 2D `latitude` and `longitude` coordinate arrays.
+    Pass `proj` via `plot_kwargs` to use the model's native projection; defaults
+    to PlateCarree.
+    """
+    lon = ds["longitude"].to_numpy()
+    lat = ds["latitude"].to_numpy()
+    values = ds[target_variable].to_numpy()
+
+    lon_min, lon_max = float(np.nanmin(lon)), float(np.nanmax(lon))
+    lat_min, lat_max = float(np.nanmin(lat)), float(np.nanmax(lat))
+
+    if ax is None:
+        fig_width = 10
+        fig_height = fig_width * (lat_max - lat_min) / (lon_max - lon_min) + 1.5
+        fig = plt.figure(figsize=(fig_width, fig_height))
+        ax = fig.add_subplot(1, 1, 1, projection=proj or ccrs.PlateCarree())
+    else:
+        fig = ax.figure
+
+    vmin = kwargs.pop("vmin", qty_spec.vmin)
+    vmax = kwargs.pop("vmax", qty_spec.vmax)
+    cmap = kwargs.pop("cmap", qty_spec.cmap)
+
+    mesh = ax.pcolormesh(
+        lon,
+        lat,
+        values,
+        transform=ccrs.PlateCarree(),
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax,
+        **kwargs,
+    )
+
+    units = qty_spec.display_units or qty_spec.units
+    fig.colorbar(
+        mesh,
+        ax=ax,
+        label=f"{qty_spec.label} [{units}]",
+        pad=0.02,
+        orientation="horizontal",
+    )
+
+    ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=ccrs.PlateCarree())
+
+    ax.coastlines(linewidth=0.5)
+    ax.gridlines(linewidth=0.3, color="gray", alpha=0.5)
+    ax.set_title(inst_spec.label, fontsize=11)
+
+    return fig
+
+
 GEOMETRY_PLOTTERS = {
     Geometry.PROFILE_CURTAIN: _plot_geom_profile_curtain,
     Geometry.AEOLUS_WINDRESULTS: _plot_geom_aeolus_windresults,
+    Geometry.MAP_SWATH: _plot_geom_map_swath,
 }
 
 
@@ -273,9 +338,16 @@ def plot_observations_vs_model(
     default_widths = {
         Geometry.PROFILE_CURTAIN: (10, 4),
         Geometry.AEOLUS_WINDRESULTS: (12, 5),
+        Geometry.MAP_SWATH: (10, 8),
     }
     sw, sh = default_widths.get(inst_spec.geometry, (10, 4))
-    fig, axes = plt.subplots(1, 3, figsize=(sw * 3, sh))
+    proj = base_kwargs.pop("proj", None)
+    subplot_kw = (
+        {"projection": proj or ccrs.PlateCarree()}
+        if inst_spec.geometry.needs_geo_axes
+        else {}
+    )
+    fig, axes = plt.subplots(1, 3, figsize=(sw * 3, sh), subplot_kw=subplot_kw)
 
     # Panel 0: Observation
     obs_kwargs = {

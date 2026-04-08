@@ -16,6 +16,11 @@ class Geometry(str, Enum):
     AEOLUS_WINDRESULTS = "aeolus_windresults"
     TIMESERIES = "timeseries"
 
+    @property
+    def needs_geo_axes(self) -> bool:
+        """Whether this geometry requires a cartopy GeoAxes for plotting."""
+        return self in (Geometry.MAP_SWATH,)
+
 
 @dataclass(frozen=True)
 class AxisSpec:
