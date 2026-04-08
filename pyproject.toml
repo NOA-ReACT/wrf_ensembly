@@ -37,6 +37,7 @@ wrf-ensembly-obs = "wrf_ensembly.observations.cli:cli"
 
 [project.optional-dependencies]
 dev = ["ipykernel>=6.29.5"]
+msg-seviri = ["satpy", "pyresample"]
 docs = [
   "mkdocs>=1.6.1",
   "mkdocs-terminal>=4.7.0",

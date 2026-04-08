@@ -152,6 +152,12 @@ INSTRUMENT_REGISTRY: dict[str, InstrumentSpec] = {
         y=AxisSpec(dim="wind_result", label="Height [m]", coord="z"),
         plot_metadata_keys=("time_start", "time_stop", "alt_bottom", "alt_top"),
     ),
+    "MSG_SEVIRI": InstrumentSpec(
+        label="MSG SEVIRI",
+        geometry=Geometry.MAP_SWATH,
+        x=AxisSpec(dim="x", label="X", coord="longitude"),
+        y=AxisSpec(dim="y", label="Y", coord="latitude"),
+    ),
 }
 
 
@@ -164,6 +170,46 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         dart_quantity="LIDAR_EXTINCTION_355nm",
         display_units="1/Mm",
         display_scale=1e6,
+    ),
+    "BT_WV62": QuantitySpec(
+        label="Brightness Temperature WV 6.2 um",
+        units="K",
+        cmap="RdYlBu_r",
+        vmin=200,
+        vmax=260,
+        model_equivalent="WV62",
+    ),
+    "BT_WV73": QuantitySpec(
+        label="Brightness Temperature WV 7.3 um",
+        units="K",
+        cmap="RdYlBu_r",
+        vmin=210,
+        vmax=270,
+        model_equivalent="WV73",
+    ),
+    "BT_IR87": QuantitySpec(
+        label="Brightness Temperature IR 8.7 um",
+        units="K",
+        cmap="RdYlBu_r",
+        vmin=200,
+        vmax=310,
+        model_equivalent="IR87",
+    ),
+    "BT_IR108": QuantitySpec(
+        label="Brightness Temperature IR 10.8 um",
+        units="K",
+        cmap="RdYlBu_r",
+        vmin=200,
+        vmax=310,
+        model_equivalent="IR108",
+    ),
+    "BT_IR120": QuantitySpec(
+        label="Brightness Temperature IR 12.0 um",
+        units="K",
+        cmap="RdYlBu_r",
+        vmin=200,
+        vmax=310,
+        model_equivalent="IR120",
     ),
     "HLOS_WIND": QuantitySpec(
         label="Horizontal Line-of-Sight Wind",

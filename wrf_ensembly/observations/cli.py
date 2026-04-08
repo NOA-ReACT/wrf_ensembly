@@ -27,6 +27,7 @@ import click
 
 from wrf_ensembly.observations.converters import (
     HAS_AEOLUS_CONVERTERS,
+    HAS_MSG_SEVIRI_CONVERTER,
     aeronet_cli,
     earthcare_ebd_cli,
     modis_cli,
@@ -57,6 +58,7 @@ def convert_group():
 
     Some converters require extra dependencies:
         - `aeolus-l2a` and `aeolus-l2b`: `stcorp/coda`
+        - `msg-seviri`: `satpy`, `pyresample`
     """
     pass
 
@@ -66,6 +68,12 @@ convert_group.add_command(remotap_spexone_cli)
 convert_group.add_command(earthcare_ebd_cli)
 convert_group.add_command(viirs_cli)
 convert_group.add_command(modis_cli)
+
+# Only add MSG SEVIRI converter if 'satpy' and 'pyresample' are available
+if HAS_MSG_SEVIRI_CONVERTER:
+    from wrf_ensembly.observations.converters import msg_seviri_cli
+
+    convert_group.add_command(msg_seviri_cli)
 
 # Only add AEOLUS converters if the 'coda' library is available
 if HAS_AEOLUS_CONVERTERS:
