@@ -525,12 +525,18 @@ class ExperimentObservations:
 
         # Query the observations with duck db, find only files that overlap with the time window and instrument list
         with self._get_duckdb(read_only=True) as con:
-            observations = con.execute(
-                f"SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE time >= '{start_time}' AND time <= '{end_time}'"
-            ).fetchdf()
+            if instruments is not None:
+                placeholders = ", ".join("?" * len(instruments))
+                observations = con.execute(
+                    f"SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE time >= ? AND time <= ? AND instrument IN ({placeholders})",
+                    [start_time, end_time, *instruments],
+                ).fetchdf()
+            else:
+                observations = con.execute(
+                    "SELECT *, time AT TIME ZONE 'UTC' FROM observations WHERE time >= ? AND time <= ?",
+                    [start_time, end_time],
+                ).fetchdf()
 
-        if instruments is not None:
-            observations = observations[observations["instrument"].isin(instruments)]
         if observations.empty:
             return None
 
