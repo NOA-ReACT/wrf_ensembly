@@ -570,15 +570,16 @@ class ExperimentObservations:
 
         # Apply error inflation if configured
         if not observations.empty and self.cfg.observations.error_inflation_factor:
-
-            def inflate_error(row):
-                key = f"{row['instrument']}.{row['quantity']}"
-                factor = self.cfg.observations.error_inflation_factor.get(key, 1.0)
-                return row["value_uncertainty"] * factor
-
-            observations["value_uncertainty"] = observations.apply(
-                inflate_error, axis=1
+            factors_df = pd.DataFrame(
+                [
+                    {"instrument": k.split(".")[0], "quantity": k.split(".")[1], "factor": v}
+                    for k, v in self.cfg.observations.error_inflation_factor.items()
+                ]
             )
+            observations = observations.merge(factors_df, on=["instrument", "quantity"], how="left")
+            observations["factor"] = observations["factor"].fillna(1.0)
+            observations["value_uncertainty"] *= observations["factor"]
+            observations = observations.drop(columns=["factor"])
 
         return observations if not observations.empty else None
 
