@@ -447,28 +447,35 @@ class ExperimentObservations:
         Returns:
             DataFrame with columns: cycle_index, total, to_assimilate
         """
-        rows = []
+        cycles_df = pd.DataFrame(
+            [
+                {
+                    "cycle_index": c.index,
+                    "start_time": pd.Timestamp(c.start).tz_convert("UTC"),
+                    "end_time": pd.Timestamp(c.end).tz_convert("UTC"),
+                }
+                for c in cycles
+            ]
+        )
+
         with self._get_duckdb(read_only=True) as con:
-            for cycle in cycles:
-                result = con.execute(
-                    """
-                    SELECT
-                        COUNT(*) AS total,
-                        COUNT(*) FILTER (WHERE used_in_da AND da_cycle = ?) AS to_assimilate
-                    FROM observations
-                    WHERE time >= ? AND time <= ?
-                    """,
-                    [cycle.index, str(cycle.start), str(cycle.end)],
-                ).fetchone()
-                total, to_assimilate = result if result else (0, 0)
-                rows.append(
-                    {
-                        "cycle_index": cycle.index,
-                        "total": int(total),
-                        "to_assimilate": int(to_assimilate),
-                    }
-                )
-        return pd.DataFrame(rows, columns=["cycle_index", "total", "to_assimilate"])
+            con.register("cycles_view", cycles_df)
+            result = con.execute(
+                """
+                SELECT
+                    cw.cycle_index,
+                    COUNT(o.time) AS total,
+                    COUNT(o.time) FILTER (WHERE o.used_in_da AND o.da_cycle = cw.cycle_index) AS to_assimilate
+                FROM cycles_view cw
+                LEFT JOIN observations o ON o.time >= cw.start_time AND o.time <= cw.end_time
+                GROUP BY cw.cycle_index
+                ORDER BY cw.cycle_index
+                """
+            ).fetchdf()
+
+        result["total"] = result["total"].astype(int)
+        result["to_assimilate"] = result["to_assimilate"].astype(int)
+        return result
 
     def get_cycle_file_info(self, cycle: CycleInformation) -> pd.DataFrame:
         """
