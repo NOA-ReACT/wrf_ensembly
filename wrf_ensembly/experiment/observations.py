@@ -76,9 +76,7 @@ class ExperimentObservations:
                         da_cycle INT
             )"""
         )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_obs_time ON observations (time)"
-        )
+        con.execute("CREATE INDEX IF NOT EXISTS idx_obs_time ON observations (time)")
         con.execute(
             "CREATE INDEX IF NOT EXISTS idx_obs_filename ON observations (orig_filename)"
         )
@@ -233,14 +231,10 @@ class ExperimentObservations:
             smalled_dim_index = shape.argmin()
 
             # Create a column with the groups, excluding the fastest-changing dimension
-            indices_array = np.array(
-                [oc["indices"] for oc in df_subset["orig_coords"]]
-            )
+            indices_array = np.array([oc["indices"] for oc in df_subset["orig_coords"]])
             mask = np.ones(indices_array.shape[1], dtype=bool)
             mask[smalled_dim_index] = False
-            df_subset["group_key"] = [
-                tuple(row) for row in indices_array[:, mask]
-            ]
+            df_subset["group_key"] = [tuple(row) for row in indices_array[:, mask]]
 
             # Find groups with at least one observation inside the domain
             valid_groups = df_subset[df_subset["in_domain"]].groupby("group_key").size()
@@ -428,9 +422,7 @@ class ExperimentObservations:
             con.register("model_values_view", update_df)
 
             # Clear old values only where they exist, then set new ones
-            con.execute(
-                f"UPDATE observations SET {col} = NULL WHERE {col} IS NOT NULL"
-            )
+            con.execute(f"UPDATE observations SET {col} = NULL WHERE {col} IS NOT NULL")
             con.execute(
                 f"""
                 UPDATE observations
@@ -604,11 +596,17 @@ class ExperimentObservations:
         if not observations.empty and self.cfg.observations.error_inflation_factor:
             factors_df = pd.DataFrame(
                 [
-                    {"instrument": k.split(".")[0], "quantity": k.split(".")[1], "factor": v}
+                    {
+                        "instrument": k.split(".")[0],
+                        "quantity": k.split(".")[1],
+                        "factor": v,
+                    }
                     for k, v in self.cfg.observations.error_inflation_factor.items()
                 ]
             )
-            observations = observations.merge(factors_df, on=["instrument", "quantity"], how="left")
+            observations = observations.merge(
+                factors_df, on=["instrument", "quantity"], how="left"
+            )
             observations["factor"] = observations["factor"].fillna(1.0)
             observations["value_uncertainty"] *= observations["factor"]
             observations = observations.drop(columns=["factor"])
