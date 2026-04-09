@@ -331,6 +331,14 @@ class ObservationsConfig:
     are marked with qc_flag = -1 (validation hold-out) and remain in the database.
     """
 
+    temporal_binning: dict[str, int] = field(default_factory=dict)
+    """
+    Temporal binning configuration per instrument and quantity.
+    The key is the `instrument.quantity` string, e.g. `AERONET.AOD_550nm`.
+    The value is the bin width in minutes.
+    Incompatible with superobs (spatial grid binning) for the same instrument-quantity pair.
+    """
+
 
 @dataclass
 class FirstDeparturesRegimeConfig:

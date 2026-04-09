@@ -508,14 +508,7 @@ def plot_compare_obs_to_grid(
     cycle_info = exp.cycles[cycle]
 
     # Load observations
-    parquet_path = exp.paths.obs / f"cycle_{cycle_info.index:03d}.parquet"
-    if not parquet_path.is_file():
-        logger.error(
-            f"Cycle {cycle_info.index} parquet file {parquet_path} does not exist, "
-            "run `wrf-ensembly observations prepare-cycles` first"
-        )
-        return
-    obs = observations.io.read_obs(parquet_path)
+    obs = exp.obs.get_observations_for_cycle(cycle_info)
     if obs is None or obs.empty:
         logger.error(f"Cycle {cycle_info.index} has no observations, cannot plot")
         return
