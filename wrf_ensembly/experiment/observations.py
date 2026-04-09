@@ -13,7 +13,7 @@ from wrf_ensembly.config import Config
 from wrf_ensembly.console import logger
 from wrf_ensembly.cycling import CycleInformation, cycles_to_dataframe
 from wrf_ensembly.experiment.paths import ExperimentPaths
-from wrf_ensembly.superobs import grid_bin, stride_thin
+from wrf_ensembly.superobs import grid_bin, stride_thin, time_bin
 
 
 @dataclass
@@ -304,6 +304,42 @@ class ExperimentObservations:
                 groups.append(group)
 
             df = pd.concat(groups)
+
+        # Validate mutual exclusivity of spatial superobbing and temporal binning
+        overlap = set(self.cfg.observations.superobs) & set(
+            self.cfg.observations.temporal_binning
+        )
+        if overlap:
+            raise ValueError(
+                f"These instrument-quantity pairs appear in both 'superobs' and "
+                f"'temporal_binning' — they are mutually exclusive: {overlap}"
+            )
+
+        # Apply temporal binning (alternative to grid_bin, not in sequence)
+        temporal_keys = set(df["instrument_quantity"].unique()) & set(
+            self.cfg.observations.temporal_binning.keys()
+        )
+        if temporal_keys:
+            needs_temporal = df["instrument_quantity"].isin(temporal_keys)
+            parts = [df[~needs_temporal]]
+            for iq in temporal_keys:
+                group = df.loc[df["instrument_quantity"] == iq]
+                tb_cfg = self.cfg.observations.temporal_binning[iq]
+                before_n = len(group)
+                group = time_bin(group, tb_cfg.bin_minutes, tb_cfg.offset_minutes)
+                print(
+                    f"{iq}: Temporal binning: {len(group)} bins from {before_n} obs "
+                    f"({tb_cfg.bin_minutes} min windows, offset {tb_cfg.offset_minutes} min)."
+                )
+                parts.append(group)
+            # Normalise value_uncertainty to float64 across all parts before
+            # concat — AERONET and similar instruments leave it as None/object,
+            # which triggers a FutureWarning when mixed with float64 partitions.
+            parts = [
+                p.assign(value_uncertainty=pd.to_numeric(p["value_uncertainty"], errors="coerce"))
+                for p in parts
+            ]
+            df = pd.concat(parts)
 
         # Apply stride thinning (after superobbing)
         thinning_keys = set(df["instrument_quantity"].unique()) & set(

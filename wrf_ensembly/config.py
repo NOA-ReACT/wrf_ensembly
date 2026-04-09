@@ -266,6 +266,21 @@ class AssimilationConfig:
 
 
 @dataclass
+class TemporalBinConfig:
+    """Configuration for temporal binning of one instrument/quantity pair."""
+
+    bin_minutes: int
+    """Width of each time window in minutes."""
+
+    offset_minutes: int = 0
+    """
+    Shift bin boundaries by this many minutes relative to UTC midnight alignment.
+    For example, with bin_minutes=60 and offset_minutes=-30, bins run from :30 to :30,
+    centering each window on a full hour — useful when comparing against hourly model output.
+    """
+
+
+@dataclass
 class SuperObsConfig:
     """Configuration related to how we generate superobservations (or superobs) for one instrument/quantity pair"""
 
@@ -331,11 +346,11 @@ class ObservationsConfig:
     are marked with qc_flag = -1 (validation hold-out) and remain in the database.
     """
 
-    temporal_binning: dict[str, int] = field(default_factory=dict)
+    temporal_binning: dict[str, TemporalBinConfig] = field(default_factory=dict)
     """
     Temporal binning configuration per instrument and quantity.
     The key is the `instrument.quantity` string, e.g. `AERONET.AOD_550nm`.
-    The value is the bin width in minutes.
+    The value is a TemporalBinConfig instance.
     Incompatible with superobs (spatial grid binning) for the same instrument-quantity pair.
     """
 

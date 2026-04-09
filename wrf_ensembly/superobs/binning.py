@@ -169,6 +169,108 @@ def grid_bin(
     return result
 
 
+def time_bin(df: pd.DataFrame, bin_minutes: int, offset_minutes: int = 0) -> pd.DataFrame:
+    """
+    Bin observations into fixed-width UTC time windows using pandas time grouping.
+
+    By default bins are left-aligned to UTC midnight (00:00, 01:00, ...). Use
+    offset_minutes to shift boundaries — e.g. offset_minutes=-30 with bin_minutes=60
+    produces bins from :30 to :30, centering each window on a full hour.
+
+    Empty bins are dropped. The same uncertainty model as grid_bin is applied:
+    instrument error reduces with sqrt(n), representativeness error is the std of
+    values within the bin.
+
+    Incompatible with grid_bin (spatial superobbing) — the two operations produce
+    different orig_coords structures. After time_bin, orig_coords encodes a single
+    "time_bin" dimension.
+
+    Parameters:
+        df: Observations for a single (instrument, quantity) pair.
+        bin_minutes: Width of each time window in minutes.
+        offset_minutes: Shift bin boundaries by this many minutes (default 0).
+
+    Returns:
+        pd.DataFrame with same schema, one row per non-empty bin.
+    """
+    if df.empty:
+        return df.copy()
+
+    epoch = pd.Timestamp("1970-01-01", tz="UTC")
+    bin_seconds = bin_minutes * 60
+    offset_td = pd.Timedelta(minutes=offset_minutes)
+
+    grouped = df.groupby(
+        pd.Grouper(key="time", freq=f"{bin_minutes}min", offset=offset_td)
+    )
+    non_empty = [(ts, g) for ts, g in grouped if not g.empty]
+    if not non_empty:
+        return df.iloc[:0].copy()
+
+    # Shift ts back by the offset to get an epoch-aligned integer index
+    bin_indices = [
+        int((ts - offset_td - epoch).total_seconds() // bin_seconds)
+        for ts, _ in non_empty
+    ]
+    n_bins = max(bin_indices) + 1
+
+    def _agg(group: pd.DataFrame, bin_idx: int) -> pd.Series:
+        good = group[group["qc_flag"] == 0]
+        agg_group = good if not good.empty else group
+        qc = 0 if not good.empty else 1
+        n = len(agg_group)
+        first = agg_group.iloc[0]
+
+        mean_val = agg_group["value"].mean()
+
+        unc = agg_group["value_uncertainty"].dropna()
+        instr_err = (
+            float(np.sqrt((unc**2).mean()) / np.sqrt(len(unc))) if len(unc) > 0 else float("nan")
+        )
+        unc_val = first["value_uncertainty"]
+        repr_err = (
+            float(agg_group["value"].std())
+            if n > 1
+            else (float("nan") if pd.isna(unc_val) else float(unc_val))
+        )
+        components = [x**2 for x in (instr_err, repr_err) if not np.isnan(x)]
+        total_err = float(np.sqrt(sum(components))) if components else float("nan")
+
+        meta = dict(first["metadata"]) if first["metadata"] else {}
+        meta["superob"] = {
+            "n_contributing": n,
+            "repr_error": repr_err,
+            "instrument_error": instr_err,
+        }
+
+        return pd.Series(
+            {
+                "instrument": first["instrument"],
+                "quantity": first["quantity"],
+                "time": agg_group["time"].mean(),
+                "longitude": agg_group["longitude"].mean(),
+                "latitude": agg_group["latitude"].mean(),
+                "x": agg_group["x"].mean(),
+                "y": agg_group["y"].mean(),
+                "z": agg_group["z"].mean(),
+                "z_type": first["z_type"],
+                "value": mean_val,
+                "value_uncertainty": total_err,
+                "qc_flag": qc,
+                "orig_coords": {
+                    "indices": np.array([bin_idx], dtype=np.int32),
+                    "shape": np.array([n_bins], dtype=np.int32),
+                    "names": np.array(["time_bin"], dtype=object),
+                },
+                "orig_filename": first["orig_filename"],
+                "metadata": meta,
+            }
+        )
+
+    results = [_agg(g, idx) for (_, g), idx in zip(non_empty, bin_indices)]
+    return pd.DataFrame(results).reset_index(drop=True)
+
+
 def stride_thin(df: pd.DataFrame, n: int) -> pd.DataFrame:
     """
     Thin observations by keeping every N-th good-QC observation for DA.
