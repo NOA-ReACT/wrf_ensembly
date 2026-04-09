@@ -473,6 +473,11 @@ def plot_cycle_locations(experiment_path: Path, cycle: int):
     default=None,
     help="Filter observations to this quantity.",
 )
+@click.option(
+    "--keep-only-good-qc",
+    is_flag=True,
+    help="Keep only observations with good quality control (qc_flag = 0).",
+)
 @pass_experiment_path
 def plot_compare_obs_to_grid(
     experiment_path: Path,
@@ -482,6 +487,7 @@ def plot_compare_obs_to_grid(
     window_size: int,
     instrument: str | None,
     quantity: str | None,
+    keep_only_good_qc: bool,
 ):
     """
     Plot observation locations overlaid on the WRF model grid, zoomed in to compare
@@ -522,6 +528,13 @@ def plot_compare_obs_to_grid(
     if obs.empty:
         logger.error("No observations remaining after filtering")
         return
+
+    # Keep only good QC if requested
+    if keep_only_good_qc:
+        obs = obs[obs["qc_flag"] == 0]
+        if obs.empty:
+            logger.error("No observations remaining after filtering for good QC")
+            return
 
     # Load grid coordinates from wrfinput
     wrfinput_path = exp.paths.ic_path(0, 0)
