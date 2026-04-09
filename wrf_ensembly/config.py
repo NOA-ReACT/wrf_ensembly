@@ -283,6 +283,14 @@ class SuperObsConfig:
 
 
 @dataclass
+class ThinningConfig:
+    """Configuration for stride thinning of one instrument/quantity pair."""
+
+    keep_every_n: int
+    """Keep every N-th good-QC observation for DA; the rest become validation hold-outs (qc_flag = -1)."""
+
+
+@dataclass
 class ObservationsConfig:
     """Configuration related to observation preprocessing (mainly for the `observations preprocess-for-wrf` command)"""
 
@@ -312,6 +320,15 @@ class ObservationsConfig:
     Superobservation configuration per instrument and quantity.
     The key is the `instrument.quantity` string, e.g. `sonde.U`.
     The value is a `SuperObsConfig` instance.
+    """
+
+    thinning: dict[str, ThinningConfig] = field(default_factory=dict)
+    """
+    Stride thinning configuration per instrument and quantity.
+    The key is the `instrument.quantity` string, e.g. `AEOLUS_L2B_MIE.HLOS_WIND`.
+    The value is a `ThinningConfig` instance.
+    Thinning is applied after superobbing. Good-QC observations not selected for DA
+    are marked with qc_flag = -1 (validation hold-out) and remain in the database.
     """
 
 

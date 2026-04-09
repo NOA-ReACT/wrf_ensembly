@@ -5,6 +5,8 @@ import json
 import numpy as np
 import pandas as pd
 
+from wrf_ensembly.observations.io import QC_VALIDATION_HOLDOUT
+
 
 def parse_orig_coords(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -165,3 +167,32 @@ def grid_bin(
     result = df.groupby(group_cols, group_keys=False).apply(_agg).reset_index(drop=True)
 
     return result
+
+
+def stride_thin(df: pd.DataFrame, n: int) -> pd.DataFrame:
+    """
+    Thin observations by keeping every N-th good-QC observation for DA.
+
+    Good-QC observations (qc_flag == 0) are sorted by time, then every n-th
+    is kept with qc_flag = 0 (for DA). The rest are marked
+    qc_flag = QC_VALIDATION_HOLDOUT so they remain available for validation
+    but are excluded from DA. Bad-QC observations are left unchanged.
+
+    Parameters:
+        df: Observations for a single (instrument, quantity) pair.
+        n:  Keep every n-th good-QC observation. n=1 means keep all (no-op for DA).
+
+    Returns:
+        pd.DataFrame with same schema, same number of rows.
+    """
+    df = df.copy()
+
+    good_mask = df["qc_flag"] == 0
+    good_idx = df[good_mask].sort_values("time").index
+
+    keep_idx = good_idx[::n]
+    holdout_idx = good_idx.difference(keep_idx)
+
+    df.loc[holdout_idx, "qc_flag"] = QC_VALIDATION_HOLDOUT
+
+    return df

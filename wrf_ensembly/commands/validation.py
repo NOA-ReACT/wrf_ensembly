@@ -93,8 +93,8 @@ def analyze_first_departures(
         logger.error("Run 'wrf-ensembly validation interpolate-model' first.")
         return
 
-    # Keep only good QC observations to compare
-    df = df.loc[df["qc_flag"] == 0]
+    # Keep good QC observations and validation hold-outs (qc_flag = -1) for comparison
+    df = df.loc[df["qc_flag"].isin([0, -1])]
 
     # Determine which instrument-quantity pairs to analyze
     pairs_to_analyze = []

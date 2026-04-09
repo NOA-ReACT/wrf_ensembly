@@ -248,7 +248,7 @@ class ModelInterpolation:
                     SELECT rowid, time, x, y, z, latitude, longitude, value
                         {metadata_sql}
                     FROM observations
-                    WHERE instrument = ? AND quantity = ? AND qc_flag = 0
+                    WHERE instrument = ? AND quantity = ? AND qc_flag IN (0, -1)
                     {instrument_filter}
                     """,
                     [instrument, quantity],

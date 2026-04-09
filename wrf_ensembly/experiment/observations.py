@@ -13,7 +13,7 @@ from wrf_ensembly.config import Config
 from wrf_ensembly.console import logger
 from wrf_ensembly.cycling import CycleInformation, cycles_to_dataframe
 from wrf_ensembly.experiment.paths import ExperimentPaths
-from wrf_ensembly.superobs import grid_bin
+from wrf_ensembly.superobs import grid_bin, stride_thin
 
 
 @dataclass
@@ -310,6 +310,25 @@ class ExperimentObservations:
                 groups.append(group)
 
             df = pd.concat(groups)
+
+        # Apply stride thinning (after superobbing)
+        thinning_keys = set(df["instrument_quantity"].unique()) & set(
+            self.cfg.observations.thinning.keys()
+        )
+        if thinning_keys:
+            parts = [df[~df["instrument_quantity"].isin(thinning_keys)]]
+            for iq in thinning_keys:
+                group = df.loc[df["instrument_quantity"] == iq].copy()
+                thin_opts = self.cfg.observations.thinning[iq]
+                before_good = (group["qc_flag"] == 0).sum()
+                group = stride_thin(group, thin_opts.keep_every_n)
+                after_good = (group["qc_flag"] == 0).sum()
+                print(
+                    f"{iq}: Thinned to {after_good} DA obs from {before_good} good-QC obs "
+                    f"(keep_every_n={thin_opts.keep_every_n})."
+                )
+                parts.append(group)
+            df = pd.concat(parts)
 
         # Convert orig_coords to a pyarrow-backed column so DuckDB sees it as STRUCT
         # (plain Python dicts get inferred as MAP, which can't be cast to STRUCT)

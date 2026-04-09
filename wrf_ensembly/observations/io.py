@@ -23,6 +23,13 @@ REQUIRED_COLUMNS = [
 
 Z_TYPES = ["surface", "pressure", "height", "model_level", "columnar"]
 
+QC_VALIDATION_HOLDOUT = -1
+"""
+Observation is good quality but held out from DA for independent validation.
+Negative value signals a system/configuration reason (not a source observation fault).
+Used by stride thinning. The validation pipeline includes these; the DA pipeline does not.
+"""
+
 
 def validate_schema(df: pd.DataFrame):
     """
