@@ -524,11 +524,7 @@ def plot_compare_obs_to_grid(
         return
 
     # Load grid coordinates from wrfinput
-    if not exp.cfg.data.per_member_meteorology:
-        wrfinput_path = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
-    else:
-        wrfinput_path = exp.paths.data_icbc / "member_00" / "wrfinput_d01_cycle_0"
-
+    wrfinput_path = exp.paths.ic_path(0, 0)
     if not wrfinput_path.exists():
         logger.error(f"wrfinput file not found at {wrfinput_path}")
         return
