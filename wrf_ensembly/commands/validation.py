@@ -85,17 +85,6 @@ def analyze_first_departures(
         )
         proj = None
 
-    # Load model-interpolated observations from DuckDB
-    logger.info("Loading model interpolated data from DuckDB...")
-    df = exp.obs.get_model_interpolated(start_time, end_time)
-    if df is None:
-        logger.error("No model-interpolated observations found in DuckDB.")
-        logger.error("Run 'wrf-ensembly validation interpolate-model' first.")
-        return
-
-    # Keep good QC observations and validation hold-outs (qc_flag = -1) for comparison
-    df = df.loc[df["qc_flag"].isin([0, -1])]
-
     # Determine which instrument-quantity pairs to analyze
     pairs_to_analyze = []
 
@@ -107,8 +96,8 @@ def analyze_first_departures(
                     f"Invalid pair format: {pair_str}. Expected format: 'instrument.quantity'"
                 )
                 return
-            instrument, quantity = pair_str.split(".", 1)
-            pairs_to_analyze.append((instrument, quantity))
+            instr, qty = pair_str.split(".", 1)
+            pairs_to_analyze.append((instr, qty))
         logger.info(
             f"Analyzing pairs from command line: {[f'{i}.{q}' for i, q in pairs_to_analyze]}"
         )
@@ -120,39 +109,45 @@ def analyze_first_departures(
                     f"Invalid pair format in config: {pair_str}. Expected format: 'instrument.quantity'"
                 )
                 return
-            instrument, quantity = pair_str.split(".", 1)
-            pairs_to_analyze.append((instrument, quantity))
+            instr, qty = pair_str.split(".", 1)
+            pairs_to_analyze.append((instr, qty))
         logger.info(
             f"Analyzing pairs from config: {[f'{i}.{q}' for i, q in pairs_to_analyze]}"
         )
     else:
-        # Use all available pairs
-        pairs_to_analyze = df.groupby(["instrument", "quantity"]).size().index.tolist()
+        # Use all available pairs from DuckDB
+        pairs_to_analyze = exp.obs.get_model_interpolated_pairs(start_time, end_time)
         logger.info(
             f"No pairs specified, analyzing all available: {[f'{i}.{q}' for i, q in pairs_to_analyze]}"
         )
-
-    # Filter to pairs that exist in the data
-    available_pairs = set(df.groupby(["instrument", "quantity"]).size().index.tolist())
-    pairs_to_analyze = [
-        (i, q) for i, q in pairs_to_analyze if (i, q) in available_pairs
-    ]
 
     if not pairs_to_analyze:
         logger.warning("No pairs to analyze!")
         return
 
-    # Analyze each instrument-quantity pair
+    # When pairs were specified (not discovered), validate against what's in the DB
+    if instrument_quantity or exp.cfg.validation.first_departures.instrument_quantity_pairs:
+        available_pairs = set(exp.obs.get_model_interpolated_pairs(start_time, end_time))
+        pairs_to_analyze = [(i, q) for i, q in pairs_to_analyze if (i, q) in available_pairs]
+        if not pairs_to_analyze:
+            logger.warning("None of the specified pairs have model-interpolated data!")
+            logger.warning("Run 'wrf-ensembly validation interpolate-model' first.")
+            return
+
+    # Analyze each instrument-quantity pair, loading data from DuckDB per pair
     for instrument, quantity in pairs_to_analyze:
         logger.info(f"\n{'-' * 60}")
         logger.info(f"Analyzing {instrument}.{quantity}")
 
-        # Filter data for this instrument-quantity pair
-        pair_df = df[
-            (df["instrument"] == instrument) & (df["quantity"] == quantity)
-        ].copy()
+        pair_df = exp.obs.get_model_interpolated_for_pair(
+            instrument,
+            quantity,
+            qc_flags=[0, -1],
+            start_date=start_time,
+            end_date=end_time,
+        )
 
-        if len(pair_df) == 0:
+        if pair_df is None or len(pair_df) == 0:
             logger.warning(f"No data found for {instrument}.{quantity}, skipping")
             continue
 

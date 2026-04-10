@@ -506,6 +506,94 @@ class ExperimentObservations:
 
         return result
 
+    def get_model_interpolated_pairs(
+        self,
+        start_date: dt.datetime | None = None,
+        end_date: dt.datetime | None = None,
+    ) -> list[tuple[str, str]]:
+        """
+        Returns distinct (instrument, quantity) pairs that have model_forecast values.
+
+        Args:
+            start_date: If set, only consider observations at or after this time.
+            end_date: If set, only consider observations before or at this time.
+
+        Returns:
+            List of (instrument, quantity) tuples.
+        """
+        query = "SELECT DISTINCT instrument, quantity FROM observations WHERE model_forecast IS NOT NULL"
+        params = []
+        if start_date is not None:
+            query += " AND time >= ?"
+            params.append(start_date)
+        if end_date is not None:
+            query += " AND time <= ?"
+            params.append(end_date)
+
+        with self._get_duckdb(read_only=True) as con:
+            result = con.execute(query, params).fetchdf()
+
+        return list(result.itertuples(index=False, name=None))
+
+    def get_model_interpolated_for_pair(
+        self,
+        instrument: str,
+        quantity: str,
+        qc_flags: list[int] | None = None,
+        start_date: dt.datetime | None = None,
+        end_date: dt.datetime | None = None,
+    ) -> pd.DataFrame | None:
+        """
+        Retrieves observations for a specific instrument/quantity pair that have model_forecast set.
+
+        Only fetches the columns needed for first-departures analysis, avoiding loading
+        large metadata columns like orig_coords or metadata JSON.
+
+        Args:
+            instrument: Instrument name to filter by.
+            quantity: Quantity name to filter by.
+            qc_flags: If set, only return observations with qc_flag in this list.
+            start_date: If set, only return observations at or after this time.
+            end_date: If set, only return observations before or at this time.
+
+        Returns:
+            DataFrame of observations, or None if none exist.
+        """
+        query = """
+            SELECT
+                instrument, quantity,
+                time AT TIME ZONE 'UTC' AS time,
+                latitude, longitude,
+                value, model_forecast, model_analysis, qc_flag
+            FROM observations
+            WHERE model_forecast IS NOT NULL
+              AND instrument = ?
+              AND quantity = ?
+        """
+        params: list = [instrument, quantity]
+
+        if qc_flags is not None:
+            placeholders = ", ".join("?" * len(qc_flags))
+            query += f" AND qc_flag IN ({placeholders})"
+            params.extend(qc_flags)
+        if start_date is not None:
+            query += " AND time >= ?"
+            params.append(start_date)
+        if end_date is not None:
+            query += " AND time <= ?"
+            params.append(end_date)
+
+        with self._get_duckdb(read_only=True) as con:
+            result = con.execute(query, params).fetchdf()
+
+        if result.empty:
+            return None
+
+        if result["time"].dt.tz is None:
+            result["time"] = result["time"].dt.tz_localize("UTC")
+
+        return result
+
     def get_cycle_summary(self, cycles: list[CycleInformation]) -> pd.DataFrame:
         """
         Returns a summary of observations per cycle: total count and how many are to be assimilated.
