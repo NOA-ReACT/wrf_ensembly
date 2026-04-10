@@ -233,6 +233,38 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         ),
         dart_quantity="SAT_HLOS_WIND",
     ),
+    "AOD_355nm": QuantitySpec(
+        label="Aerosol Optical Depth @ 355nm",
+        units="",
+        cmap="Oranges",
+        vmin=0,
+        vmax=2,
+        model_equivalent="AOD_355",
+    ),
+    "AOD_500nm": QuantitySpec(
+        label="Aerosol Optical Depth @ 500nm",
+        units="",
+        cmap="Oranges",
+        vmin=0,
+        vmax=2,
+        model_equivalent="AOD_500",
+    ),
+    "AOD_550nm": QuantitySpec(
+        label="Aerosol Optical Depth @ 550nm",
+        units="",
+        cmap="Oranges",
+        vmin=0,
+        vmax=2,
+        model_equivalent="AOD_550",
+    ),
+    "AOD_1064nm": QuantitySpec(
+        label="Aerosol Optical Depth @ 1064nm",
+        units="",
+        cmap="Oranges",
+        vmin=0,
+        vmax=2,
+        model_equivalent="AOD_1064",
+    ),
 }
 
 
