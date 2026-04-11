@@ -28,6 +28,9 @@ class FirstDeparturesStatistics:
     q25: float
     median: float
     q75: float
+    norm_bias: float
+    norm_std: float
+    spread_to_obserr_ratio: float
 
 
 class FirstDeparturesAnalysis:
@@ -147,6 +150,12 @@ class FirstDeparturesAnalysis:
             Statistics dataclass
         """
         departure = df["departure"].dropna()
+        d = df.dropna(
+            subset=["departure", "model_forecast_spread", "value_uncertainty"]
+        )
+        total_var = d["model_forecast_spread"] ** 2 + d["value_uncertainty"] ** 2
+        valid = total_var > 0
+        normalised = d.loc[valid, "departure"] / np.sqrt(total_var[valid])
 
         stats = FirstDeparturesStatistics(
             count=len(departure),
@@ -158,6 +167,14 @@ class FirstDeparturesAnalysis:
             q25=float(departure.quantile(0.25)),
             median=float(departure.median()),
             q75=float(departure.quantile(0.75)),
+            norm_bias=float(normalised.mean()),
+            norm_std=float(normalised.std()),
+            spread_to_obserr_ratio=float(
+                (
+                    d.loc[valid, "model_forecast_spread"]
+                    / d.loc[valid, "value_uncertainty"]
+                ).mean()
+            ),
         )
 
         logger.info(f"Statistics for {self.instrument}.{self.quantity}:")
@@ -165,6 +182,9 @@ class FirstDeparturesAnalysis:
         logger.info(f"  Bias: {stats.bias:.6f}")
         logger.info(f"  Std: {stats.std:.6f}")
         logger.info(f"  RMSE: {stats.rmse:.6f}")
+        logger.info(f"  Normalised innovation mean: {stats.norm_bias:+.3f}")
+        logger.info(f"  Normalised innovation std: {stats.norm_std:.3f}")
+        logger.info(f"  Mean σ_B / σ_o ratio: {stats.spread_to_obserr_ratio:.3f}")
 
         return stats
 

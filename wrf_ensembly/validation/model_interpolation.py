@@ -1,6 +1,7 @@
 """Model interpolation to observation locations and times."""
 
 import glob
+import math
 
 import numpy as np
 import pandas as pd
@@ -25,13 +26,16 @@ class ModelInterpolation:
 
     exp: Experiment
 
-    def __init__(self, experiment: Experiment):
+    def __init__(self, experiment: Experiment, batch_size: int = 10_000_000):
         """Initialize with an experiment.
 
         Args:
             experiment: The experiment to perform validation on
+            batch_size: Maximum number of observations to interpolate in a
+                single pass. Larger values are faster but use more memory.
         """
         self.exp = experiment
+        self.batch_size = batch_size
 
     def run(self) -> int:
         """Run the model interpolation.
@@ -56,16 +60,38 @@ class ModelInterpolation:
 
         n_updated = 0
 
+        # Vertical coordinate variables live in the mean files and must not
+        # be taken from the sd files (which contain ensemble spread, not actual
+        # coordinate values).
+        vert_coord_vars = ["air_pressure", "geopotential_height", "z"]
+
         for source in ("forecast", "analysis"):
-            logger.info(f"Interpolating with {source} files")
-            ds = self._open_files(source, list(needed_vars))
-            if ds is None:
+            logger.info(f"Interpolating mean with {source} files")
+            ds_mean = self._open_files(source, list(needed_vars), file_type="mean")
+            if ds_mean is None:
                 logger.warning(
-                    f"No {source} files found, skipping {source} interpolation"
+                    f"No {source} mean files found, skipping {source} interpolation"
                 )
                 continue
-            result_df = self._interpolate_all(needed_combos, ds, source)
+            result_df = self._interpolate_all(needed_combos, ds_mean, source)
             n_updated += self._save_output(result_df, source)
+
+            logger.info(f"Interpolating spread with {source} files")
+            sd_vars = [v for v in needed_vars if v not in vert_coord_vars]
+            ds_sd = self._open_files(source, sd_vars, file_type="sd")
+            if ds_sd is None:
+                logger.warning(
+                    f"No {source} sd files found, skipping {source} spread interpolation"
+                )
+                continue
+
+            # Inject actual vertical coordinates from the mean dataset
+            for v in vert_coord_vars:
+                if v in ds_mean.data_vars:
+                    ds_sd[v] = ds_mean[v]
+
+            spread_df = self._interpolate_all(needed_combos, ds_sd, source)
+            n_updated += self._save_spread_output(spread_df, source)
 
         return n_updated
 
@@ -132,12 +158,16 @@ class ModelInterpolation:
 
         return needed_combos
 
-    def _open_files(self, source: str, needed_vars: list[str]) -> xr.Dataset | None:
-        """Open forecast or analysis mean files as a single lazy xarray Dataset.
+    def _open_files(
+        self, source: str, needed_vars: list[str], file_type: str = "mean"
+    ) -> xr.Dataset | None:
+        """Open forecast or analysis files as a single lazy xarray Dataset.
 
         Args:
             source: Either 'forecast' or 'analysis'
             needed_vars: List of WRF variable names to load
+            file_type: Either 'mean' or 'sd', selects which ensemble statistic
+                files to open
 
         Returns:
             Lazy xarray Dataset with only the needed variables, or None if no
@@ -147,13 +177,9 @@ class ModelInterpolation:
             ValueError: If duplicate coordinates are found
         """
         if source == "forecast":
-            glob_pattern = (
-                f"{self.exp.paths.data_forecasts}/cycle_**/{source}_mean_cycle_*.nc"
-            )
+            glob_pattern = f"{self.exp.paths.data_forecasts}/cycle_**/{source}_{file_type}_cycle_*.nc"
         else:
-            glob_pattern = (
-                f"{self.exp.paths.data_analysis}/cycle_**/{source}_mean_cycle_*.nc"
-            )
+            glob_pattern = f"{self.exp.paths.data_analysis}/cycle_**/{source}_{file_type}_cycle_*.nc"
 
         if not glob.glob(glob_pattern):
             return None
@@ -248,7 +274,7 @@ class ModelInterpolation:
                     SELECT rowid, time, x, y, z, latitude, longitude, value
                         {metadata_sql}
                     FROM observations
-                    WHERE instrument = ? AND quantity = ? AND qc_flag IN (0, -1)
+                    WHERE instrument = ? AND quantity = ? -- AND qc_flag IN (0, -1)
                     {instrument_filter}
                     """,
                     [instrument, quantity],
@@ -280,38 +306,56 @@ class ModelInterpolation:
                 cycle_end = forecast_mean.t.max()
                 batch_t = xr.where(batch_t > cycle_end, cycle_end, batch_t)
 
-            batch_x = xr.DataArray(arrays["x"], dims="obs")
-            batch_y = xr.DataArray(arrays["y"], dims="obs")
+            wrf_var = quantity_info.model_equivalent
 
-            if quantity_info.operator is not None:
-                model_vals = self._apply_operator(
-                    forecast_mean,
-                    quantity_info.operator,
-                    z_type,
-                    batch_t,
-                    batch_x,
-                    batch_y,
-                    arrays,
-                )
-            else:
-                wrf_var = quantity_info.model_equivalent
-                model_vals = self._interpolate_simple(
-                    forecast_mean,
-                    wrf_var,
-                    z_type,
-                    batch_t,
-                    batch_x,
-                    batch_y,
-                    arrays["z"],
+            n_chunks = math.ceil(n_obs / self.batch_size)
+            if n_chunks > 1:
+                logger.info(
+                    f"  Splitting {n_obs} observations into {n_chunks} chunks of {self.batch_size}"
                 )
 
-            chunk_df = pd.DataFrame(
-                {
-                    "rowid": arrays["rowid"],
-                    "model_value": model_vals,
-                }
-            )
-            all_results.append(chunk_df)
+            for chunk_idx in range(n_chunks):
+                start = chunk_idx * self.batch_size
+                end = min(start + self.batch_size, n_obs)
+                if n_chunks > 1:
+                    logger.info(
+                        f"  Chunk {chunk_idx + 1}/{n_chunks} (obs {start}–{end - 1})"
+                    )
+
+                chunk_arrays = {k: v[start:end] for k, v in arrays.items()}
+                chunk_t = batch_t[start:end]
+                chunk_x = xr.DataArray(arrays["x"][start:end], dims="obs")
+                chunk_y = xr.DataArray(arrays["y"][start:end], dims="obs")
+
+                if quantity_info.operator is not None:
+                    model_vals = self._apply_operator(
+                        forecast_mean,
+                        quantity_info.operator,
+                        z_type,
+                        chunk_t,
+                        chunk_x,
+                        chunk_y,
+                        chunk_arrays,
+                    )
+                else:
+                    model_vals = self._interpolate_simple(
+                        forecast_mean,
+                        wrf_var,
+                        z_type,
+                        chunk_t,
+                        chunk_x,
+                        chunk_y,
+                        chunk_arrays["z"],
+                    )
+
+                all_results.append(
+                    pd.DataFrame(
+                        {
+                            "rowid": chunk_arrays["rowid"],
+                            "model_value": model_vals,
+                        }
+                    )
+                )
 
         return pd.concat(all_results, ignore_index=True)
 
@@ -421,25 +465,58 @@ class ModelInterpolation:
             )
             return np.full(n_obs, np.nan)
 
-        # Interpolate each required model field
+        # Split fields by dimensionality so we can batch the horizontal
+        # interpolation into as few dask graph evaluations as possible.
+        fields_2d = [f for f in operator.required_model_fields if f.dims == 2]
+        fields_3d = [f for f in operator.required_model_fields if f.dims == 3]
+
         model_fields: dict[str, np.ndarray] = {}
-        for field_spec in operator.required_model_fields:
-            if field_spec.dims == 2:
-                model_fields[field_spec.name] = (
-                    forecast_mean[field_spec.name]
+
+        # Batch all 2D fields in a single interp + compute
+        if fields_2d:
+            names_2d = [f.name for f in fields_2d]
+            interp_2d = (
+                forecast_mean[names_2d]
+                .interp(t=batch_t, x=batch_x, y=batch_y)
+                .compute()
+            )
+            for name in names_2d:
+                model_fields[name] = interp_2d[name].values
+
+        # Batch all 3D fields + vertical coord in a single interp + compute,
+        # then do per-field vertical interpolation from the cached profiles.
+        if fields_3d:
+            if z_type == "height":
+                vert_coord = "geopotential_height"
+                flip = False
+            elif z_type == "pressure":
+                vert_coord = "air_pressure"
+                flip = True
+            else:
+                logger.warning(f"Unknown z_type '{z_type}' for 3D operator fields")
+                for f in fields_3d:
+                    model_fields[f.name] = np.full(n_obs, np.nan)
+                vert_coord = None
+
+            if vert_coord is not None:
+                names_3d = [f.name for f in fields_3d]
+                all_3d_vars = list(set(names_3d + [vert_coord]))
+                interp_3d = (
+                    forecast_mean[all_3d_vars]
                     .interp(t=batch_t, x=batch_x, y=batch_y)
-                    .values
+                    .compute()
                 )
-            elif field_spec.dims == 3:
-                model_fields[field_spec.name] = self._interpolate_simple(
-                    forecast_mean,
-                    field_spec.name,
-                    z_type,
-                    batch_t,
-                    batch_x,
-                    batch_y,
-                    obs_arrays["z"],
-                )
+                coord_profiles = interp_3d[vert_coord].values
+                if flip:
+                    coord_profiles = coord_profiles[:, ::-1]
+
+                for name in names_3d:
+                    profiles = interp_3d[name].values
+                    if flip:
+                        profiles = profiles[:, ::-1]
+                    model_fields[name] = self._vertical_interp_1d(
+                        profiles, coord_profiles, obs_arrays["z"]
+                    )
 
         # Collect metadata arrays (extracted via SQL in _interpolate_all)
         metadata: dict[str, np.ndarray] = {}
@@ -527,6 +604,10 @@ class ModelInterpolation:
         For each observation, interpolates along the vertical using the
         model's coordinate profile at that location/time.
 
+        Uses a fast vectorized path when all profiles are fully valid
+        (the common case for model output), falling back to a per-observation
+        loop only for profiles containing NaNs.
+
         Args:
             value_profiles: (n_obs, n_levels) target variable profiles
             coord_profiles: (n_obs, n_levels) vertical coordinate profiles
@@ -538,7 +619,52 @@ class ModelInterpolation:
         n_obs = len(obs_z)
         result = np.empty(n_obs, dtype=np.float64)
 
-        for i in range(n_obs):
+        # Split into all-valid (vectorizable) and has-NaN (needs loop)
+        all_valid = (
+            np.isfinite(coord_profiles).all(axis=1)
+            & np.isfinite(value_profiles).all(axis=1)
+        )
+        valid_idx = np.where(all_valid)[0]
+        nan_idx = np.where(~all_valid)[0]
+
+        # --- Vectorized path for all-valid profiles ---
+        if len(valid_idx) > 0:
+            c = coord_profiles[valid_idx]  # (n_valid, n_levels)
+            v = value_profiles[valid_idx]  # (n_valid, n_levels)
+            z = obs_z[valid_idx]  # (n_valid,)
+
+            # Sort each profile by coordinate (ascending)
+            sort_idx = np.argsort(c, axis=1)
+            obs_range = np.arange(len(valid_idx))[:, None]
+            c = c[obs_range, sort_idx]
+            v = v[obs_range, sort_idx]
+
+            # Find bracketing level indices via broadcasting
+            # (n_valid, 1) vs (n_valid, n_levels) -> (n_valid, n_levels)
+            n_levels = c.shape[1]
+            ge_mask = c >= z[:, None]
+            has_ge = ge_mask.any(axis=1)
+
+            # Index of the first level >= obs_z (right bracket)
+            idx_right = np.where(has_ge, ge_mask.argmax(axis=1), n_levels - 1)
+            idx_left = np.maximum(idx_right - 1, 0)
+
+            # Gather bracketing values
+            row_idx = np.arange(len(valid_idx))
+            c_left = c[row_idx, idx_left]
+            c_right = c[row_idx, idx_right]
+            v_left = v[row_idx, idx_left]
+            v_right = v[row_idx, idx_right]
+
+            # Linear interpolation weight, clamped to [0, 1] for boundary extrapolation
+            # (matches np.interp behavior: clamp to boundary values)
+            dc = c_right - c_left
+            safe_dc = np.where(dc == 0, 1.0, dc)
+            weight = np.clip((z - c_left) / safe_dc, 0.0, 1.0)
+            result[valid_idx] = v_left + weight * (v_right - v_left)
+
+        # --- Scalar fallback for profiles with NaNs ---
+        for i in nan_idx:
             c = coord_profiles[i, :]
             v = value_profiles[i, :]
 
@@ -549,8 +675,6 @@ class ModelInterpolation:
 
             c_valid = c[valid]
             v_valid = v[valid]
-
-            # np.interp requires monotonically increasing x
             sort_idx = np.argsort(c_valid)
             result[i] = np.interp(obs_z[i], c_valid[sort_idx], v_valid[sort_idx])
 
@@ -569,5 +693,21 @@ class ModelInterpolation:
         n_updated = self.exp.obs.update_model_source_values(obs, source)
         logger.info(
             f"Updated {n_updated} observations with {source} model values in DuckDB"
+        )
+        return n_updated
+
+    def _save_spread_output(self, obs: pd.DataFrame, source: str) -> int:
+        """Save interpolated spread values to the DuckDB observations table.
+
+        Args:
+            obs: DataFrame with 'rowid' and 'model_value' columns
+            source: Either 'forecast' or 'analysis'; selects the target column
+
+        Returns:
+            Number of rows updated
+        """
+        n_updated = self.exp.obs.update_model_source_spread_values(obs, source)
+        logger.info(
+            f"Updated {n_updated} observations with {source} spread values in DuckDB"
         )
         return n_updated

@@ -126,9 +126,16 @@ def analyze_first_departures(
         return
 
     # When pairs were specified (not discovered), validate against what's in the DB
-    if instrument_quantity or exp.cfg.validation.first_departures.instrument_quantity_pairs:
-        available_pairs = set(exp.obs.get_model_interpolated_pairs(start_time, end_time))
-        pairs_to_analyze = [(i, q) for i, q in pairs_to_analyze if (i, q) in available_pairs]
+    if (
+        instrument_quantity
+        or exp.cfg.validation.first_departures.instrument_quantity_pairs
+    ):
+        available_pairs = set(
+            exp.obs.get_model_interpolated_pairs(start_time, end_time)
+        )
+        pairs_to_analyze = [
+            (i, q) for i, q in pairs_to_analyze if (i, q) in available_pairs
+        ]
         if not pairs_to_analyze:
             logger.warning("None of the specified pairs have model-interpolated data!")
             logger.warning("Run 'wrf-ensembly validation interpolate-model' first.")

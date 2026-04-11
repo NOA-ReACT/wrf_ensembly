@@ -72,6 +72,8 @@ class ExperimentObservations:
                         cluster_id STRING,
                         model_forecast DOUBLE,
                         model_analysis DOUBLE,
+                        model_forecast_spread DOUBLE,
+                        model_analysis_spread DOUBLE,
                         used_in_da BOOLEAN NOT NULL DEFAULT FALSE,
                         da_cycle INT
             )"""
@@ -336,7 +338,11 @@ class ExperimentObservations:
             # concat — AERONET and similar instruments leave it as None/object,
             # which triggers a FutureWarning when mixed with float64 partitions.
             parts = [
-                p.assign(value_uncertainty=pd.to_numeric(p["value_uncertainty"], errors="coerce"))
+                p.assign(
+                    value_uncertainty=pd.to_numeric(
+                        p["value_uncertainty"], errors="coerce"
+                    )
+                )
                 for p in parts
             ]
             df = pd.concat(parts)
@@ -470,6 +476,39 @@ class ExperimentObservations:
 
         return len(update_df)
 
+    def update_model_source_spread_values(self, df: pd.DataFrame, source: str) -> int:
+        """
+        Update model_forecast_spread or model_analysis_spread for observations using their rowid.
+
+        The DataFrame must contain 'rowid' and 'model_value' columns.
+        All existing entries for the target column are reset to NULL before
+        applying the new values.
+
+        Args:
+            df: DataFrame with 'rowid' and 'model_value' columns.
+            source: Either 'forecast' or 'analysis', selects the target column.
+
+        Returns:
+            The number of rows updated.
+        """
+        col = f"model_{source}_spread"
+
+        with self._get_duckdb(read_only=False) as con:
+            update_df = df[["rowid", "model_value"]].copy()
+            con.register("model_spread_view", update_df)
+
+            con.execute(f"UPDATE observations SET {col} = NULL WHERE {col} IS NOT NULL")
+            con.execute(
+                f"""
+                UPDATE observations
+                SET {col} = mv.model_value
+                FROM model_spread_view mv
+                WHERE observations.rowid = mv.rowid
+                """
+            )
+
+        return len(update_df)
+
     def get_model_interpolated(
         self,
         start_date: dt.datetime | None = None,
@@ -559,12 +598,16 @@ class ExperimentObservations:
         Returns:
             DataFrame of observations, or None if none exist.
         """
+        # sql
         query = """
             SELECT
                 instrument, quantity,
                 time AT TIME ZONE 'UTC' AS time,
                 latitude, longitude,
-                value, model_forecast, model_analysis, qc_flag
+                value, value_uncertainty,
+                model_forecast, model_analysis,
+                model_forecast_spread, model_analysis_spread,
+                qc_flag
             FROM observations
             WHERE model_forecast IS NOT NULL
               AND instrument = ?
