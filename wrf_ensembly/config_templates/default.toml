@@ -1,0 +1,236 @@
+[metadata]
+name = "my_experiment"
+description = "Description of this experiment"
+
+# Environment variables injected when running experiment commands
+[environment]
+# universal = {}   # Applied to all commands
+# wrf = {}         # Applied to WRF/WPS commands
+# dart = {}        # Applied to DART commands
+
+[directories]
+wrf_root = "/path/to/WRF"
+wps_root = "/path/to/WPS"
+dart_root = "/path/to/DART"
+scratch_root = "./scratch"  # Relative paths are inside the experiment directory
+
+[domain_control]
+xy_resolution = [30, 30]    # Grid spacing in km (dx, dy)
+xy_size = [100, 100]        # Grid points (e_we, e_sn)
+projection = "lambert"
+ref_lat = 40.0
+ref_lon = 20.0
+truelat1 = 30.0
+truelat2 = 60.0             # Optional; required for lambert projection
+stand_lon = 20.0            # Optional
+# pole_lat =                # Optional
+# pole_lon =                # Optional
+
+[time_control]
+start = 2021-01-01T00:00:00Z
+end   = 2021-01-07T00:00:00Z
+boundary_update_interval = 180  # Minutes between lateral boundary condition updates
+output_interval = 60            # WRF history output interval in minutes
+analysis_interval = 360         # Minutes between assimilation cycles (6h)
+# runtime_io = []               # Optional runtime I/O options for WRF (iofields_filename)
+
+# Per-cycle overrides (optional):
+# [time_control.cycles.0]
+# duration = 1440             # Override duration for cycle 0 (spin-up, in minutes)
+
+[geogrid]
+table = "GEOGRID.TBL"
+
+[data]
+wps_geog = "/path/to/WPS_GEOG"
+meteorology = "/path/to/meteorology_grib_files"
+meteorology_glob = "*.grib"
+meteorology_vtable = "Vtable.ERA-interim.pl"
+per_member_meteorology = false
+manage_chem_ic = false
+# [data.chemistry]             # Optional; required for WRF-CHEM experiments
+# path = "/path/to/chem_data"
+# model_name = "CAMS"
+
+[assimilation]
+n_members = 20
+filter_mpi_tasks = 1          # Set > 1 to run DART filter with MPI
+half_window_length_minutes = 30
+use_inflation = false
+cycled_variables = [
+  "U",
+  "V",
+  "P",
+  "PH",
+  "T",
+  "MU",
+  "QVAPOR",
+  "QCLOUD",
+  "QRAIN",
+  "QICE",
+  "QSNOW",
+  "QGRAUP",
+  "QNICE",
+  "QNRAIN",
+  "U10",
+  "V10",
+  "T2",
+  "Q2",
+  "PSFC",
+  "TSLB",
+  "SMOIS",
+  "TSK",
+]
+state_variables = ["U", "V", "W", "PH", "T", "MU", "QVAPOR", "PSFC"]
+
+[observations]
+# instruments_to_assimilate =  # Optional; defaults to all available instruments
+boundary_width = 0
+boundary_error_factor = 2.5
+boundary_error_width = 1.0
+# error_inflation_factor = {}  # Per instrument.quantity error inflation, e.g. {"sonde.U" = 1.5}
+# superobs = {}                # Superobbing config per instrument.quantity
+# thinning = {}                # Stride thinning config per instrument.quantity
+# temporal_binning = {}        # Temporal binning config per instrument.quantity
+
+[validation]
+# instruments = []             # Defaults to all available instruments
+[validation.first_departures]
+# instrument_quantity_pairs = []
+# bias_map_colorbar_ranges = {}
+# excluded_bboxes = []
+# regimes = []
+
+[perturbations]
+# seed =                       # Optional RNG seed; random if not set
+# [perturbations.variables.U]
+# operation = "add"            # "add", "multiply", or "assign"
+# mean = 1.0
+# sd = 1.0
+# gaussian_sigma = 2.5
+# boundary = 0
+# perturb_every_cycle = false
+# different_field_every_cycle = true
+# midcycle_taper_width = 0
+
+[slurm]
+sbatch_command = "sbatch --parsable"
+command_prefix = ""
+mpirun_command = "mpirun"
+env_modules = []
+pre_commands = []
+
+[slurm.directives.default]
+nodes = 1
+cpus-per-task = 1
+
+[slurm.directives.advance_model]
+ntasks-per-node = 20
+
+[slurm.directives.preprocess]
+ntasks-per-node = 20
+
+[slurm.directives.make_analysis]
+ntasks-per-node = 1
+
+[slurm.directives.postprocess]
+ntasks-per-node = 4
+
+[postprocess]
+# variables_to_keep =          # Optional list of regexes; keeps all if not set
+# variables_to_keep_ensemble = # Optional subset for per-member files
+compression = "zlib"
+compression_level = 4
+shuffle = true
+significant_digits = 3
+significant_digits_overrides = {"Z.*" = 6, "X.*" = 6}
+quantize_mode = "GranularBitRound"
+compute_ensemble_statistics_in_job = true
+keep_per_member = false
+processors = []
+
+[plots.forecast_vs_analysis]
+arrangement = "horizontal"
+dpi = 150
+include_spread = false
+variables = []
+
+[plots.forecasts]
+dpi = 150
+include_spread = false
+variables = []
+
+# -- WRF NAMELIST OVERRIDES --
+[wrf_namelist]
+
+[wrf_namelist.time_control]
+input_from_file = true
+frames_per_outfile = 1
+restart = false
+restart_interval = 3600
+io_form_history = 2
+io_form_restart = 2
+io_form_input = 2
+io_form_boundary = 2
+debug_level = 0
+
+[wrf_namelist.domains]
+time_step = 180             # Recommended: 6 * dx_km
+time_step_fract_num = 0
+time_step_fract_den = 1
+max_dom = 1
+e_vert = 45
+num_metgrid_levels = 38
+num_metgrid_soil_levels = 4
+grid_id = 1
+parent_id = 0
+i_parent_start = 1
+j_parent_start = 1
+parent_grid_ratio = 1
+parent_time_step_ratio = 1
+feedback = 1
+smooth_option = 0
+p_top_requested = 5000
+
+[wrf_namelist.physics]
+mp_physics = 10
+ra_lw_physics = 4
+ra_sw_physics = 4
+radt = 30
+sf_sfclay_physics = 2
+sf_surface_physics = 2
+bl_pbl_physics = 2
+bldt = 0
+cu_physics = 5
+cudt = 0
+isfflx = 1
+ifsnow = 1
+icloud = 1
+num_soil_layers = 4
+
+[wrf_namelist.dynamics]
+hybrid_opt = 2
+w_damping = 1
+diff_opt = 2
+km_opt = 4
+non_hydrostatic = true
+gwd_opt = 1
+
+[wrf_namelist.bdy_control]
+spec_bdy_width = 5
+specified = true
+
+[wrf_namelist.namelist_quilt]
+nio_tasks_per_group = 0
+nio_groups = 1
+
+# -- DART NAMELIST OVERRIDES --
+# [dart_namelist]
+# [dart_namelist.filter_nml]
+# num_output_state_members = 0
+# ...
+
+# -- EXTRA FILES TO COPY INTO DART DIRECTORY --
+# [[extra_dart_files]]
+# source = "/path/to/file"
+# destination_name = "file"  # Optional; defaults to source filename
