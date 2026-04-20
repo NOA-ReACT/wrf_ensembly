@@ -648,21 +648,52 @@ class ExperimentObservations:
             DataFrame with columns: cycle_index, total, to_assimilate
         """
         cycles_df = cycles_to_dataframe(cycles)
+        half_window_td = pd.Timedelta(
+            minutes=self.cfg.assimilation.half_window_length_minutes
+        )
+        cycles_df["window_start"] = cycles_df["end_time"] - half_window_td
+        cycles_df["window_end"] = cycles_df["end_time"] + half_window_td
+
+        instruments = self.cfg.observations.instruments_to_assimilate
 
         with self._get_duckdb(read_only=True) as con:
             con.register("cycles_view", cycles_df)
-            result = con.execute(
-                """
-                SELECT
-                    cw.cycle_index,
-                    COUNT(o.time) AS total,
-                    COUNT(o.time) FILTER (WHERE o.used_in_da AND o.da_cycle = cw.cycle_index) AS to_assimilate
-                FROM cycles_view cw
-                LEFT JOIN observations o ON o.time >= cw.start_time AND o.time <= cw.end_time
-                GROUP BY cw.cycle_index
-                ORDER BY cw.cycle_index
-                """
-            ).fetchdf()
+
+            if instruments is not None:
+                placeholders = ", ".join("?" * len(instruments))
+                result = con.execute(
+                    f"""
+                    SELECT
+                        cw.cycle_index,
+                        COUNT(o.time) AS total,
+                        COUNT(o.time) FILTER (
+                            WHERE o.time >= cw.window_start
+                              AND o.time <= cw.window_end
+                              AND o.instrument IN ({placeholders})
+                        ) AS to_assimilate
+                    FROM cycles_view cw
+                    LEFT JOIN observations o ON o.time >= cw.start_time AND o.time <= cw.end_time
+                    GROUP BY cw.cycle_index
+                    ORDER BY cw.cycle_index
+                    """,
+                    [*instruments],
+                ).fetchdf()
+            else:
+                result = con.execute(
+                    """
+                    SELECT
+                        cw.cycle_index,
+                        COUNT(o.time) AS total,
+                        COUNT(o.time) FILTER (
+                            WHERE o.time >= cw.window_start
+                              AND o.time <= cw.window_end
+                        ) AS to_assimilate
+                    FROM cycles_view cw
+                    LEFT JOIN observations o ON o.time >= cw.start_time AND o.time <= cw.end_time
+                    GROUP BY cw.cycle_index
+                    ORDER BY cw.cycle_index
+                    """
+                ).fetchdf()
 
         result["total"] = result["total"].astype(int)
         result["to_assimilate"] = result["to_assimilate"].astype(int)
@@ -674,27 +705,68 @@ class ExperimentObservations:
 
         Each row represents one (orig_filename, instrument) combination and includes:
         - total: total observations in the cycle time window
-        - assimilated: observations marked as used_in_da for this cycle
+        - assimilated: observations within the assimilation window around cycle end
 
         Args:
             cycle: The cycle whose start/end times define the time window.
         """
 
+        window_start = cycle.end - pd.Timedelta(
+            minutes=self.cfg.assimilation.half_window_length_minutes
+        )
+        window_end = cycle.end + pd.Timedelta(
+            minutes=self.cfg.assimilation.half_window_length_minutes
+        )
+        instruments = self.cfg.observations.instruments_to_assimilate
+
         with self._get_duckdb(read_only=True) as con:
-            result = con.execute(
-                """
-                SELECT
-                    orig_filename,
-                    instrument,
-                    COUNT(*) AS total,
-                    COUNT(*) FILTER (WHERE used_in_da AND da_cycle = ?) AS assimilated
-                FROM observations
-                WHERE time >= ? AND time <= ?
-                GROUP BY orig_filename, instrument
-                ORDER BY instrument, orig_filename
-                """,
-                [cycle.index, str(cycle.start), str(cycle.end)],
-            ).fetchdf()
+            if instruments is not None:
+                placeholders = ", ".join("?" * len(instruments))
+                result = con.execute(
+                    f"""
+                    SELECT
+                        orig_filename,
+                        instrument,
+                        COUNT(*) AS total,
+                        COUNT(*) FILTER (
+                            WHERE time >= ? AND time <= ?
+                              AND instrument IN ({placeholders})
+                        ) AS assimilated
+                    FROM observations
+                    WHERE time >= ? AND time <= ?
+                    GROUP BY orig_filename, instrument
+                    ORDER BY instrument, orig_filename
+                    """,
+                    [
+                        str(window_start),
+                        str(window_end),
+                        *instruments,
+                        str(cycle.start),
+                        str(cycle.end),
+                    ],
+                ).fetchdf()
+            else:
+                result = con.execute(
+                    """
+                    SELECT
+                        orig_filename,
+                        instrument,
+                        COUNT(*) AS total,
+                        COUNT(*) FILTER (
+                            WHERE time >= ? AND time <= ?
+                        ) AS assimilated
+                    FROM observations
+                    WHERE time >= ? AND time <= ?
+                    GROUP BY orig_filename, instrument
+                    ORDER BY instrument, orig_filename
+                    """,
+                    [
+                        str(window_start),
+                        str(window_end),
+                        str(cycle.start),
+                        str(cycle.end),
+                    ],
+                ).fetchdf()
         return result
 
     def get_observations_for_cycle(
