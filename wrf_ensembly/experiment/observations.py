@@ -69,13 +69,10 @@ class ExperimentObservations:
                         ) NOT NULL,
                         orig_filename STRING NOT NULL,
                         metadata JSON,
-                        cluster_id STRING,
                         model_forecast DOUBLE,
                         model_analysis DOUBLE,
                         model_forecast_spread DOUBLE,
-                        model_analysis_spread DOUBLE,
-                        used_in_da BOOLEAN NOT NULL DEFAULT FALSE,
-                        da_cycle INT
+                        model_analysis_spread DOUBLE
             )"""
         )
         con.execute("CREATE INDEX IF NOT EXISTS idx_obs_time ON observations (time)")
@@ -84,9 +81,6 @@ class ExperimentObservations:
         )
         con.execute(
             "CREATE INDEX IF NOT EXISTS idx_obs_instrument_time ON observations (instrument, time)"
-        )
-        con.execute(
-            "CREATE INDEX IF NOT EXISTS idx_obs_da ON observations (da_cycle, used_in_da)"
         )
         return con
 
@@ -402,43 +396,6 @@ class ExperimentObservations:
                 FROM df_view
             """
             )
-
-            # Mark observations that fall within a DA assimilation window
-            cycles_df = cycles_to_dataframe(self.cycles)
-            half_window_td = pd.Timedelta(
-                minutes=self.cfg.assimilation.half_window_length_minutes
-            )
-            cycles_df["window_start"] = cycles_df["end_time"] - half_window_td
-            cycles_df["window_end"] = cycles_df["end_time"] + half_window_td
-            con.register("cycles_windows", cycles_df)
-
-            da_instruments = self.cfg.observations.instruments_to_assimilate
-            if da_instruments is not None:
-                placeholders = ", ".join("?" * len(da_instruments))
-                con.execute(
-                    f"""
-                    UPDATE observations
-                    SET used_in_da = TRUE, da_cycle = cw.cycle_index
-                    FROM cycles_windows cw
-                    WHERE observations.orig_filename = ?
-                      AND observations.time >= cw.window_start
-                      AND observations.time <= cw.window_end
-                      AND observations.instrument IN ({placeholders})
-                    """,
-                    [input_path.name, *da_instruments],
-                )
-            else:
-                con.execute(
-                    """
-                    UPDATE observations
-                    SET used_in_da = TRUE, da_cycle = cw.cycle_index
-                    FROM cycles_windows cw
-                    WHERE observations.orig_filename = ?
-                      AND observations.time >= cw.window_start
-                      AND observations.time <= cw.window_end
-                    """,
-                    [input_path.name],
-                )
 
         return len(df.index)
 
