@@ -9,14 +9,25 @@ import xarray as xr
 
 from wrf_ensembly.observations import io as obs_io
 
-HAS_SATPY = False
 try:
     import satpy
     from pyresample import create_area_def
 
-    HAS_SATPY = True
-except ImportError:
-    pass
+    _DEPS_ERR: Exception | None = None
+except Exception as _e:
+    satpy = None  # type: ignore[assignment]
+    create_area_def = None  # type: ignore[assignment]
+    _DEPS_ERR = _e
+
+
+def _require_deps() -> None:
+    if _DEPS_ERR is not None:
+        raise click.ClickException(
+            "The msg-seviri converter requires 'satpy' and 'pyresample'.\n"
+            f"Loading them failed with {type(_DEPS_ERR).__name__}: {_DEPS_ERR}\n"
+            "Install with: pip install satpy pyresample"
+        )
+
 
 SEVIRI_CHANNELS = {
     "WV_062": "BT_WV62",
@@ -92,10 +103,7 @@ def convert_msg_seviri(
         valid observations are found.
     """
 
-    if not HAS_SATPY:
-        raise ImportError(
-            "satpy and pyresample are required to read MSG SEVIRI files. Install them with: pip install satpy pyresample"
-        )
+    _require_deps()
 
     # Load SEVIRI scene
     scn = satpy.Scene(filenames=[str(seviri_path)], reader="seviri_l1b_native")
@@ -189,6 +197,7 @@ def msg_seviri(
     WV_073, IR_087, IR_108, and IR_120, resamples them onto the WRF grid,
     and saves the result in the standardized observation format.
     """
+    _require_deps()
 
     print(f"Converting MSG SEVIRI file: {input_path}")
     print(f"Output path: {output_path}")

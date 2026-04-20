@@ -26,11 +26,12 @@ The resulting CLI will be: wrf-ensembly-obs-convert your_format [args...]
 import click
 
 from wrf_ensembly.observations.converters import (
-    HAS_AEOLUS_CONVERTERS,
-    HAS_MSG_SEVIRI_CONVERTER,
+    aeolus_l2a_cli,
+    aeolus_l2b_cli,
     aeronet_cli,
     earthcare_ebd_cli,
     modis_cli,
+    msg_seviri_cli,
     remotap_spexone_cli,
     viirs_cli,
 )
@@ -68,19 +69,9 @@ convert_group.add_command(remotap_spexone_cli)
 convert_group.add_command(earthcare_ebd_cli)
 convert_group.add_command(viirs_cli)
 convert_group.add_command(modis_cli)
-
-# Only add MSG SEVIRI converter if 'satpy' and 'pyresample' are available
-if HAS_MSG_SEVIRI_CONVERTER:
-    from wrf_ensembly.observations.converters import msg_seviri_cli
-
-    convert_group.add_command(msg_seviri_cli)
-
-# Only add AEOLUS converters if the 'coda' library is available
-if HAS_AEOLUS_CONVERTERS:
-    from wrf_ensembly.observations.converters import aeolus_l2a_cli, aeolus_l2b_cli
-
-    convert_group.add_command(aeolus_l2a_cli)
-    convert_group.add_command(aeolus_l2b_cli)
+convert_group.add_command(msg_seviri_cli)
+convert_group.add_command(aeolus_l2a_cli)
+convert_group.add_command(aeolus_l2b_cli)
 
 
 @cli.group()

@@ -3,9 +3,24 @@
 from pathlib import Path
 
 import click
-import coda
 import numpy as np
 import pandas as pd
+
+try:
+    import coda
+    _DEPS_ERR: Exception | None = None
+except Exception as _e:
+    coda = None  # type: ignore[assignment]
+    _DEPS_ERR = _e
+
+
+def _require_deps() -> None:
+    if _DEPS_ERR is not None:
+        raise click.ClickException(
+            "The aeolus-l2b converter requires 'coda' (stcorp/coda).\n"
+            f"Loading it failed with {type(_DEPS_ERR).__name__}: {_DEPS_ERR}\n"
+            "Install from: https://github.com/stcorp/coda"
+        )
 
 from wrf_ensembly.observations import io as obs_io
 
@@ -103,6 +118,7 @@ def convert_aeolus_l2b(
     Returns:
         A pandas DataFrame in WRF-Ensembly Observation format, or None if no valid data.
     """
+    _require_deps()
     cf = coda.open(str(path))
     if cf.product_type != "ALD_U_N_2B":
         cf.close()
@@ -254,6 +270,7 @@ def aeolus_l2b(input_path: Path, output_path: Path, mie: bool, rayleigh: bool):
     INPUT_PATH: Path to the AEOLUS L2B file
     OUTPUT_PATH: Path where to save the converted observations (parquet)
     """
+    _require_deps()
     print(f"Converting AEOLUS L2B file: {input_path}")
     print(f"Output path: {output_path}")
 
