@@ -442,6 +442,184 @@ spatial_resolution = 1.0
 | `viirs INPUT OUTPUT` | Convert VIIRS AOD NetCDF files |
 | `msg-seviri INPUT WRFINPUT OUTPUT` | Convert MSG SEVIRI native files (requires WRF input for grid) |
 
+## Adding a New Observation Kind
+
+This section is a step-by-step guide for adding a completely new instrument and/or quantity. The steps are ordered roughly by dependency — each step unlocks the next.
+
+### Step 1 — Register the Instrument and Quantity (`definitions.py`)
+
+Add entries to `INSTRUMENT_REGISTRY` and `QUANTITY_REGISTRY` in `wrf_ensembly/observations/definitions.py`. This is required for plotting and model-comparison support. If you only need a converter (no plotting, no validation), you can skip this step, but it is good practice to do it upfront.
+
+**Add the instrument:**
+```python
+"MY_INSTRUMENT": InstrumentSpec(
+    label="My Instrument Description",
+    geometry=Geometry.MAP_SWATH,          # or PROFILE_CURTAIN, TIMESERIES, ...
+    x=AxisSpec(dim="x", label="X", coord="longitude"),
+    y=AxisSpec(dim="y", label="Y", coord="latitude"),
+),
+```
+
+**Add the quantity with a direct WRF mapping (simplest case):**
+```python
+"MY_QUANTITY": QuantitySpec(
+    label="My Quantity [unit]",
+    units="unit",
+    cmap="viridis",
+    vmin=0,
+    vmax=1,
+    model_equivalent="WRF_VARIABLE_NAME",  # exact WRF field name
+    dart_quantity="DART_QUANTITY_NAME",     # DART obs type string
+),
+```
+
+**Add the quantity with a complex observation operator (multi-field case):**
+
+If the observation cannot be directly mapped to a single WRF variable (e.g., a projected wind component), define an operator instead of `model_equivalent`:
+
+```python
+# In wrf_ensembly/observations/operators/my_operator.py:
+def my_operator(
+    model_fields: dict[str, np.ndarray],
+    metadata: dict[str, np.ndarray],
+) -> np.ndarray:
+    # model_fields keys match the `name` of each ModelFieldSpec
+    # metadata keys match required_metadata
+    return model_fields["field_a"] * metadata["scale"]
+
+# In definitions.py:
+"MY_QUANTITY": QuantitySpec(
+    label="...",
+    units="...",
+    operator=OperatorSpec(
+        func=my_operator,
+        required_model_fields=(
+            ModelFieldSpec("field_a", dims=3),  # dims=3 for vertical interpolation
+            ModelFieldSpec("field_b", dims=2),  # dims=2 for surface/column fields
+        ),
+        required_metadata=("scale",),           # keys from the obs metadata JSON
+        description="Human-readable description",
+    ),
+    dart_quantity="DART_QUANTITY_NAME",
+),
+```
+
+### Step 2 — Write the Converter
+
+Create `wrf_ensembly/observations/converters/my_instrument.py`. Use `template.py` as a starting point. The function must return a pandas DataFrame with these columns:
+
+| Column | Notes |
+|--------|-------|
+| `instrument` | Must match the key in `INSTRUMENT_REGISTRY` |
+| `quantity` | Must match the key in `QUANTITY_REGISTRY` |
+| `time` | `pd.Timestamp`, timezone-aware UTC |
+| `longitude` | float, degrees (-180 to 180) |
+| `latitude` | float, degrees (-90 to 90) |
+| `z` | float, vertical coordinate value |
+| `z_type` | one of `surface`, `pressure`, `height`, `model_level`, `columnar` |
+| `value` | float, may be NaN |
+| `value_uncertainty` | float, may be NaN if unknown |
+| `qc_flag` | int; `0` = good, positive = instrument QA issues |
+| `orig_coords` | dict with keys `indices`, `shape`, `names` |
+| `orig_filename` | `input_path.name` (not the full path) |
+| `metadata` | JSON string for any extra fields needed by the operator |
+
+Call `obs_io.validate_schema(df)` before returning to catch missing or mistyped columns.
+
+For the `orig_coords` field, store the observation's position in the original data array so that `reshape_to_native()` can reconstruct it later. For a 2D satellite image of shape `(H, W)`:
+
+```python
+orig_coords = [
+    {"indices": [int(i), int(j)], "shape": [H, W], "names": ["y", "x"]}
+    for i, j in zip(row_indices, col_indices)
+]
+```
+
+For 1D timeseries data or when reconstruction is not meaningful, use a single-element shape:
+```python
+orig_coords = [
+    {"indices": [int(k)], "shape": [N], "names": ["obs"]}
+    for k in range(N)
+]
+```
+
+### Step 3 — Register the Converter CLI
+
+Add a Click command to the same file, then register it in two places:
+
+**In `wrf_ensembly/observations/converters/__init__.py`:**
+```python
+from .my_instrument import my_instrument as my_instrument_cli
+
+__all__ = [..., "my_instrument_cli"]
+```
+
+**In `wrf_ensembly/observations/cli.py`:**
+```python
+from wrf_ensembly.observations.converters import ..., my_instrument_cli
+
+# inside the file, add to the convert group:
+convert_group.add_command(my_instrument_cli)
+```
+
+After this step, `wrf-ensembly-obs convert my-instrument --help` should work.
+
+### Step 4 — Handle the DART Type (if needed)
+
+If your quantity's `dart_quantity` string (from `QuantitySpec`) differs from what DART calls it, add a mapping to `OBS_TYPE_TABLE` in `wrf_ensembly/observations/dart.py`:
+
+```python
+OBS_TYPE_TABLE = {
+    "AOD_500nm": "AIRSENSE_AOD",
+    "AOD_550nm": "AIRSENSE_AOD",
+    "MY_QUANTITY": "DART_TYPE_NAME",  # add here if names differ
+}
+```
+
+If `dart_quantity` already matches the DART type name exactly (as with `LIDAR_EXTINCTION_355nm` and `SAT_HLOS_WIND`), no entry is needed — the quantity name is passed through directly.
+
+You also need to ensure the DART quantity is registered in the DART source and the `wrf_ensembly` converter is compiled with that type. This is outside the Python codebase but is required before DART can ingest the observations.
+
+### Step 5 — Test the Conversion
+
+```bash
+# Convert a test file
+wrf-ensembly-obs convert my-instrument test_file.nc output.parquet
+
+# Inspect the result
+wrf-ensembly-obs dump-info output.parquet
+
+# Add to an experiment and verify it appears in the summary
+wrf-ensembly $EXP_PATH obs add output.parquet
+wrf-ensembly $EXP_PATH obs show
+```
+
+### Step 6 — Enable for Assimilation
+
+Add the instrument to `instruments_to_assimilate` in `config.toml`:
+```toml
+[observations]
+instruments_to_assimilate = ["MY_INSTRUMENT", "AERONET"]
+```
+
+Then prepare cycles and verify the observations appear:
+```bash
+wrf-ensembly $EXP_PATH obs prepare-cycles --skip-dart --cycle 0
+wrf-ensembly $EXP_PATH obs cycle-info 0
+```
+
+### Summary Checklist
+
+- [ ] `InstrumentSpec` added to `INSTRUMENT_REGISTRY` in `definitions.py`
+- [ ] `QuantitySpec` added to `QUANTITY_REGISTRY` in `definitions.py` (with `model_equivalent` or `operator`)
+- [ ] Operator function written in `observations/operators/` (if using `OperatorSpec`)
+- [ ] Converter written in `observations/converters/my_instrument.py`
+- [ ] Converter registered in `converters/__init__.py`
+- [ ] Converter registered in `observations/cli.py`
+- [ ] `OBS_TYPE_TABLE` entry added in `dart.py` (if DART type name differs)
+- [ ] DART quantity registered and converter recompiled (outside Python)
+- [ ] Instrument added to `instruments_to_assimilate` in `config.toml`
+
 ## Advanced Usage
 
 ### Custom Database Queries
