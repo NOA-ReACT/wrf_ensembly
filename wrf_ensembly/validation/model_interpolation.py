@@ -1,13 +1,23 @@
 """Model interpolation to observation locations and times."""
 
 import glob
-import math
+import os
+from collections import defaultdict
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 
-from wrf_ensembly.console import logger
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TextColumn,
+    TimeElapsedColumn,
+)
+
+from wrf_ensembly.console import console, logger
 from wrf_ensembly.experiment.experiment import Experiment
 from wrf_ensembly.observations import QUANTITY_REGISTRY, OperatorSpec
 
@@ -26,16 +36,13 @@ class ModelInterpolation:
 
     exp: Experiment
 
-    def __init__(self, experiment: Experiment, batch_size: int = 10_000_000):
+    def __init__(self, experiment: Experiment):
         """Initialize with an experiment.
 
         Args:
             experiment: The experiment to perform validation on
-            batch_size: Maximum number of observations to interpolate in a
-                single pass. Larger values are faster but use more memory.
         """
         self.exp = experiment
-        self.batch_size = batch_size
 
     def run(self) -> int:
         """Run the model interpolation.
@@ -65,6 +72,20 @@ class ModelInterpolation:
         # coordinate values).
         vert_coord_vars = ["air_pressure", "geopotential_height", "z"]
 
+        # TODO: Feeding per-field spread through a non-identity operator does not
+        # yield the spread of the operator output. Proper handling requires either
+        # linearizing the operator (Jacobian-based SD propagation) or computing SD
+        # across per-member operator evaluations. Until then, skip spread for
+        # operator-based combos and only compute spread where model_equivalent is
+        # a direct field lookup.
+        spread_combos = [c for c in needed_combos if not c["has_operator"]]
+        skipped_for_spread = [c for c in needed_combos if c["has_operator"]]
+        for c in skipped_for_spread:
+            logger.warning(
+                f"Skipping spread for {c['instrument']}/{c['quantity']}: "
+                "operator-based quantities cannot be propagated by interpolating spread directly"
+            )
+
         for source in ("forecast", "analysis"):
             logger.info(f"Interpolating mean with {source} files")
             ds_mean = self._open_files(source, list(needed_vars), file_type="mean")
@@ -75,6 +96,9 @@ class ModelInterpolation:
                 continue
             result_df = self._interpolate_all(needed_combos, ds_mean, source)
             n_updated += self._save_output(result_df, source)
+
+            if not spread_combos:
+                continue
 
             logger.info(f"Interpolating spread with {source} files")
             sd_vars = [v for v in needed_vars if v not in vert_coord_vars]
@@ -90,26 +114,27 @@ class ModelInterpolation:
                 if v in ds_mean.data_vars:
                     ds_sd[v] = ds_mean[v]
 
-            spread_df = self._interpolate_all(needed_combos, ds_sd, source)
+            spread_df = self._interpolate_all(spread_combos, ds_sd, source)
             n_updated += self._save_spread_output(spread_df, source)
 
         return n_updated
 
-    def _instrument_where_clause(self, prefix: str = "WHERE") -> str:
-        """Build a SQL WHERE/AND clause for instrument filtering.
+    def _instrument_where_clause(self, prefix: str = "WHERE") -> tuple[str, list[str]]:
+        """Build a parameterized SQL WHERE/AND clause for instrument filtering.
 
         Args:
             prefix: SQL keyword to use ('WHERE' or 'AND')
 
         Returns:
-            SQL clause string, or empty string if no filter is configured
+            A (clause, params) tuple. The clause contains '?' placeholders and
+            the params list holds the instrument names; both are empty when no
+            filter is configured.
         """
         if not self.exp.cfg.validation.instruments:
-            return ""
-        instruments_list = ", ".join(
-            f"'{inst}'" for inst in self.exp.cfg.validation.instruments
-        )
-        return f"{prefix} instrument IN ({instruments_list})"
+            return "", []
+        instruments = list(self.exp.cfg.validation.instruments)
+        placeholders = ", ".join("?" for _ in instruments)
+        return f"{prefix} instrument IN ({placeholders})", instruments
 
     def _determine_needed_combos(self) -> list[dict]:
         """Determine which instrument/quantity combinations need interpolation.
@@ -122,11 +147,12 @@ class ModelInterpolation:
             List of dicts with keys: instrument, quantity, wrf_vars, z_type,
             has_operator
         """
-        where_clause = self._instrument_where_clause()
+        where_clause, where_params = self._instrument_where_clause()
 
         with self.exp.obs._get_duckdb(read_only=True) as con:
             combos = con.execute(
-                f"SELECT DISTINCT instrument, quantity, z_type FROM observations {where_clause}"
+                f"SELECT DISTINCT instrument, quantity, z_type FROM observations {where_clause}",
+                where_params,
             ).fetchall()
 
         needed_combos = []
@@ -181,60 +207,72 @@ class ModelInterpolation:
         else:
             glob_pattern = f"{self.exp.paths.data_analysis}/cycle_**/{source}_{file_type}_cycle_*.nc"
 
+        logger.debug(f"Globbing {source}/{file_type} files: {glob_pattern}")
         if not glob.glob(glob_pattern):
+            logger.debug(f"No files matched for {source}/{file_type}")
             return None
 
-        forecast_mean = xr.open_mfdataset(
+        ds = xr.open_mfdataset(
             glob_pattern,
             combine="by_coords",
             chunks={"time": 1},
             coords="minimal",
         )
 
-        available = [v for v in needed_vars if v in forecast_mean.data_vars]
-        missing = [v for v in needed_vars if v not in forecast_mean.data_vars]
+        available = [v for v in needed_vars if v in ds.data_vars]
+        missing = [v for v in needed_vars if v not in ds.data_vars]
         if missing:
-            logger.warning(f"Variables not found in forecast files: {missing}")
-        forecast_mean = forecast_mean[available]
+            logger.warning(f"Variables not found in {source}/{file_type} files: {missing}")
+        ds = ds[available]
 
         # Check for duplicate coordinates
         for coord_name in ["t", "x", "y"]:
-            if coord_name not in forecast_mean.coords:
+            if coord_name not in ds.coords:
                 continue
-            coord_vals = forecast_mean.coords[coord_name].values
+            coord_vals = ds.coords[coord_name].values
             unique, counts = np.unique(coord_vals, return_counts=True)
             duplicates = unique[counts > 1]
 
             if len(duplicates) > 0:
-                print(
-                    f"Duplicate values found in forecast_mean coordinate '{coord_name}':"
+                logger.error(
+                    f"Duplicate values found in {source}/{file_type} coordinate '{coord_name}':"
                 )
                 for dup in duplicates:
                     indices = np.where(coord_vals == dup)[0]
-                    print(f"  Value: {dup}")
-                    print(f"  Appears {len(indices)} times at indices: {indices}")
+                    logger.error(f"  Value: {dup}")
+                    logger.error(
+                        f"  Appears {len(indices)} times at indices: {indices}"
+                    )
 
                 raise ValueError(
-                    f"Duplicate values found in forecast_mean coordinate '{coord_name}': {duplicates}"
+                    f"Duplicate values found in {source}/{file_type} coordinate "
+                    f"'{coord_name}': {duplicates}"
                 )
 
-        return forecast_mean
+        return ds
 
     def _interpolate_all(
         self,
         needed_combos: list[dict],
-        forecast_mean: xr.Dataset,
+        ds: xr.Dataset,
         source: str = "forecast",
     ) -> pd.DataFrame:
         """Interpolate model forecasts to all observation combos.
 
-        For each instrument/quantity combination, fetches observations from
-        DuckDB, performs interpolation (simple or operator-based), and
-        assembles results.
+        Operates in three phases:
+        1. Gather: fetch all observation data from DuckDB and compute time
+           bracket assignments for every combo. All DuckDB access is
+           concentrated here, in the main thread.
+        2. Execute: iterate over unique brackets (across all combos). Each
+           bracket's 1-2 timesteps are materialized in the main thread
+           (safe for dask), then the scipy interpolation for every combo
+           sharing that bracket is dispatched to a ThreadPoolExecutor.
+           A bounded prefetch queue overlaps I/O with compute.
+        3. Collect: concatenate all results.
 
         Args:
             needed_combos: List of combo dicts from _determine_needed_combos
-            forecast_mean: Lazy forecast Dataset
+            ds: Lazy Dataset (forecast or analysis, mean or sd)
             source: Either 'forecast' or 'analysis'. For analysis, observation
                 times are snapped to the nearest available time in the dataset
                 since analysis files have only one timestep per cycle.
@@ -242,20 +280,34 @@ class ModelInterpolation:
         Returns:
             DataFrame with all observations and their model_value
         """
-        instrument_filter = self._instrument_where_clause(prefix="AND")
+        instrument_filter, instrument_params = self._instrument_where_clause(prefix="AND")
         all_results = []
+
+        ds_times = pd.DatetimeIndex(ds["t"].values)
+        ds_times_values = ds_times.values
+        n_times = len(ds_times)
+        ds_t_min = ds_times_values[0]
+        ds_t_max = ds_times_values[-1]
+        # Observations farther than this from the dataset time range are treated
+        # as invalid and their model values are set to NaN. Inside the range
+        # (or within max_time_gap of an edge) we clamp/snap and interpolate.
+        max_time_gap = np.timedelta64(1, "h")
+
+        # --- Phase 1: Gather observation data and bracket assignments ---
+        combo_work_list: list[dict] = []
+        # bracket_key -> [(combo_idx, obs_indices_into_that_combo)]
+        bracket_work: dict[int, list[tuple[int, np.ndarray]]] = defaultdict(list)
 
         for combo in needed_combos:
             instrument = combo["instrument"]
             quantity = combo["quantity"]
-            z_type = combo["z_type"]
             quantity_info = QUANTITY_REGISTRY[quantity]
+            tag = f"[{instrument}/{quantity}]"
 
             logger.info(
-                f"Interpolating {instrument}/{quantity}(vars={combo['wrf_vars']}, z_type={z_type})"
+                f"{tag} Fetching (vars={combo['wrf_vars']}, z_type={combo['z_type']})"
             )
 
-            # Determine if we need to fetch metadata from DuckDB
             metadata_sql = ""
             if (
                 quantity_info.operator is not None
@@ -267,106 +319,258 @@ class ModelInterpolation:
                 )
                 metadata_sql = f", {meta_extracts}"
 
-            # Fetch numeric + geographic columns from DuckDB
             with self.exp.obs._get_duckdb(read_only=True) as con:
                 arrays = con.execute(
                     f"""
                     SELECT rowid, time, x, y, z, latitude, longitude, value
                         {metadata_sql}
                     FROM observations
-                    WHERE instrument = ? AND quantity = ? -- AND qc_flag IN (0, -1)
+                    WHERE instrument = ? AND quantity = ?
                     {instrument_filter}
                     """,
-                    [instrument, quantity],
+                    [instrument, quantity, *instrument_params],
                 ).fetchnumpy()
 
             n_obs = len(arrays["x"])
             if n_obs == 0:
-                logger.warning(f"No observations for {instrument}/{quantity}, skipping")
+                logger.warning(f"{tag} No observations, skipping")
                 continue
 
-            logger.info(f"  {n_obs} observations")
+            logger.info(f"{tag} {n_obs} observations")
 
             times = pd.DatetimeIndex(arrays["time"]).tz_localize(None)
-            batch_t = xr.DataArray(times, dims="obs")
+            orig_times = times.values
 
-            # Analysis files have one timestep per cycle, so temporal
-            # interpolation won't work. Snap each obs time to the nearest
-            # available time in the dataset instead.
+            # Compute effective observation times with snapping/clamping, and
+            # flag obs that are too far outside the dataset time range as invalid.
             if source == "analysis":
-                ds_times = pd.DatetimeIndex(forecast_mean["t"].values)
                 nearest_idx = ds_times.get_indexer(times, method="nearest")
-                batch_t = xr.DataArray(ds_times[nearest_idx], dims="obs")
-
-            # For forecast files, we clamp the batch time to the end of the cycle
-            # so the plot correctly shows observation that might be after the end.
-            # Otherwise the plot would always end at cycle end, even though we assimilate
-            # for at least 30 minutes afterwards
-            if source == "forecast":
-                cycle_end = forecast_mean.t.max()
-                batch_t = xr.where(batch_t > cycle_end, cycle_end, batch_t)
-
-            wrf_var = quantity_info.model_equivalent
-
-            n_chunks = math.ceil(n_obs / self.batch_size)
-            if n_chunks > 1:
-                logger.info(
-                    f"  Splitting {n_obs} observations into {n_chunks} chunks of {self.batch_size}"
+                eff_times = ds_times_values[nearest_idx]
+                invalid_time = np.abs(orig_times - eff_times) > max_time_gap
+            else:
+                eff_times = np.clip(orig_times, ds_t_min, ds_t_max)
+                invalid_time = (orig_times < ds_t_min - max_time_gap) | (
+                    orig_times > ds_t_max + max_time_gap
                 )
 
-            for chunk_idx in range(n_chunks):
-                start = chunk_idx * self.batch_size
-                end = min(start + self.batch_size, n_obs)
-                if n_chunks > 1:
-                    logger.info(
-                        f"  Chunk {chunk_idx + 1}/{n_chunks} (obs {start}–{end - 1})"
-                    )
-
-                chunk_arrays = {k: v[start:end] for k, v in arrays.items()}
-                chunk_t = batch_t[start:end]
-                chunk_x = xr.DataArray(arrays["x"][start:end], dims="obs")
-                chunk_y = xr.DataArray(arrays["y"][start:end], dims="obs")
-
-                if quantity_info.operator is not None:
-                    model_vals = self._apply_operator(
-                        forecast_mean,
-                        quantity_info.operator,
-                        z_type,
-                        chunk_t,
-                        chunk_x,
-                        chunk_y,
-                        chunk_arrays,
-                    )
-                else:
-                    model_vals = self._interpolate_simple(
-                        forecast_mean,
-                        wrf_var,
-                        z_type,
-                        chunk_t,
-                        chunk_x,
-                        chunk_y,
-                        chunk_arrays["z"],
-                    )
-
-                all_results.append(
-                    pd.DataFrame(
-                        {
-                            "rowid": chunk_arrays["rowid"],
-                            "model_value": model_vals,
-                        }
-                    )
+            n_invalid_time = int(invalid_time.sum())
+            if n_invalid_time > 0:
+                logger.warning(
+                    f"{tag} {n_invalid_time}/{n_obs} obs are >1h outside dataset time "
+                    f"range; their model values will be NaN"
                 )
 
+            # Find bracketing timestep indices for each observation.
+            # searchsorted('right') gives the index of the first dataset time
+            # strictly greater than the obs time, so the bracket is
+            # (right-1, right), clamped to valid range.
+            right_idx = np.searchsorted(ds_times_values, eff_times, side="right")
+            right_idx = np.clip(right_idx, 0, n_times - 1)
+            left_idx = np.clip(right_idx - 1, 0, n_times - 1)
+
+            # Group observations by their time bracket using a single scalar
+            # key per (left, right) pair
+            bracket_keys = left_idx * n_times + right_idx
+            unique_keys = np.unique(bracket_keys)
+
+            logger.info(f"{tag} {len(unique_keys)} time brackets")
+
+            combo_idx = len(combo_work_list)
+            combo_work_list.append(
+                {
+                    "combo": combo,
+                    "arrays": arrays,
+                    "eff_times": eff_times,
+                    "invalid_time": invalid_time,
+                    "quantity_info": quantity_info,
+                }
+            )
+
+            for bkey in unique_keys:
+                obs_idx = np.where(bracket_keys == bkey)[0]
+                bracket_work[bkey].append((combo_idx, obs_idx))
+
+        if not combo_work_list:
+            return pd.DataFrame(columns=["rowid", "model_value"])
+
+        # --- Phase 2: Execute with ThreadPoolExecutor (bounded prefetch) ---
+        # The main thread materializes 1-2 timesteps per bracket synchronously
+        # (avoids dask thread-safety issues), while worker threads run scipy
+        # interpolation in parallel (numpy/scipy release the GIL).
+        sorted_brackets = sorted(bracket_work.keys())
+        max_workers = max(1, (os.cpu_count() or 4) - 1)
+        # Keep a deep queue so workers always have something to do.
+        # Loading one bracket (1-2 timesteps) is typically slower than
+        # computing it, so with max_inflight = max_workers + 2 workers
+        # drain the queue and idle. A 4x multiplier pre-loads enough
+        # brackets that the pipeline stays full even if I/O is bursty.
+        max_inflight = max_workers * 4
+        n_brackets = len(sorted_brackets)
+        logger.info(
+            f"Processing {n_brackets} unique brackets "
+            f"with up to {max_workers} workers"
+        )
+
+        bracket_iter = iter(sorted_brackets)
+        pending: dict = {}
+
+        progress = Progress(
+            TextColumn("[bold]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            TextColumn("{task.fields[extra]}"),
+            console=console,
+        )
+        task_done = progress.add_task("Brackets", total=n_brackets, extra="")
+
+        def _update_progress() -> None:
+            progress.update(task_done, extra=f"[dim]{len(pending)} in queue[/dim]")
+
+        def _load_and_submit(bkey: int) -> None:
+            bl = int(bkey // n_times)
+            br = int(bkey % n_times)
+            logger.debug(f"  Loading bracket t[{bl}]..t[{br}]")
+            # Materialize only the 1-2 needed timesteps in the main thread.
+            # scheduler="synchronous" prevents dask from spawning its own threads.
+            ds_sub = ds.isel(t=slice(bl, br + 1)).compute(
+                scheduler="synchronous"
+            )
+            future = executor.submit(
+                self._process_bracket,
+                ds_sub,
+                bracket_work[bkey],
+                combo_work_list,
+                bkey,
+                n_times,
+            )
+            pending[future] = bkey
+            _update_progress()
+
+        with progress, ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Seed with just enough brackets to keep all workers busy immediately.
+            # The drain loop below tops up to max_inflight after each batch of
+            # completions, so the deep queue is maintained without blocking the
+            # main thread for a long time before any draining begins.
+            for _ in range(min(max_workers + 2, n_brackets)):
+                try:
+                    _load_and_submit(next(bracket_iter))
+                except StopIteration:
+                    break
+
+            while pending:
+                done, _ = wait(pending.keys(), return_when=FIRST_COMPLETED)
+                for future in done:
+                    pending.pop(future)
+                    all_results.extend(future.result())
+                    progress.advance(task_done)
+                # Top up to max_inflight after each drain batch
+                while len(pending) < max_inflight:
+                    try:
+                        _load_and_submit(next(bracket_iter))
+                    except StopIteration:
+                        break
+                _update_progress()
+
+        # --- Phase 3: Collect ---
         return pd.concat(all_results, ignore_index=True)
+
+    def _process_bracket(
+        self,
+        ds_sub: xr.Dataset,
+        bracket_combos: list[tuple[int, np.ndarray]],
+        combo_work_list: list[dict],
+        bkey: int,
+        n_times: int,
+    ) -> list[pd.DataFrame]:
+        """Process all combos for a single time bracket.
+
+        Called from worker threads. Operates only on the in-memory
+        (numpy-backed) ds_sub — no dask or DuckDB access here.
+
+        Args:
+            ds_sub: In-memory Dataset with 1-2 timesteps already materialized
+            bracket_combos: List of (combo_idx, obs_indices) pairs sharing this bracket
+            combo_work_list: Pre-fetched combo data from Phase 1
+            bkey: Bracket key (encoded as left_idx * n_times + right_idx)
+            n_times: Total number of timesteps in the dataset
+
+        Returns:
+            List of DataFrames, one per (combo, bracket) pair
+        """
+        bl = int(bkey // n_times)
+        br = int(bkey % n_times)
+        logger.debug(f"  Bracket t[{bl}]..t[{br}]: {len(bracket_combos)} combos")
+
+        results = []
+        for combo_idx, obs_idx in bracket_combos:
+            cw = combo_work_list[combo_idx]
+            combo = cw["combo"]
+            arrays = cw["arrays"]
+            eff_times = cw["eff_times"]
+            invalid_time = cw["invalid_time"]
+            quantity_info = cw["quantity_info"]
+            z_type = combo["z_type"]
+
+            # Slice only what we need for this bracket/combo instead of copying
+            # every column in `arrays`.
+            obs_t = eff_times[obs_idx]
+            obs_x = arrays["x"][obs_idx]
+            obs_y = arrays["y"][obs_idx]
+            obs_z = arrays["z"][obs_idx]
+            rowid = arrays["rowid"][obs_idx]
+
+            if quantity_info.operator is not None:
+                metadata = {
+                    key: arrays[f"meta_{key}"][obs_idx]
+                    for key in quantity_info.operator.required_metadata
+                    if f"meta_{key}" in arrays
+                }
+                model_vals = self._apply_operator(
+                    ds_sub,
+                    quantity_info.operator,
+                    z_type,
+                    obs_t,
+                    obs_x,
+                    obs_y,
+                    obs_z,
+                    metadata,
+                )
+            else:
+                model_vals = self._interpolate_simple(
+                    ds_sub,
+                    quantity_info.model_equivalent,
+                    z_type,
+                    obs_t,
+                    obs_x,
+                    obs_y,
+                    obs_z,
+                )
+
+            # NaN out obs that fall outside the dataset time range.
+            invalid_subset = invalid_time[obs_idx]
+            if invalid_subset.any():
+                model_vals = np.where(invalid_subset, np.nan, model_vals)
+
+            results.append(
+                pd.DataFrame(
+                    {
+                        "rowid": rowid,
+                        "model_value": model_vals,
+                    }
+                )
+            )
+
+        return results
 
     def _interpolate_simple(
         self,
-        forecast_mean: xr.Dataset,
+        ds: xr.Dataset,
         wrf_var: str,
         z_type: str,
-        batch_t: xr.DataArray,
-        batch_x: xr.DataArray,
-        batch_y: xr.DataArray,
+        obs_t: np.ndarray,
+        obs_x: np.ndarray,
+        obs_y: np.ndarray,
         obs_z: np.ndarray,
     ) -> np.ndarray:
         """Interpolate a single model field to observation locations.
@@ -375,12 +579,12 @@ class ModelInterpolation:
         model_equivalent mapping.
 
         Args:
-            forecast_mean: Lazy forecast Dataset
+            ds: In-memory Dataset
             wrf_var: WRF variable name
             z_type: Vertical coordinate type ("columnar", "surface", "height", "pressure")
-            batch_t: Time coordinates for observations
-            batch_x: X coordinates for observations
-            batch_y: Y coordinates for observations
+            obs_t: Observation times (datetime64)
+            obs_x: Observation x coordinates
+            obs_y: Observation y coordinates
             obs_z: Vertical coordinate values for observations
 
         Returns:
@@ -388,30 +592,30 @@ class ModelInterpolation:
         """
         n_obs = len(obs_z)
 
-        if wrf_var not in forecast_mean.data_vars:
+        if wrf_var not in ds.data_vars:
             logger.warning(f"Variable {wrf_var} not in forecast data")
             return np.full(n_obs, np.nan)
 
         if z_type in ("columnar", "surface"):
-            return forecast_mean[wrf_var].interp(t=batch_t, x=batch_x, y=batch_y).values
+            return self._hor_interp(ds, [wrf_var], obs_t, obs_x, obs_y)[wrf_var]
         elif z_type == "height":
             return self._interp_vertical(
-                forecast_mean,
+                ds,
                 wrf_var,
                 "geopotential_height",
-                batch_t,
-                batch_x,
-                batch_y,
+                obs_t,
+                obs_x,
+                obs_y,
                 obs_z,
             )
         elif z_type == "pressure":
             return self._interp_vertical(
-                forecast_mean,
+                ds,
                 wrf_var,
                 "air_pressure",
-                batch_t,
-                batch_x,
-                batch_y,
+                obs_t,
+                obs_x,
+                obs_y,
                 obs_z,
                 flip=True,
             )
@@ -421,13 +625,14 @@ class ModelInterpolation:
 
     def _apply_operator(
         self,
-        forecast_mean: xr.Dataset,
+        ds: xr.Dataset,
         operator: OperatorSpec,
         z_type: str,
-        batch_t: xr.DataArray,
-        batch_x: xr.DataArray,
-        batch_y: xr.DataArray,
-        obs_arrays: dict,
+        obs_t: np.ndarray,
+        obs_x: np.ndarray,
+        obs_y: np.ndarray,
+        obs_z: np.ndarray,
+        metadata: dict[str, np.ndarray],
     ) -> np.ndarray:
         """Interpolate all required model fields and apply the observation operator.
 
@@ -435,29 +640,36 @@ class ModelInterpolation:
         - dims=2: horizontal/temporal interpolation to a scalar per obs
         - dims=3: horizontal/temporal + vertical interpolation to a scalar per obs
 
-        Metadata fields are extracted from the DuckDB query results (already
-        present in obs_arrays as meta_<key> columns).
+        Note on NaN handling:
+            operator.func may receive NaN-valued entries in `model_fields`
+            (e.g. when z_type is unknown for 3D fields, the corresponding
+            arrays are NaN-filled so other 2D fields can still be passed
+            through). Metadata arrays may also contain NaN if the converter
+            did not populate every observation. Operator implementations
+            must tolerate per-observation NaN input and propagate NaN to
+            their output for those rows rather than raising.
 
         Args:
-            forecast_mean: Lazy forecast Dataset
+            ds: In-memory Dataset
             operator: The OperatorSpec to apply
             z_type: Vertical coordinate type
-            batch_t: Time coordinates for observations
-            batch_x: X coordinates for observations
-            batch_y: Y coordinates for observations
-            obs_arrays: Dict of arrays from the DuckDB query, including
-                meta_<key> columns for required metadata
+            obs_t: Observation times (datetime64)
+            obs_x: Observation x coordinates
+            obs_y: Observation y coordinates
+            obs_z: Vertical coordinate values for observations
+            metadata: Dict mapping required metadata key -> array of values
+                already sliced to this bracket's observations
 
         Returns:
             (n_obs,) array of operator-computed model-equivalent values
         """
-        n_obs = len(obs_arrays["x"])
+        n_obs = len(obs_x)
 
         # Check that all required model fields are available
         missing_fields = [
             f.name
             for f in operator.required_model_fields
-            if f.name not in forecast_mean.data_vars
+            if f.name not in ds.data_vars
         ]
         if missing_fields:
             logger.warning(
@@ -465,26 +677,19 @@ class ModelInterpolation:
             )
             return np.full(n_obs, np.nan)
 
-        # Split fields by dimensionality so we can batch the horizontal
-        # interpolation into as few dask graph evaluations as possible.
         fields_2d = [f for f in operator.required_model_fields if f.dims == 2]
         fields_3d = [f for f in operator.required_model_fields if f.dims == 3]
 
         model_fields: dict[str, np.ndarray] = {}
 
-        # Batch all 2D fields in a single interp + compute
+        # Batch all 2D fields in a single _hor_interp call
         if fields_2d:
             names_2d = [f.name for f in fields_2d]
-            interp_2d = (
-                forecast_mean[names_2d]
-                .interp(t=batch_t, x=batch_x, y=batch_y)
-                .compute()
-            )
+            interped = self._hor_interp(ds, names_2d, obs_t, obs_x, obs_y)
             for name in names_2d:
-                model_fields[name] = interp_2d[name].values
+                model_fields[name] = interped[name]
 
-        # Batch all 3D fields + vertical coord in a single interp + compute,
-        # then do per-field vertical interpolation from the cached profiles.
+        # Batch all 3D fields + vertical coord, then do per-field vertical interp
         if fields_3d:
             if z_type == "height":
                 vert_coord = "geopotential_height"
@@ -501,35 +706,30 @@ class ModelInterpolation:
             if vert_coord is not None:
                 names_3d = [f.name for f in fields_3d]
                 all_3d_vars = list(set(names_3d + [vert_coord]))
-                interp_3d = (
-                    forecast_mean[all_3d_vars]
-                    .interp(t=batch_t, x=batch_x, y=batch_y)
-                    .compute()
+                interped = self._hor_interp(
+                    ds, all_3d_vars, obs_t, obs_x, obs_y
                 )
-                coord_profiles = interp_3d[vert_coord].values
+                coord_profiles = interped[vert_coord]
                 if flip:
                     coord_profiles = coord_profiles[:, ::-1]
 
                 for name in names_3d:
-                    profiles = interp_3d[name].values
+                    profiles = interped[name]
                     if flip:
                         profiles = profiles[:, ::-1]
                     model_fields[name] = self._vertical_interp_1d(
-                        profiles, coord_profiles, obs_arrays["z"]
+                        profiles, coord_profiles, obs_z
                     )
 
-        # Collect metadata arrays (extracted via SQL in _interpolate_all)
-        metadata: dict[str, np.ndarray] = {}
+        # Validate metadata presence and log NaN fraction
         for key in operator.required_metadata:
-            col_name = f"meta_{key}"
-            if col_name not in obs_arrays:
+            if key not in metadata:
                 logger.error(
                     f"Required metadata '{key}' not found in observation data. "
                     "Check that the converter populates this field."
                 )
                 return np.full(n_obs, np.nan)
-
-            vals = obs_arrays[col_name]
+            vals = metadata[key]
             n_invalid = (
                 np.sum(np.isnan(vals)) if np.issubdtype(vals.dtype, np.floating) else 0
             )
@@ -538,18 +738,17 @@ class ModelInterpolation:
                     f"Metadata '{key}' has {n_invalid}/{n_obs} NaN values "
                     f"({100 * n_invalid / n_obs:.1f}%)"
                 )
-            metadata[key] = vals
 
         return operator.func(model_fields, metadata)
 
     def _interp_vertical(
         self,
-        forecast_mean: xr.Dataset,
+        ds: xr.Dataset,
         wrf_var: str,
         vertical_coord_var: str,
-        batch_t: xr.DataArray,
-        batch_x: xr.DataArray,
-        batch_y: xr.DataArray,
+        obs_t: np.ndarray,
+        obs_x: np.ndarray,
+        obs_y: np.ndarray,
         obs_z: np.ndarray,
         flip: bool = False,
     ) -> np.ndarray:
@@ -560,14 +759,14 @@ class ModelInterpolation:
         interpolation per observation.
 
         Args:
-            forecast_mean: Lazy forecast Dataset
+            ds: In-memory Dataset
             wrf_var: Name of the target variable
             vertical_coord_var: Name of the vertical coordinate variable
                 (e.g., 'geopotential_height' for height, 'air_pressure' for
                 pressure)
-            batch_t: Time coordinates for observations
-            batch_x: X coordinates for observations
-            batch_y: Y coordinates for observations
+            obs_t: Observation times (datetime64)
+            obs_x: Observation x coordinates
+            obs_y: Observation y coordinates
             obs_z: Target vertical coordinate values (height or pressure)
             flip: If True, reverse the vertical axis before interpolation
                 (needed for pressure, which decreases with altitude)
@@ -575,23 +774,124 @@ class ModelInterpolation:
         Returns:
             Array of interpolated values, one per observation
         """
-        # Interpolate both the target variable and the vertical coordinate
-        # horizontally/temporally in a single compute call to avoid
-        # evaluating the dask graph twice.
-        interp_ds = (
-            forecast_mean[[wrf_var, vertical_coord_var]]
-            .interp(t=batch_t, x=batch_x, y=batch_y)
-            .compute()
+        interped = self._hor_interp(
+            ds, [wrf_var, vertical_coord_var], obs_t, obs_x, obs_y
         )
 
-        profiles = interp_ds[wrf_var].values  # (n_obs, n_levels)
-        coord_profiles = interp_ds[vertical_coord_var].values  # (n_obs, n_levels)
+        profiles = interped[wrf_var]            # (n_obs, n_levels)
+        coord_profiles = interped[vertical_coord_var]  # (n_obs, n_levels)
 
         if flip:
             profiles = profiles[:, ::-1]
             coord_profiles = coord_profiles[:, ::-1]
 
         return self._vertical_interp_1d(profiles, coord_profiles, obs_z)
+
+    @staticmethod
+    def _hor_interp(
+        ds: xr.Dataset,
+        var_names: list[str],
+        obs_t: np.ndarray,
+        obs_x: np.ndarray,
+        obs_y: np.ndarray,
+    ) -> dict[str, np.ndarray]:
+        """Trilinear interpolation in (t, x, y) using pure numpy.
+
+        Replaces xarray.interp() + scipy.RegularGridInterpolator for the
+        horizontal/temporal dimensions. All heavy work is pure numpy (C-level
+        operations that release the GIL), enabling true thread parallelism.
+
+        For 2D variables (t, x, y) returns shape (n_obs,).
+        For 3D variables (t, x, y, vert) returns shape (n_obs, n_levels) so
+        the caller can do vertical interpolation afterwards.
+
+        Args:
+            ds: In-memory (numpy-backed) Dataset with dims t, x, y [, vert]
+            var_names: Variables to interpolate
+            obs_t: Observation times (datetime64, n_obs)
+            obs_x: Observation x coordinates (n_obs,)
+            obs_y: Observation y coordinates (n_obs,)
+
+        Returns:
+            Dict mapping var_name -> interpolated numpy array
+        """
+        t_c = ds["t"].values.astype("datetime64[ns]").astype(np.float64)
+        x_c = ds["x"].values.astype(np.float64)
+        y_c = ds["y"].values.astype(np.float64)
+        obs_t_f = obs_t.astype("datetime64[ns]").astype(np.float64)
+
+        def _bracket_weight(coords: np.ndarray, vals: np.ndarray):
+            """Return (left_indices, weights) for linear interpolation.
+
+            The single-coordinate branch returns `(0, 0)` for every point; this
+            is paired with the `data = concatenate([data, data], axis=...)`
+            padding below so that the unrolled `for dt/dx/dy in range(2)` loop
+            sees `data[0]` and `data[1]` (both identical). Weights `(1-0)*1
+            + 0*1 = 1` land entirely on the duplicated slice, giving the same
+            result as "no interpolation" along that axis.
+            """
+            if len(coords) == 1:
+                return np.zeros(len(vals), dtype=np.intp), np.zeros(len(vals))
+            idx = np.searchsorted(coords, vals, side="right") - 1
+            idx = np.clip(idx, 0, len(coords) - 2)
+            dc = coords[idx + 1] - coords[idx]
+            w = np.where(dc == 0, 0.0, (vals - coords[idx]) / dc)
+            return idx, np.clip(w, 0.0, 1.0)
+
+        it, wt = _bracket_weight(t_c, obs_t_f)
+        ix, wx = _bracket_weight(x_c, obs_x.astype(np.float64))
+        iy, wy = _bracket_weight(y_c, obs_y.astype(np.float64))
+
+        # Pre-compute both weights for each dimension
+        awt = (1.0 - wt, wt)
+        awx = (1.0 - wx, wx)
+        awy = (1.0 - wy, wy)
+
+        result: dict[str, np.ndarray] = {}
+        for name in var_names:
+            var = ds[name]
+            vert_dims = [d for d in var.dims if d not in ("t", "x", "y")]
+            if len(vert_dims) > 1:
+                raise ValueError(
+                    f"Variable {name!r} has multiple non-(t,x,y) dims {vert_dims}; "
+                    "only a single vertical dim is supported"
+                )
+
+            if vert_dims:
+                z_dim = vert_dims[0]
+                data = var.transpose("t", "x", "y", z_dim).values  # (n_t, n_x, n_y, n_z)
+                # Pad to 2 along each axis so idx+1 is always valid
+                if data.shape[0] == 1:
+                    data = np.concatenate([data, data], axis=0)
+                if data.shape[1] == 1:
+                    data = np.concatenate([data, data], axis=1)
+                if data.shape[2] == 1:
+                    data = np.concatenate([data, data], axis=2)
+                n_z = data.shape[3]
+                out = np.zeros((len(obs_t), n_z), dtype=np.float64)
+                for dt in range(2):
+                    for dx in range(2):
+                        for dy in range(2):
+                            w = (awt[dt] * awx[dx] * awy[dy])[:, np.newaxis]
+                            out += w * data[it + dt, ix + dx, iy + dy]
+            else:
+                data = var.transpose("t", "x", "y").values  # (n_t, n_x, n_y)
+                if data.shape[0] == 1:
+                    data = np.concatenate([data, data], axis=0)
+                if data.shape[1] == 1:
+                    data = np.concatenate([data, data], axis=1)
+                if data.shape[2] == 1:
+                    data = np.concatenate([data, data], axis=2)
+                out = np.zeros(len(obs_t), dtype=np.float64)
+                for dt in range(2):
+                    for dx in range(2):
+                        for dy in range(2):
+                            w = awt[dt] * awx[dx] * awy[dy]
+                            out += w * data[it + dt, ix + dx, iy + dy]
+
+            result[name] = out
+
+        return result
 
     @staticmethod
     def _vertical_interp_1d(
@@ -620,10 +920,9 @@ class ModelInterpolation:
         result = np.empty(n_obs, dtype=np.float64)
 
         # Split into all-valid (vectorizable) and has-NaN (needs loop)
-        all_valid = (
-            np.isfinite(coord_profiles).all(axis=1)
-            & np.isfinite(value_profiles).all(axis=1)
-        )
+        all_valid = np.isfinite(coord_profiles).all(axis=1) & np.isfinite(
+            value_profiles
+        ).all(axis=1)
         valid_idx = np.where(all_valid)[0]
         nan_idx = np.where(~all_valid)[0]
 

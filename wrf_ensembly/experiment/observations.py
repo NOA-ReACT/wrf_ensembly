@@ -463,16 +463,25 @@ class ExperimentObservations:
             update_df = df[["rowid", "model_value"]].copy()
             con.register("model_values_view", update_df)
 
-            # Clear old values only where they exist, then set new ones
-            con.execute(f"UPDATE observations SET {col} = NULL WHERE {col} IS NOT NULL")
-            con.execute(
-                f"""
-                UPDATE observations
-                SET {col} = mv.model_value
-                FROM model_values_view mv
-                WHERE observations.rowid = mv.rowid
-                """
-            )
+            # Clear old values and apply new ones atomically, so a failure in
+            # the populating UPDATE cannot leave the column fully NULLed.
+            con.execute("BEGIN TRANSACTION")
+            try:
+                con.execute(
+                    f"UPDATE observations SET {col} = NULL WHERE {col} IS NOT NULL"
+                )
+                con.execute(
+                    f"""
+                    UPDATE observations
+                    SET {col} = mv.model_value
+                    FROM model_values_view mv
+                    WHERE observations.rowid = mv.rowid
+                    """
+                )
+                con.execute("COMMIT")
+            except Exception:
+                con.execute("ROLLBACK")
+                raise
 
         return len(update_df)
 
@@ -497,15 +506,23 @@ class ExperimentObservations:
             update_df = df[["rowid", "model_value"]].copy()
             con.register("model_spread_view", update_df)
 
-            con.execute(f"UPDATE observations SET {col} = NULL WHERE {col} IS NOT NULL")
-            con.execute(
-                f"""
-                UPDATE observations
-                SET {col} = mv.model_value
-                FROM model_spread_view mv
-                WHERE observations.rowid = mv.rowid
-                """
-            )
+            con.execute("BEGIN TRANSACTION")
+            try:
+                con.execute(
+                    f"UPDATE observations SET {col} = NULL WHERE {col} IS NOT NULL"
+                )
+                con.execute(
+                    f"""
+                    UPDATE observations
+                    SET {col} = mv.model_value
+                    FROM model_spread_view mv
+                    WHERE observations.rowid = mv.rowid
+                    """
+                )
+                con.execute("COMMIT")
+            except Exception:
+                con.execute("ROLLBACK")
+                raise
 
         return len(update_df)
 
