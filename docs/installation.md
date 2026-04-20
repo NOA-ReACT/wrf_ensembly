@@ -22,6 +22,10 @@ pip install wrf_ensembly
 mamba create -n wrf_ensembly python=3.11
 mamba activate wrf_ensembly
 pip install wrf_ensembly
+
+# Or with uv
+uv venv
+uv pip install wrf_ensembly
 ```
 
 ## External dependencies
@@ -30,11 +34,7 @@ WRF-Ensembly requires the following external dependencies:
 
 - Compiled WRF and WPS. Version is not important but the latest is recommended and what is used by the developers. More info on the model [here](https://github.com/wrf-model/WRF).
 - Compiled DART. Again version is not important but all tests are done with the latest github clone. More info on DART [here](https://github.com/NCAR/DART).
-- For postprocessing, `cdo` and `nco` are used to wrangle with the netCDF files. If you installed WRF-Ensembly in a conda/mamba environment, you can also install `cdo` and `nco` with:
-
-```bash
-# or mamba or micromamba or ...
-conda install -c conda-forge cdo nco
+- Some observation converterters have optional dependencies that are not pulled by default to either save space or because they are tricky to installed. They are documented in [Observations](./observations.md) and also when you try to run them.
 ```
 
 ## Development & Contributing

@@ -1,32 +1,35 @@
 # Observations
 
-WRF-Ensembly provides a comprehensive observation system for handling observational data in ensemble assimilation experiments. The system converts observations from various instruments into a standardized format, processes them spatially and temporally for your experiment domain, and integrates seamlessly with DART for data assimilation.
+WRF-Ensembly provides an observation system for handling observational data in ensemble assimilation experiments. The system converts observations from various instruments into a standardized format, processes them spatially and temporally for your experiment domain, and integrates with DART for data assimilation.
 
-For a complete list of observation-related commands, see the [Usage](usage.md#observations) documentation. Configuration options are detailed in the [Configuration](configuration.md#observations) reference.
+For configuration options, see the [Configuration](configuration.md#observations) reference.
 
 ## Overview
 
 The observation system consists of several key components:
 
-- **Standardized Format** - A unified parquet-based observation format that all instruments are converted to
-- **Converters** - Instrument-specific modules that transform raw observation data to the standard format
-- **Database Management** - DuckDB-based storage and querying of observations within experiments
-- **Spatial/Temporal Processing** - Tools for trimming observations to experiment domains and time windows
-- **Superorbing** - Downsampling techniques to reduce observation density while preserving information
-- **DART Integration** - Conversion to DART's obs_seq format for data assimilation
+- **Standardized Format** - A unified parquet-based observation format; all raw data is converted to this target.
+- **Instrument & Quantity Registry** - Definitions for supported instruments, physical quantities, and observation operators (`definitions.py`).
+- **Converters** - Instrument-specific modules that transform raw observation data to the standard format.
+- **Database Management** - DuckDB-based storage and querying of observations within experiments.
+- **Spatial/Temporal Processing** - Tools for trimming observations to experiment domains and time windows.
+- **Density Reduction** - Superobbing, temporal binning, and stride thinning to reduce observation density.
+- **DART Integration** - Conversion to DART's obs_seq format for data assimilation.
+- **Validation** - Interpolation routines to compare model output against observations (O-B statistics).
+- **Plotting** - Observation-only and observation-vs-model plotting routines.
 
-While DART already includes an observation management system that covers some of the above functionalities, WRF-Ensembly includes it's own to facilitate extra functionality, such as validation and plotting. Subjectively, it is also easier to write data converters in Python than in Fortran, given that even the most obscure observation data format is likely to have a Python library available for reading it.
+While DART already includes an observation management system, WRF-Ensembly includes its own to facilitate extra tools, such as validation and plotting. This also makes it easier to write converters in Python, where even obscure observation formats usually have library support.
 
-Since observations in DART (and in DA in general) are tuples of location, time and value, we are using DataFrames to represent collections of observations. This allows us to leverage all the powerful data manipulation capabilities of pandas and DuckDB, keep file sizes low and enable easy inspection and plotting.
+Because WRF-Ensembly supports plotting and model comparisons, the aim is to support not only the observations that will be assimilated but all observations you will use in an experiment. For example, you might assimilate Instrument A while using Instrument B for validation — both should be added to the experiment.
 
 ## Observation Data Format
 
-The WRF-Ensembly observation format is a standardized schema stored as parquet files. Each observation record contains the following required columns:
+The WRF-Ensembly observation format is a standardized schema stored as parquet files. Each observation record contains:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `instrument` | string | Name of the observing instrument (e.g., "radiosonde", "aeronet") |
-| `quantity` | string | Physical quantity being observed (e.g., "temperature", "AOD_500nm") |
+| `instrument` | string | Name of the observing instrument (e.g., `AERONET`, `MODIS`) |
+| `quantity` | string | Physical quantity being observed (e.g., `AOD_550nm`) |
 | `time` | timestamp | UTC time of the observation |
 | `longitude` | float | Longitude in degrees (-180 to 180) |
 | `latitude` | float | Latitude in degrees (-90 to 90) |
@@ -34,14 +37,12 @@ The WRF-Ensembly observation format is a standardized schema stored as parquet f
 | `z_type` | string | Type of vertical coordinate (see below) |
 | `value` | float | The observed value (can be NaN for missing data) |
 | `value_uncertainty` | float | Observation uncertainty/error estimate |
-| `qc_flag` | int | Quality control flag (0 = good, higher values indicate issues) |
-| `orig_coords` | dict | Original coordinate information (indices, shape, names) |
+| `qc_flag` | int | Quality control flag (see [Quality Control](#quality-control)) |
+| `orig_coords` | struct | Original coordinate information (indices, shape, names) |
 | `orig_filename` | string | Name of the original data file |
-| `metadata` | string | Additional metadata as JSON string |
+| `metadata` | JSON string | Additional metadata (e.g., Aeolus azimuth angle) |
 
 ### Vertical Coordinate Types
-
-The `z_type` field specifies the type of vertical coordinate:
 
 | Value | Description | Units |
 |-------|-------------|-------|
@@ -51,158 +52,245 @@ The `z_type` field specifies the type of vertical coordinate:
 | `model_level` | Model vertical levels | level number |
 | `columnar` | Column-integrated values | N/A |
 
-### Array reconstruction
+For `instrument` and `quantity`, the convention is: everything instrument- and retrieval-specific is encoded in `instrument`, while `quantity` is instrument-agnostic. For example, `AEOLUS_L2A_MLE` and `AEOLUS_L2A_SCA` are two "instruments" representing different retrieval algorithms, but both use `LIDAR_EXTINCTION_355nm` as the quantity.
 
-While DA requires our data to be in tabular format, with each row being independent, it is often useful to reconstruct the original array structure of the data (e.g. for plotting, imagine you want to plot a vertical profile over time). To facilitate this, the `orig_coords` field contains information about the original array structure, specifically:
+### Array Reconstruction
 
-- `indices`: The indices of the observation in the original array
-- `shape`: The shape of the original array
-- `names`: The names of the original dimensions
+While DA requires tabular data with one observation per row, it is often useful to reconstruct the original array structure (e.g., a vertical profile over time, or a satellite image). To facilitate this, the `orig_coords` field stores:
 
-For example, imagine you convert a satellite image observation file, which is a 2D array of size (100x200). The `orig_coords` field for each observation would contain the indices of that observation in the 2D array, the overall shape (100, 200), and the names of the dimensions (e.g., "along_track", "across_track").
+- `indices`: The observation's position in the original array.
+- `shape`: The shape of the original array.
+- `names`: The names of the original dimensions.
 
-The function `wrf_ensembly.observations.utils.reconstruct_array()` can be used to reconstruct the original array structure as an xarray DataArray.
+The function `wrf_ensembly.observations.definitions.reshape_to_native()` reconstructs these arrays from a filtered DataFrame.
 
-### Internal database fields
+### Internal Database Fields
 
-After observations are added to the experiment database, a few additional fields are added for internal use:
+After observations are added to the experiment database, a few additional fields are used in the DuckDB file:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `x`, `y` | float | Projected coordinates in the WRF grid coordinate system |
-| `downsampling_info` | dict | Information about superorbing/downsampling (if applied) |
+| `model_forecast` | double | Model forecast equivalent value at this observation |
+| `model_analysis` | double | Model analysis equivalent value at this observation |
+| `model_forecast_spread` | double | Ensemble spread of the model forecast at this observation |
+| `model_analysis_spread` | double | Ensemble spread of the model analysis at this observation |
+
+The schema is kept stable so you can query `observations.duckdb` directly if needed.
+
+## Instruments, Quantities, and Observation Operators
+
+The `wrf_ensembly/observations/definitions.py` module is the central registry for instruments and quantities. It defines:
+
+- **`INSTRUMENT_REGISTRY`** — maps instrument name strings to `InstrumentSpec` (label, geometry type, axis information for plotting).
+- **`QUANTITY_REGISTRY`** — maps quantity name strings to `QuantitySpec` (label, units, colormap, model mapping or operator, DART quantity name).
+
+### Supported Instruments
+
+| Instrument | Description | Geometry |
+|------------|-------------|----------|
+| `AEOLUS_L2A_MLE` | AEOLUS L2A MLE extinction retrieval | Profile curtain |
+| `AEOLUS_L2A_SCA` | AEOLUS L2A SCA extinction retrieval | Profile curtain |
+| `AEOLUS_L2A_AEL_PRO` | AEOLUS L2A AEL-PRO extinction retrieval | Profile curtain |
+| `AEOLUS_L2B_RAYLEIGH` | AEOLUS L2B HLOS Wind (Rayleigh channel) | Wind results curtain |
+| `AEOLUS_L2B_MIE` | AEOLUS L2B HLOS Wind (Mie channel) | Wind results curtain |
+| `MSG_SEVIRI` | Meteosat SEVIRI brightness temperatures | 2D map swath |
+
+Additional instruments used by converters but not yet in `INSTRUMENT_REGISTRY` (plotting/operator support is limited): `AERONET`, `MODIS`, `VIIRS`, `EarthCARE_ATLID_EBD`, `REMOTAP_SPEXONE`.
+
+### Supported Quantities
+
+| Quantity | Label | Units | WRF Equivalent | DART Quantity |
+|----------|-------|-------|----------------|---------------|
+| `LIDAR_EXTINCTION_355nm` | Lidar Extinction @ 355nm | 1/m | `EXT355` | `LIDAR_EXTINCTION_355nm` |
+| `HLOS_WIND` | HLOS Wind | m/s | operator (see below) | `SAT_HLOS_WIND` |
+| `BT_WV62` | Brightness Temp WV 6.2 µm | K | `WV62` | — |
+| `BT_WV73` | Brightness Temp WV 7.3 µm | K | `WV73` | — |
+| `BT_IR87` | Brightness Temp IR 8.7 µm | K | `IR87` | — |
+| `BT_IR108` | Brightness Temp IR 10.8 µm | K | `IR108` | — |
+| `BT_IR120` | Brightness Temp IR 12.0 µm | K | `IR120` | — |
+| `AOD_355nm` | AOD @ 355nm | — | `AOD_355` | — |
+| `AOD_500nm` | AOD @ 500nm | — | `AOD_500` | `AIRSENSE_AOD` |
+| `AOD_550nm` | AOD @ 550nm | — | `AOD_550` | `AIRSENSE_AOD` |
+| `AOD_1064nm` | AOD @ 1064nm | — | `AOD_1064` | — |
+
+### Observation Operators
+
+`QuantitySpec` supports two ways to map observations to model fields:
+
+- **`model_equivalent`** — A direct WRF variable name. The system interpolates that variable to the observation location/time and uses it as-is. Example: `AOD_550nm` maps to WRF's `AOD_550`.
+
+- **`operator`** — An `OperatorSpec` for non-trivial transformations. The operator specifies:
+  - `func`: A Python callable `(model_fields: dict, metadata: dict) -> ndarray` that returns model-equivalent values.
+  - `required_model_fields`: `ModelFieldSpec` list specifying which WRF variables to interpolate (with `dims=2` for 2D or `dims=3` for 3D vertical interpolation).
+  - `required_metadata`: Keys to extract from the observation `metadata` JSON column.
+
+  The only current complex operator is `HLOS_WIND`, which projects the model's `wind_east` and `wind_north` (3D) onto the satellite's HLOS direction using the `azimuth` metadata field from Aeolus observations.
+
+## Quality Control
+
+QC flags control which observations are used for assimilation and validation:
+
+| QC Flag | Meaning | Behavior |
+|---------|---------|---------|
+| `0` | Good observation | Used in assimilation and validation |
+| `> 0` | Instrument or data quality issue | Excluded from assimilation; present in database |
+| `-1` | Validation hold-out (stride thinning) | Not assimilated; used in validation |
+| `99` | Zero or negative variance | Set automatically; excluded from assimilation |
+
+Positive QC flag values come from instrument-native QA flags and are set by the converters. Negative values are WRF-Ensembly internal flags.
 
 ## Workflow Overview
 
-The typical workflow for using observations in WRF-Ensembly follows these steps:
-
-1. **Convert Raw Data** - Transform instrument-specific files to the standardized WRF-Ensembly format
-2. **Add to Experiment** - Import observations into the experiment database with spatial/temporal trimming
-3. **Apply Superorbing** - Optionally downsample dense observations using clustering techniques
-4. **Prepare Cycles** - Extract observations for each assimilation cycle's time window
-5. **Convert to DART** - Transform to DART's obs_seq format for data assimilation
-6. **Assimilate** - Use in the ensemble data assimilation system
-
-```mermaid
-graph TD
-    A[Raw Observation Files] --> B[Convert to WRF-Ensembly Format]
-    B --> C[Add to Experiment Database]
-    C --> D[Apply Superorbing/Downsampling]
-    D --> E[Prepare Cycle-Specific Files]
-    E --> F[Convert to DART obs_seq Format]
-    F --> G[Use in Data Assimilation]
-```
+1. **Convert Raw Data** — Transform instrument-specific files to the standardized parquet format using `wrf-ensembly-obs convert`.
+2. **Add to Experiment** — Import observations into the experiment DuckDB with spatial/temporal trimming. Density reduction (superobs, temporal binning, thinning) is applied here.
+3. **Prepare Cycles** — Extract observations for each assimilation cycle's time window and convert to DART obs_seq format.
+4. **Assimilate** — DART reads the obs_seq files during `ensemble filter`.
+5. **Validate (optional)** — Interpolate model output to observation locations, then analyze O-B statistics.
 
 ## Converting Observations
 
+Converters are accessed through the `wrf-ensembly-obs convert` subcommand. This CLI is independent of `wrf-ensembly` and works without an experiment context.
+
 ### Available Converters
 
-The system includes converters for various observation types:
-
-| Converter | Description | Input Format |
-|-----------|-------------|--------------|
-| `aeronet` | Aerosol Robotic Network sun photometer data | `.lev20` files |
-| `remotap-spexone` | Satellite aerosol optical depth data | NetCDF files |
-| `template` | Template for creating new converters | N/A |
+| Converter | Instrument | Quantity | Input Format |
+|-----------|------------|----------|--------------|
+| `aeronet` | `AERONET` | `AOD_{wavelength}nm` | `.lev20` tabular files |
+| `remotap-spexone` | `REMOTAP_SPEXONE` | AOD | NetCDF files |
+| `aeolus-l2a` | `AEOLUS_L2A_MLE`, `AEOLUS_L2A_SCA`, `AEOLUS_L2A_AEL_PRO` | `LIDAR_EXTINCTION_355nm` | AEOLUS DBL L2A files |
+| `aeolus-l2b` | `AEOLUS_L2B_MIE`, `AEOLUS_L2B_RAYLEIGH` | `HLOS_WIND` | AEOLUS DBL L2B files |
+| `earthcare-atl-ebd` | `EarthCARE_ATLID_EBD` | `LIDAR_EXTINCTION_355nm` | EarthCARE ATLID EBD files |
+| `modis` | `MODIS` | `AOD_550nm` | MODIS AOD HDF4 files |
+| `viirs` | `VIIRS` | `AOD_550nm` | VIIRS AOD NetCDF files |
+| `msg-seviri` | `MSG_SEVIRI` | `BT_WV62`, `BT_WV73`, `BT_IR87`, `BT_IR108`, `BT_IR120` | SEVIRI native format (via satpy) |
 
 ### Using Converters
 
-Converters are accessed through the `wrf-ensembly-obs-convert` command:
-
 ```bash
-# Convert AERONET data
-wrf-ensembly-obs convert aeronet input_files/*.lev20 output.parquet
+# Convert AERONET data (specify quantities with --quantity)
+wrf-ensembly-obs convert aeronet input_files/*.lev20 output.parquet \
+  --quantity AOD_500nm --quantity AOD_550nm
 
-# Convert REMOTAP data
-wrf-ensembly-obs convert remotap-spexone input.nc output.parquet
+# Convert AEOLUS L2A data
+wrf-ensembly-obs convert aeolus-l2a input.DBL output.parquet
+
+# Convert AEOLUS L2B HLOS wind data
+wrf-ensembly-obs convert aeolus-l2b input.DBL output.parquet
+
+# Convert MSG SEVIRI (requires a WRF grid file for reprojection)
+wrf-ensembly-obs convert msg-seviri input.nat wrfinput_d01 output.parquet
 
 # Get help for a specific converter
 wrf-ensembly-obs convert aeronet --help
 ```
 
-The `wrf-ensembly-obs` command is independent of `wrf-ensembly` because it can be used standalone, without an experiment context.
-
 ### Creating New Converters
 
 To add support for a new instrument:
 
-1. **Create the converter module** in `wrf_ensembly/observations/converters/your_instrument.py`
-2. **Implement the conversion function** that returns a pandas DataFrame with the required schema
-3. **Add a CLI command** using click decorators
-4. **Register the converter** in `cli.py` and `__init__.py`
+1. Create the converter module in `wrf_ensembly/observations/converters/your_instrument.py`.
+2. Implement the conversion function that returns a pandas DataFrame with the required schema.
+3. Add a Click command and register it in `converters/__init__.py` and `observations/cli.py`.
+4. Optionally add `InstrumentSpec` and `QuantitySpec` entries to `definitions.py` for plotting and validation support.
 
-Use the template converter (`template.py`) as a starting point. Key requirements:
-
-- All required columns must be present and correctly typed
-- Use `obs_io.validate_schema()` to verify compliance
-- Handle the `orig_coords` field to preserve array structure information
-- Set appropriate `qc_flag` values based on data quality
+Use `template.py` as a starting point. Key requirements:
+- All required columns must be present and correctly typed.
+- Use `obs_io.validate_schema()` to verify compliance.
+- Handle `orig_coords` to preserve array structure information.
+- Set appropriate `qc_flag` values based on instrument QA flags.
 
 ## Experiment Integration
 
 ### Adding Observations to Experiments
 
-Once observations are converted to the standard format, they can be added to experiments:
+Once observations are converted, add them to the experiment:
 
 ```bash
 # Add individual files or directories
-wrf-ensembly obs add /path/to/observations/*.parquet
+wrf-ensembly $EXP_PATH obs add /path/to/observations/*.parquet
 
 # Use parallel processing for large datasets
-wrf-ensembly obs add /path/to/observations/*.parquet --jobs 4
+wrf-ensembly $EXP_PATH obs add /path/to/observations/*.parquet --jobs 4
 ```
 
-The `add` command performs several operations:
-
-1. **Spatial Trimming**: Removes observations outside the experiment's WRF domain
-2. **Temporal Trimming**: Filters observations to the experiment's time range
-3. **Database Storage**: Adds trimmed observations to the experiment's DuckDB database
+The `add` command performs:
+1. **Spatial Trimming** — Removes observations outside the WRF domain. Observations whose entire profile/row is outside are dropped; observations at the boundary of an array group have their value set to NaN (to preserve array reconstructability).
+2. **Temporal Trimming** — Filters to the experiment's cycling time range.
+3. **Density Reduction** — Applies superobs, temporal binning, or stride thinning if configured.
+4. **Database Storage** — Inserts trimmed observations into the experiment's DuckDB database at `obs/observations.duckdb`.
 
 ### Observation Database
 
-Each experiment maintains a DuckDB database (`experiment_path/obs/observations.db`) that stores all observation data.
-The `wrf-ensembly obs` command group allows interacting with this database for various operations:
+Each experiment maintains a DuckDB database. You can interact with it via CLI commands or directly from Python:
 
 ```bash
-# Show summary of available observations
-wrf-ensembly obs show
+# Show summary of available observations and files
+wrf-ensembly $EXP_PATH obs show
 
-# Get statistics for a specific cycle
-wrf-ensembly obs cycle-stats 0
+# Remove all observations from a specific file
+wrf-ensembly $EXP_PATH obs delete 'original_file.nc'
+```
 
-# Plot observation locations for a cycle
-wrf-ensembly obs plot-cycle-locations 0
+## Density Reduction
 
-# Remove a file's observations from the database
-wrf-ensembly obs delete 'original_file.nc'
+Observations are often denser than the model grid, so WRF-Ensembly supports three mutually exclusive (per instrument-quantity pair) methods to reduce density. These are configured in `config.toml` and applied during `obs add`.
+
+### Spatial Superobbing (`superobs`)
+
+Groups observations into spatial bins defined by their original array dimensions, then averages each bin into a single superobservation. Uncertainty is reduced by sqrt(n) for the instrument error component and augmented by the within-bin standard deviation as representativeness error.
+
+```toml
+[observations.superobs."AEOLUS_L2A_MLE.LIDAR_EXTINCTION_355nm"]
+hoz_bin_sizes = {profile = 5}       # Bin every 5 profiles together
+vert_bin_sizes = {height_bin = 2}   # Bin every 2 height levels together
+```
+
+### Temporal Binning (`temporal_binning`)
+
+Groups observations into fixed-width UTC time windows, producing one superob per window. Cannot be used together with `superobs` for the same instrument-quantity pair.
+
+```toml
+[observations.temporal_binning."AERONET.AOD_550nm"]
+bin_minutes = 60        # 60-minute windows
+offset_minutes = -30    # Shift bins to be centered on full hours (:30 to :30)
+```
+
+### Stride Thinning (`thinning`)
+
+Keeps every N-th good-QC observation for DA; the others are marked `qc_flag = -1` (validation hold-out) and remain in the database. Applied after superobbing.
+
+```toml
+[observations.thinning."AEOLUS_L2B_MIE.HLOS_WIND"]
+keep_every_n = 3    # Keep 1 in 3 observations for assimilation
 ```
 
 ## Cycle Preparation
 
-Before data assimilation, observations must be prepared for each assimilation cycle:
+Before data assimilation, observations must be prepared for each cycle:
 
 ```bash
 # Prepare observations for all cycles
-wrf-ensembly obs prepare-cycles
+wrf-ensembly $EXP_PATH obs prepare-cycles
 
 # Prepare for a specific cycle
-wrf-ensembly obs prepare-cycles --cycle 0
+wrf-ensembly $EXP_PATH obs prepare-cycles --cycle 0
 
-# Skip DART conversion (for inspection)
-wrf-ensembly obs prepare-cycles --skip-dart
+# Use parallel jobs for DART conversion
+wrf-ensembly $EXP_PATH obs prepare-cycles --jobs 4
+
+# Skip DART conversion (write parquet files only, for inspection)
+wrf-ensembly $EXP_PATH obs prepare-cycles --skip-dart
 ```
 
 This process:
-1. Extracts observations within each cycle's assimilation window
-2. Applies the configured half-window length (default 30 minutes before/after cycle end)
-3. Saves cycle-specific parquet files for inspection
-4. Converts to DART obs_seq format for assimilation
-
-If `obs superorbing` has been run, the superobservations are used in cycle preparation, otherwise the original observations are used.
+1. Queries the DuckDB for observations within the cycle's assimilation window (controlled by `assimilation.half_window_length_minutes`).
+2. Filters to instruments in `observations.instruments_to_assimilate` (or all instruments if unset).
+3. Applies the `error_inflation_factor` if configured.
+4. Writes `obs/cycle_NNN.parquet` for inspection.
+5. Converts observations with `qc_flag = 0` to `obs/cycle_NNN.obs_seq` using the DART converter.
 
 ### Assimilation Window
-
-The assimilation window is controlled by `assimilation.half_window_length_minutes` in the experiment configuration. See the [Configuration](configuration.md#assimilation) reference for details:
 
 ```toml
 [assimilation]
@@ -211,193 +299,190 @@ half_window_length_minutes = 30  # ±30 minutes around cycle end time
 
 ## DART Integration
 
-### Observation Types
+### Observation Type Mapping
 
-The system maps WRF-Ensembly quantities to DART observation types:
+Most WRF-Ensembly quantities map directly to DART by their quantity name (e.g., `LIDAR_EXTINCTION_355nm`, `SAT_HLOS_WIND`). A small lookup table handles cases where the names differ:
 
 ```python
 OBS_TYPE_TABLE = {
     "AOD_500nm": "AIRSENSE_AOD",
     "AOD_550nm": "AIRSENSE_AOD",
-    # Add more mappings as needed
 }
 ```
 
 ### Building the DART Converter
 
-The system requires a custom DART converter located at:
-```
-$DART_ROOT/observations/obs_converters/wrf_ensembly/
-```
+The system requires a custom DART converter located at `$DART_ROOT/observations/obs_converters/wrf_ensembly/`. Build it before use:
 
-This converter must be compiled before use:
 ```bash
 cd $DART_ROOT/observations/obs_converters/wrf_ensembly/work
 ./quickbuild.sh
 ```
 
-### obs_seq Format
-
-The converted obs_seq files contain:
-- Observation location (lat, lon, vertical coordinate)
-- Observation time
-- Observation value and error
-- DART observation type
-- Quality control information
+The converter reads observations from stdin as CSV and writes a DART obs_seq file. Longitudes are converted to [0, 360) as required by DART.
 
 ## Configuration
 
-The observation system is configured through the experiment's `config.toml` file in the `[observations]` section:
-
 ```toml
 [observations]
-instruments_to_assimilate = ["aeronet", "radiosonde"]
-boundary_width = 0
-boundary_error_factor = 2.5
-boundary_error_width = 1.0
+instruments_to_assimilate = ["AERONET", "MODIS"]  # null = use all instruments
+boundary_width = 0          # Grid points to exclude near domain boundaries
+boundary_error_factor = 2.5 # Error inflation factor near boundaries
+boundary_error_width = 1.0  # Width (grid points) of boundary inflation zone
 
-[observations.superorbing]
-# Superorbing configurations per instrument.quantity
+[observations.error_inflation_factor]
+"AERONET.AOD_550nm" = 2.0   # Inflate errors for this pair by 2x
+
+[observations.superobs."AEOLUS_L2A_MLE.LIDAR_EXTINCTION_355nm"]
+hoz_bin_sizes = {profile = 5}
+vert_bin_sizes = {height_bin = 2}
+
+[observations.temporal_binning."AERONET.AOD_550nm"]
+bin_minutes = 60
+offset_minutes = 0
+
+[observations.thinning."AEOLUS_L2B_MIE.HLOS_WIND"]
+keep_every_n = 3
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `instruments_to_assimilate` | [string] | Which instruments to use in assimilation. If null, all available instruments are used |
-| `boundary_width` | float | Grid points to exclude near domain boundaries. *Default: 0* |
-| `boundary_error_factor` | float | Factor to inflate observation errors near boundaries. *Default: 2.5* |
-| `boundary_error_width` | float | Width (in grid points) of boundary error inflation zone. *Default: 1.0* |
-| `superorbing` | dict | Per-instrument superorbing configurations (see [Superorbing](#superorbing)) |
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `instruments_to_assimilate` | `[string]` or null | null | Instruments to include in assimilation. Null uses all. |
+| `boundary_width` | float | 0 | Grid points to exclude near domain boundaries |
+| `boundary_error_factor` | float | 2.5 | Error inflation multiplier near boundaries |
+| `boundary_error_width` | float | 1.0 | Width (grid points) of boundary error inflation zone |
+| `error_inflation_factor` | `{str: float}` | `{}` | Per-instrument.quantity error multiplier |
+| `superobs` | `{str: SuperObsConfig}` | `{}` | Spatial superobbing per instrument.quantity |
+| `temporal_binning` | `{str: TemporalBinConfig}` | `{}` | Temporal binning per instrument.quantity |
+| `thinning` | `{str: ThinningConfig}` | `{}` | Stride thinning per instrument.quantity |
 
-### Quality Control
+## Validation
 
-The system respects QC flags during assimilation:
+WRF-Ensembly includes tools to compare model output against observations (first departure / O-B analysis). These commands are under the `validation` group.
 
-| QC Flag | Description | Usage |
-|---------|-------------|-------|
-| `0` | Good observations | Used in assimilation |
-| `> 0` | Problematic observations | Typically excluded from assimilation |
+### Interpolating the Model
 
-Quality control statistics are reported in cycle summaries and can be viewed with the `cycle-stats` command.
+```bash
+wrf-ensembly $EXP_PATH validation interpolate-model
+```
+
+This reads the processed wrfout files (forecast mean and analysis mean), interpolates them to each observation's location, time, and vertical level, and stores the results in the `model_forecast` and `model_analysis` columns in DuckDB. Requires completed `postprocess` runs.
+
+### First Departures Analysis
+
+```bash
+# Analyze all instrument-quantity pairs with model values
+wrf-ensembly $EXP_PATH validation analyze-first-departures
+
+# Analyze specific pairs
+wrf-ensembly $EXP_PATH validation analyze-first-departures \
+  --instrument-quantity MODIS.AOD_550nm \
+  --instrument-quantity AERONET.AOD_550nm
+
+# Restrict to a time window
+wrf-ensembly $EXP_PATH validation analyze-first-departures \
+  --start-time "2023-08-01T00:00:00" \
+  --end-time "2023-08-31T23:59:59"
+```
+
+For each instrument-quantity pair, the analysis generates (saved to `data/validation/first_departures/{instrument}/{quantity}/`):
+- **Statistics file** — Bias, standard deviation, RMSE.
+- **Histogram** — Distribution of O-B departures.
+- **Time series** — Mean and std over time.
+- **Spatial maps** — Gridded bias and std.
+- **Regime plots** — If regime configurations are defined in `config.toml`.
+
+Pairs to analyze can be configured in `config.toml` or specified via `--instrument-quantity`. If neither is set, all pairs with model values in the database are analyzed.
+
+```toml
+[validation.first_departures]
+instrument_quantity_pairs = ["MODIS.AOD_550nm", "AERONET.AOD_500nm"]
+
+[[validation.first_departures.regimes]]
+instrument = "MODIS"
+quantity = "AOD_550nm"
+bins = [0.0, 0.2, 0.5, 1.0, .inf]
+labels = ["very_low", "low", "moderate", "high"]
+spatial_resolution = 1.0
+```
 
 ## Command Reference
 
-### Experiment-Level Commands
+### Experiment-Level Commands (`wrf-ensembly $EXP_PATH obs`)
 
-These commands operate on observations within an experiment context:
+| Command | Description |
+|---------|-------------|
+| `add FILES [--jobs N]` | Add parquet observation files to the experiment database |
+| `show` | Print tables of available quantities and files |
+| `delete FILENAME` | Remove all observations from a specific original file |
+| `prepare-cycles [--cycle N] [--jobs N] [--skip-dart]` | Prepare obs_seq files for each cycle |
+| `cycle-summary` | Print observation counts per cycle |
+| `cycle-info CYCLE [--as-json]` | Detailed per-file stats for a specific cycle |
+| `plot-cycle-locations CYCLE` | Plot observation locations for a cycle on a map |
+| `plot-compare-obs-to-grid CYCLE [--center-lat] [--center-lon] [--window-size] [--instrument] [--quantity] [--keep-only-good-qc]` | Plot observations overlaid on the WRF grid (useful for tuning superobbing) |
+| `plot FILENAME [--dpi] [--vmin] [--vmax] [--ylim] [--qc] [--no-robust] [--with-model]` | Plot observations from a specific file; `--with-model` produces O-B panels |
 
-```bash
-# Add observations to experiment database
-wrf-ensembly EXPERIMENT_PATH obs add observations/*.parquet --jobs 4
+### Validation Commands (`wrf-ensembly $EXP_PATH validation`)
 
-# Show summary of available observations
-wrf-ensembly EXPERIMENT_PATH obs show
+| Command | Description |
+|---------|-------------|
+| `interpolate-model` | Interpolate model forecast/analysis to observation locations |
+| `analyze-first-departures [--instrument-quantity IQ] [--start-time] [--end-time]` | Compute and plot O-B statistics |
 
-# Apply superorbing/downsampling
-wrf-ensembly EXPERIMENT_PATH obs superorbing
+### Standalone File Operations (`wrf-ensembly-obs convert`)
 
-# Prepare observations for all cycles
-wrf-ensembly EXPERIMENT_PATH obs prepare-cycles
-
-# Prepare observations for specific cycle
-wrf-ensembly EXPERIMENT_PATH obs prepare-cycles --cycle 0
-
-# Get cycle statistics
-wrf-ensembly EXPERIMENT_PATH obs cycle-stats 0
-
-# Plot observation locations for a cycle
-wrf-ensembly EXPERIMENT_PATH obs plot-cycle-locations 0
-
-# Remove observations from specific file
-wrf-ensembly EXPERIMENT_PATH obs delete filename.parquet
-```
-
-### Standalone File Operations
-
-These commands work on observation files independently of experiments:
-
-```bash
-# Convert raw data to WRF-Ensembly format
-wrf-ensembly-obs-convert aeronet input/*.lev20 output.parquet
-
-# Join multiple observation files
-wrf-ensembly-obs join file1.parquet file2.parquet output.parquet
-
-# Get file information
-wrf-ensembly-obs dump-info observations.parquet
-wrf-ensembly-obs dump-info observations.parquet --as-json
-
-# Filter observations spatially/temporally
-wrf-ensembly-obs filter observations.parquet output.parquet \
-  --start-time "2023-01-01T00:00:00" \
-  --end-time "2023-01-02T00:00:00" \
-  --bbox -180 -90 180 90
-```
+| Command | Description |
+|---------|-------------|
+| `aeronet INPUT OUTPUT [--quantity Q]` | Convert AERONET `.lev20` files |
+| `remotap-spexone INPUT OUTPUT` | Convert REMOTAP SPEXONE NetCDF files |
+| `aeolus-l2a INPUT OUTPUT [--mle/--no-mle] [--sca/--no-sca] [--ael-pro/--no-ael-pro]` | Convert AEOLUS L2A files |
+| `aeolus-l2b INPUT OUTPUT` | Convert AEOLUS L2B HLOS wind files |
+| `earthcare-atl-ebd INPUT OUTPUT` | Convert EarthCARE ATLID EBD files |
+| `modis INPUT OUTPUT` | Convert MODIS AOD HDF4 files |
+| `viirs INPUT OUTPUT` | Convert VIIRS AOD NetCDF files |
+| `msg-seviri INPUT WRFINPUT OUTPUT` | Convert MSG SEVIRI native files (requires WRF input for grid) |
 
 ## Advanced Usage
 
-### Array Reconstruction
-
-For observations that originated from gridded data, you can reconstruct the original array structure:
-
-```python
-from wrf_ensembly.observations.utils import reconstruct_array
-
-# Filter to single file and quantity
-subset = obs_df[
-    (obs_df['orig_filename'] == 'data.nc') &
-    (obs_df['quantity'] == 'AOD_500nm')
-]
-
-# Reconstruct original array structure
-xr_array = reconstruct_array(subset)
-```
-
-This creates an xarray DataArray with the original dimensions and coordinates, useful for visualization and analysis.
-
 ### Custom Database Queries
 
-The observation database supports complex SQL queries for advanced filtering:
+The observation database supports complex SQL queries:
 
 ```python
-# Get DuckDB connection
 with experiment.obs._get_duckdb(read_only=True) as con:
-    # Custom query for specific conditions
-    query = """
-    SELECT instrument, quantity, COUNT(*) as count,
-           AVG(value) as mean_value,
-           MIN(time) as start_time,
-           MAX(time) as end_time
-    FROM observations
-    WHERE qc_flag = 0
-      AND value > 0.1
-      AND time BETWEEN '2023-01-01' AND '2023-01-31'
-    GROUP BY instrument, quantity
-    ORDER BY count DESC
-    """
-    results = con.execute(query).fetchdf()
+    results = con.execute("""
+        SELECT instrument, quantity, COUNT(*) as count,
+               AVG(value) as mean_value,
+               MIN(time) as start_time,
+               MAX(time) as end_time
+        FROM observations
+        WHERE qc_flag = 0
+          AND time BETWEEN '2023-01-01' AND '2023-01-31'
+        GROUP BY instrument, quantity
+        ORDER BY count DESC
+    """).fetchdf()
 ```
 
-### Visualization and Plotting
+### Array Reconstruction
 
-Create maps and plots of observation locations:
+For observations from gridded data, reconstruct the original array using `reshape_to_native()`:
 
 ```python
-from wrf_ensembly.observations.plotting import plot_observation_locations_on_map
-import cartopy.crs as ccrs
+from wrf_ensembly.observations.definitions import reshape_to_native
 
-# Plot observation locations on a map
-fig = plot_observation_locations_on_map(
-    observations=obs_df,
-    proj=ccrs.PlateCarree(),
-    domain_bounds=(lon_min, lon_max, lat_min, lat_max)
-)
-fig.savefig('observation_locations.png')
+# Filter to a single instrument, quantity, and original file
+subset = df[
+    (df["instrument"] == "AEOLUS_L2A_MLE")
+    & (df["quantity"] == "LIDAR_EXTINCTION_355nm")
+    & (df["orig_filename"] == "AE_TEST_ALD_U_N_2A_...DBL")
+]
+
+arr, shape, dim_names = reshape_to_native(subset, field="value")
+# arr is a numpy array with the original (profile, height_bin) shape
 ```
 
 ## Next Steps
 
-Once you have prepared your observations, you can proceed with:
-
-- [Running the ensemble](usage.md#ensemble-management) - Execute your data assimilation experiment
-- [Postprocessing](postprocess.md) - Process model output and generate analysis products
-- [Configuration](configuration.md) - Fine-tune observation settings and other experiment parameters
+- [Running the ensemble](usage.md#ensemble-management) — Execute your data assimilation experiment.
+- [Postprocessing](postprocess.md) — Process model output.
+- [Configuration](configuration.md) — Fine-tune observation settings and other experiment parameters.
