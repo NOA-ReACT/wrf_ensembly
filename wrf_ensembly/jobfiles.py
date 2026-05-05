@@ -82,7 +82,9 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
     jobfile.write_text(
         templates.generate(
             "slurm_job.sh.j2",
-            slurm_directives=exp.cfg.slurm.directives.default | exp.cfg.slurm.directives.preprocess | dynamic_directives,
+            slurm_directives=exp.cfg.slurm.directives.default
+            | exp.cfg.slurm.directives.preprocess
+            | dynamic_directives,
             env_modules=exp.cfg.slurm.env_modules,
             commands=commands,
             pre_commands=exp.cfg.slurm.pre_commands,
@@ -127,7 +129,9 @@ def generate_advance_jobfiles(exp: experiment.Experiment) -> list[Path]:
         jobfile.write_text(
             templates.generate(
                 "slurm_job.sh.j2",
-                slurm_directives=exp.cfg.slurm.directives.default | exp.cfg.slurm.directives.advance_model | dynamic_directives,
+                slurm_directives=exp.cfg.slurm.directives.default
+                | exp.cfg.slurm.directives.advance_model
+                | dynamic_directives,
                 env_modules=exp.cfg.slurm.env_modules,
                 commands=[_build_command(base_cmd, "", member=i)],
                 pre_commands=exp.cfg.slurm.pre_commands,
@@ -170,7 +174,7 @@ def generate_advance_array_jobfile(
     jobfile = exp.paths.jobfiles / "advance_members_array.job.sh"
     dynamic_directives = {
         "job-name": f"{exp.cfg.metadata.name}_advance_members",
-        "output": f"{exp.paths.logs_slurm.resolve()}/%j-%a-advance_member.out",
+        "output": f"{exp.paths.logs_slurm.resolve()}/%A_%a-advance_member.out",
         "array": array_spec,
     }
 
@@ -188,9 +192,7 @@ def generate_advance_array_jobfile(
             pre_commands=exp.cfg.slurm.pre_commands,
         )
     )
-    logger.info(
-        f"Wrote array jobfile to {jobfile} for members {array_spec}"
-    )
+    logger.info(f"Wrote array jobfile to {jobfile} for members {array_spec}")
 
     return jobfile, pending
 
@@ -273,7 +275,9 @@ def generate_make_analysis_jobfile(
     jobfile.write_text(
         templates.generate(
             "slurm_job.sh.j2",
-            slurm_directives=exp.cfg.slurm.directives.default | exp.cfg.slurm.directives.make_analysis | dynamic_directives,
+            slurm_directives=exp.cfg.slurm.directives.default
+            | exp.cfg.slurm.directives.make_analysis
+            | dynamic_directives,
             env_modules=exp.cfg.slurm.env_modules,
             commands=commands,
             pre_commands=exp.cfg.slurm.pre_commands,
@@ -324,7 +328,9 @@ def generate_postprocess_jobfile(
     jobfile.write_text(
         templates.generate(
             "slurm_job.sh.j2",
-            slurm_directives=exp.cfg.slurm.directives.default | exp.cfg.slurm.directives.postprocess | dynamic_directives,
+            slurm_directives=exp.cfg.slurm.directives.default
+            | exp.cfg.slurm.directives.postprocess
+            | dynamic_directives,
             env_modules=exp.cfg.slurm.env_modules,
             commands=commands,
             pre_commands=exp.cfg.slurm.pre_commands,
@@ -359,10 +365,12 @@ def generate_postprocess_array_jobfile(
 
     exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
 
-    jobfile = exp.paths.jobfiles / f"postprocess_array_{first_cycle}_{last_cycle}.job.sh"
+    jobfile = (
+        exp.paths.jobfiles / f"postprocess_array_{first_cycle}_{last_cycle}.job.sh"
+    )
     dynamic_directives = {
         "job-name": f"{exp.cfg.metadata.name}_postprocess",
-        "output": f"{exp.paths.logs_slurm.resolve()}/%j-%a-postprocess.out",
+        "output": f"{exp.paths.logs_slurm.resolve()}/%A_%a-postprocess.out",
         "array": f"{first_cycle}-{last_cycle}%{max_parallel}",
     }
 
@@ -377,7 +385,9 @@ def generate_postprocess_array_jobfile(
     jobfile.write_text(
         templates.generate(
             "slurm_job.sh.j2",
-            slurm_directives=exp.cfg.slurm.directives.default | exp.cfg.slurm.directives.postprocess | dynamic_directives,
+            slurm_directives=exp.cfg.slurm.directives.default
+            | exp.cfg.slurm.directives.postprocess
+            | dynamic_directives,
             env_modules=exp.cfg.slurm.env_modules,
             commands=commands,
             pre_commands=exp.cfg.slurm.pre_commands,
