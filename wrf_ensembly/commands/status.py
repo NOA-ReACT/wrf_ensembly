@@ -1,6 +1,8 @@
+from collections import defaultdict
 from pathlib import Path
 
 import click
+import numpy as np
 from rich.console import Console
 from rich.table import Table
 
@@ -70,43 +72,192 @@ def show(experiment_path: Path):
 
 
 @status_cli.command()
+@click.option(
+    "--all",
+    "show_all",
+    is_flag=True,
+    help="Also print the full per-row table with every (cycle, member) entry",
+)
 @pass_experiment_path
-def runtime_stats(experiment_path: Path):
-    """Prints the runtime statistics of all members across all cycles in a rich table"""
+def runtime_stats(experiment_path: Path, show_all: bool):
+    """Prints aggregated runtime statistics per cycle, per member, and overall"""
 
     logger.setup("status-runtime-stats", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    table = Table(title="Runtime Statistics")
-    table.add_column("Cycle", justify="center", style="bold cyan")
-    table.add_column("Member", justify="center", style="bold cyan")
-    table.add_column("Start Time", justify="center")
-    table.add_column("End Time", justify="center")
-    table.add_column("Duration (s)", justify="right", style="bold green")
+    console = Console()
 
-    # Collect all runtime statistics from all members
-    all_stats = []
+    # Collect all runtime statistics
+    all_stats: list[tuple] = []
+    by_cycle: dict[int, list] = defaultdict(list)
+    by_member: dict[int, list[int]] = defaultdict(list)
+    all_durations: list[int] = []
     for member in exp.members:
         for stat in member.runtime_statistics:
             all_stats.append((stat, member.i))
+            by_cycle[stat.cycle].append((stat, member.i))
+            by_member[member.i].append(stat.duration_s)
+            all_durations.append(stat.duration_s)
 
-    # Sort by cycle, then by member
+    if not all_stats:
+        console.print("[yellow]No runtime statistics available[/yellow]")
+        return
+
     all_stats.sort(key=lambda x: (x[0].cycle, x[1]))
 
-    for stat, member_i in all_stats:
-        table.add_row(
-            str(stat.cycle),
-            str(member_i),
-            stat.start.strftime("%Y-%m-%d %H:%M:%S"),
-            stat.end.strftime("%Y-%m-%d %H:%M:%S"),
-            str(stat.duration_s),
+    def _agg(values: list[int]) -> tuple[float, int, int, float]:
+        arr = np.asarray(values, dtype=float)
+        std = float(arr.std(ddof=0)) if arr.size > 1 else 0.0
+        return float(arr.mean()), int(arr.min()), int(arr.max()), std
+
+    # 1. Per-cycle table
+    cycle_table = Table(title="Per-Cycle Runtime")
+    cycle_table.add_column("Cycle", justify="center", style="bold cyan")
+    cycle_table.add_column("N", justify="right")
+    cycle_table.add_column("Mean (s)", justify="right", style="bold green")
+    cycle_table.add_column("Min (s)", justify="right")
+    cycle_table.add_column("Max (s)", justify="right")
+    cycle_table.add_column("Std (s)", justify="right")
+    cycle_table.add_column("Wall (s)", justify="right", style="bold magenta")
+
+    for cycle in sorted(by_cycle.keys()):
+        entries = by_cycle[cycle]
+        durations = [s.duration_s for s, _ in entries]
+        mean, mn, mx, std = _agg(durations)
+        wall = int(
+            (
+                max(s.end for s, _ in entries) - min(s.start for s, _ in entries)
+            ).total_seconds()
+        )
+        cycle_table.add_row(
+            str(cycle),
+            str(len(durations)),
+            f"{mean:.1f}",
+            str(mn),
+            str(mx),
+            f"{std:.1f}",
+            str(wall),
         )
 
-    console = Console()
-    if len(all_stats) > 0:
-        console.print(table)
+    # 2. Per-member table
+    member_table = Table(title="Per-Member Runtime")
+    member_table.add_column("Member", justify="center", style="bold cyan")
+    member_table.add_column("N", justify="right")
+    member_table.add_column("Mean (s)", justify="right", style="bold green")
+    member_table.add_column("Min (s)", justify="right")
+    member_table.add_column("Max (s)", justify="right")
+    member_table.add_column("Std (s)", justify="right")
+
+    for member_i in sorted(by_member.keys()):
+        durations = by_member[member_i]
+        mean, mn, mx, std = _agg(durations)
+        member_table.add_row(
+            str(member_i),
+            str(len(durations)),
+            f"{mean:.1f}",
+            str(mn),
+            str(mx),
+            f"{std:.1f}",
+        )
+
+    # 3. Recent cycles per member table
+    available_cycles = sorted(by_cycle.keys())
+    current_cycle = exp.current_cycle_i
+    if current_cycle in by_cycle:
+        last_cycle = current_cycle - 1 if (current_cycle - 1) in by_cycle else None
     else:
-        console.print("[yellow]No runtime statistics available[/yellow]")
+        # Fall back to the two most recent cycles that have data
+        current_cycle = available_cycles[-1]
+        last_cycle = available_cycles[-2] if len(available_cycles) >= 2 else None
+
+    def _member_duration(cycle: int, member_i: int) -> int | None:
+        for s, mi in by_cycle[cycle]:
+            if mi == member_i:
+                return s.duration_s
+        return None
+
+    members_in_view: set[int] = set()
+    for s, mi in by_cycle[current_cycle]:
+        members_in_view.add(mi)
+    if last_cycle is not None:
+        for s, mi in by_cycle[last_cycle]:
+            members_in_view.add(mi)
+
+    recent_table = Table(title="Recent Cycles per Member")
+    recent_table.add_column("Member", justify="center", style="bold cyan")
+    if last_cycle is not None:
+        recent_table.add_column(f"Cycle {last_cycle} (s)", justify="right")
+    recent_table.add_column(f"Cycle {current_cycle} (s)", justify="right")
+    if last_cycle is not None:
+        recent_table.add_column("Δ (s)", justify="right")
+
+    for member_i in sorted(members_in_view):
+        cur = _member_duration(current_cycle, member_i)
+        cur_str = str(cur) if cur is not None else "-"
+        if last_cycle is not None:
+            last = _member_duration(last_cycle, member_i)
+            last_str = str(last) if last is not None else "-"
+            if cur is not None and last is not None:
+                delta = cur - last
+                if delta < 0:
+                    delta_str = f"[green]{delta:+d}[/green]"
+                elif delta > 0:
+                    delta_str = f"[red]{delta:+d}[/red]"
+                else:
+                    delta_str = "0"
+            else:
+                delta_str = ""
+            recent_table.add_row(str(member_i), last_str, cur_str, delta_str)
+        else:
+            recent_table.add_row(str(member_i), cur_str)
+
+    # 4. Overall row
+    o_mean, o_min, o_max, o_std = _agg(all_durations)
+    overall_table = Table(title="Overall Runtime")
+    overall_table.add_column("N (rows)", justify="right")
+    overall_table.add_column("Members", justify="right")
+    overall_table.add_column("Cycles", justify="right")
+    overall_table.add_column("Mean (s)", justify="right", style="bold green")
+    overall_table.add_column("Min (s)", justify="right")
+    overall_table.add_column("Max (s)", justify="right")
+    overall_table.add_column("Std (s)", justify="right")
+    overall_table.add_column("Total (s)", justify="right", style="bold magenta")
+    overall_table.add_row(
+        str(len(all_durations)),
+        str(len(by_member)),
+        str(len(by_cycle)),
+        f"{o_mean:.1f}",
+        str(o_min),
+        str(o_max),
+        f"{o_std:.1f}",
+        str(sum(all_durations)),
+    )
+
+    console.print(cycle_table)
+    console.print()
+    console.print(member_table)
+    console.print()
+    console.print(recent_table)
+    console.print()
+    console.print(overall_table)
+
+    if show_all:
+        detail_table = Table(title="Runtime Statistics (all entries)")
+        detail_table.add_column("Cycle", justify="center", style="bold cyan")
+        detail_table.add_column("Member", justify="center", style="bold cyan")
+        detail_table.add_column("Start Time", justify="center")
+        detail_table.add_column("End Time", justify="center")
+        detail_table.add_column("Duration (s)", justify="right", style="bold green")
+        for stat, member_i in all_stats:
+            detail_table.add_row(
+                str(stat.cycle),
+                str(member_i),
+                stat.start.strftime("%Y-%m-%d %H:%M:%S"),
+                stat.end.strftime("%Y-%m-%d %H:%M:%S"),
+                str(stat.duration_s),
+            )
+        console.print()
+        console.print(detail_table)
 
 
 @status_cli.command()
