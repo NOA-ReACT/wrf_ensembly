@@ -105,26 +105,29 @@ def runtime_stats(experiment_path: Path, show_all: bool):
 
     all_stats.sort(key=lambda x: (x[0].cycle, x[1]))
 
-    def _agg(values: list[int]) -> tuple[float, int, int, float]:
-        arr = np.asarray(values, dtype=float)
+    def _s_to_min(seconds: float) -> float:
+        return seconds / 60.0
+
+    def _agg(values: list[int]) -> tuple[float, float, float, float]:
+        arr = np.asarray(values, dtype=float) / 60.0
         std = float(arr.std(ddof=0)) if arr.size > 1 else 0.0
-        return float(arr.mean()), int(arr.min()), int(arr.max()), std
+        return float(arr.mean()), float(arr.min()), float(arr.max()), std
 
     # 1. Per-cycle table
     cycle_table = Table(title="Per-Cycle Runtime")
     cycle_table.add_column("Cycle", justify="center", style="bold cyan")
     cycle_table.add_column("N", justify="right")
-    cycle_table.add_column("Mean (s)", justify="right", style="bold green")
-    cycle_table.add_column("Min (s)", justify="right")
-    cycle_table.add_column("Max (s)", justify="right")
-    cycle_table.add_column("Std (s)", justify="right")
-    cycle_table.add_column("Wall (s)", justify="right", style="bold magenta")
+    cycle_table.add_column("Mean (min)", justify="right", style="bold green")
+    cycle_table.add_column("Min (min)", justify="right")
+    cycle_table.add_column("Max (min)", justify="right")
+    cycle_table.add_column("Std (min)", justify="right")
+    cycle_table.add_column("Wall (min)", justify="right", style="bold magenta")
 
     for cycle in sorted(by_cycle.keys()):
         entries = by_cycle[cycle]
         durations = [s.duration_s for s, _ in entries]
         mean, mn, mx, std = _agg(durations)
-        wall = int(
+        wall = _s_to_min(
             (
                 max(s.end for s, _ in entries) - min(s.start for s, _ in entries)
             ).total_seconds()
@@ -133,20 +136,20 @@ def runtime_stats(experiment_path: Path, show_all: bool):
             str(cycle),
             str(len(durations)),
             f"{mean:.1f}",
-            str(mn),
-            str(mx),
+            f"{mn:.1f}",
+            f"{mx:.1f}",
             f"{std:.1f}",
-            str(wall),
+            f"{wall:.1f}",
         )
 
     # 2. Per-member table
     member_table = Table(title="Per-Member Runtime")
     member_table.add_column("Member", justify="center", style="bold cyan")
     member_table.add_column("N", justify="right")
-    member_table.add_column("Mean (s)", justify="right", style="bold green")
-    member_table.add_column("Min (s)", justify="right")
-    member_table.add_column("Max (s)", justify="right")
-    member_table.add_column("Std (s)", justify="right")
+    member_table.add_column("Mean (min)", justify="right", style="bold green")
+    member_table.add_column("Min (min)", justify="right")
+    member_table.add_column("Max (min)", justify="right")
+    member_table.add_column("Std (min)", justify="right")
 
     for member_i in sorted(by_member.keys()):
         durations = by_member[member_i]
@@ -155,8 +158,8 @@ def runtime_stats(experiment_path: Path, show_all: bool):
             str(member_i),
             str(len(durations)),
             f"{mean:.1f}",
-            str(mn),
-            str(mx),
+            f"{mn:.1f}",
+            f"{mx:.1f}",
             f"{std:.1f}",
         )
 
@@ -170,10 +173,10 @@ def runtime_stats(experiment_path: Path, show_all: bool):
         current_cycle = available_cycles[-1]
         last_cycle = available_cycles[-2] if len(available_cycles) >= 2 else None
 
-    def _member_duration(cycle: int, member_i: int) -> int | None:
+    def _member_duration(cycle: int, member_i: int) -> float | None:
         for s, mi in by_cycle[cycle]:
             if mi == member_i:
-                return s.duration_s
+                return _s_to_min(s.duration_s)
         return None
 
     members_in_view: set[int] = set()
@@ -186,25 +189,25 @@ def runtime_stats(experiment_path: Path, show_all: bool):
     recent_table = Table(title="Recent Cycles per Member")
     recent_table.add_column("Member", justify="center", style="bold cyan")
     if last_cycle is not None:
-        recent_table.add_column(f"Cycle {last_cycle} (s)", justify="right")
-    recent_table.add_column(f"Cycle {current_cycle} (s)", justify="right")
+        recent_table.add_column(f"Cycle {last_cycle} (min)", justify="right")
+    recent_table.add_column(f"Cycle {current_cycle} (min)", justify="right")
     if last_cycle is not None:
-        recent_table.add_column("Δ (s)", justify="right")
+        recent_table.add_column("Δ (min)", justify="right")
 
     for member_i in sorted(members_in_view):
         cur = _member_duration(current_cycle, member_i)
-        cur_str = str(cur) if cur is not None else "-"
+        cur_str = f"{cur:.1f}" if cur is not None else "-"
         if last_cycle is not None:
             last = _member_duration(last_cycle, member_i)
-            last_str = str(last) if last is not None else "-"
+            last_str = f"{last:.1f}" if last is not None else "-"
             if cur is not None and last is not None:
                 delta = cur - last
                 if delta < 0:
-                    delta_str = f"[green]{delta:+d}[/green]"
+                    delta_str = f"[green]{delta:+.1f}[/green]"
                 elif delta > 0:
-                    delta_str = f"[red]{delta:+d}[/red]"
+                    delta_str = f"[red]{delta:+.1f}[/red]"
                 else:
-                    delta_str = "0"
+                    delta_str = "0.0"
             else:
                 delta_str = ""
             recent_table.add_row(str(member_i), last_str, cur_str, delta_str)
@@ -217,20 +220,20 @@ def runtime_stats(experiment_path: Path, show_all: bool):
     overall_table.add_column("N (rows)", justify="right")
     overall_table.add_column("Members", justify="right")
     overall_table.add_column("Cycles", justify="right")
-    overall_table.add_column("Mean (s)", justify="right", style="bold green")
-    overall_table.add_column("Min (s)", justify="right")
-    overall_table.add_column("Max (s)", justify="right")
-    overall_table.add_column("Std (s)", justify="right")
-    overall_table.add_column("Total (s)", justify="right", style="bold magenta")
+    overall_table.add_column("Mean (min)", justify="right", style="bold green")
+    overall_table.add_column("Min (min)", justify="right")
+    overall_table.add_column("Max (min)", justify="right")
+    overall_table.add_column("Std (min)", justify="right")
+    overall_table.add_column("Total (min)", justify="right", style="bold magenta")
     overall_table.add_row(
         str(len(all_durations)),
         str(len(by_member)),
         str(len(by_cycle)),
         f"{o_mean:.1f}",
-        str(o_min),
-        str(o_max),
+        f"{o_min:.1f}",
+        f"{o_max:.1f}",
         f"{o_std:.1f}",
-        str(sum(all_durations)),
+        f"{_s_to_min(sum(all_durations)):.1f}",
     )
 
     console.print(cycle_table)
