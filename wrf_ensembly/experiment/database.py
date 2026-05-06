@@ -399,10 +399,8 @@ class ExperimentDatabase:
                 )
 
                 # Trying our best to make the database easier on the FS
-                conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA synchronous=NORMAL")
                 conn.execute("PRAGMA busy_timeout=60000")
-                conn.execute("PRAGMA temp_store=MEMORY")  # Avoid temp file I/O
                 conn.execute("PRAGMA foreign_keys = ON")
 
                 # Verify connection actually works
