@@ -144,6 +144,14 @@ def process_members_for_timestep(
             )
             processed = pipeline.process(ds, context)
 
+            # Squeeze the time dimension because each wrfout file is a single
+            # timestep so the leading t-dim is always size 1.  Removing it
+            # here keeps shapes consistent with what the writers and Welford
+            # accumulators expect (no extra leading dim).
+            # it works without this but we are just being explicit
+            time_val = processed["t"].values
+            processed = processed.squeeze("t", drop=False)
+
             # Initialize accumulators from first member's structure
             if accumulators is None:
                 accumulators = create_welford_accumulators(processed)
@@ -154,8 +162,10 @@ def process_members_for_timestep(
 
             # Write per-member slice if ensemble writer is active
             if ensemble_writer is not None:
-                member_data = {var: processed[var].values for var in processed.data_vars}
-                ensemble_writer.write_member(member_data, processed["t"].values, member_i)
+                member_data = {
+                    var: processed[var].values for var in processed.data_vars
+                }
+                ensemble_writer.write_member(member_data, time_val, member_i)
 
     if accumulators is None:
         raise ValueError("No member files were successfully processed")
@@ -189,8 +199,7 @@ def _build_ensemble_template(
         filtered_vars = {
             name: var
             for name, var in template.variables.items()
-            if name in COORDINATE_VARIABLES
-            or any(p.match(name) for p in patterns)
+            if name in COORDINATE_VARIABLES or any(p.match(name) for p in patterns)
         }
         filtered_template = NetCDFFile(
             dimensions=template.dimensions,
@@ -456,11 +465,14 @@ def process_cycle_single_member(
 
     logger.info(f"Creating output file: {mean_path.name}")
 
+    # Squeeze time dim from the template (single timestep per file)
+    first_time_val = template_ds["t"].values
+    template_ds = template_ds.squeeze("t", drop=False)
+
     with _create_writer(mean_path, template, exp.cfg.postprocess) as writer:
         # Write first timestep (already processed)
         data = {var: template_ds[var].values for var in template_ds.data_vars}
-        time_val = template_ds["t"].values
-        writer.append_timestep(data, time_val)
+        writer.append_timestep(data, first_time_val)
 
         # Process remaining timesteps
         for wrfout_file in wrfout_files[1:]:
@@ -476,8 +488,9 @@ def process_cycle_single_member(
                 )
                 processed = pipeline.process(ds, context)
 
-                data = {var: processed[var].values for var in processed.data_vars}
                 time_val = processed["t"].values
+                processed = processed.squeeze("t", drop=False)
+                data = {var: processed[var].values for var in processed.data_vars}
                 writer.append_timestep(data, time_val)
 
     logger.info(f"Completed {source} processing for cycle {cycle}")
