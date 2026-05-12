@@ -104,7 +104,7 @@ def process_members_for_timestep(
     cycle: int,
     config: Config,
     ensemble_writer: StreamingEnsembleWriter | None = None,
-) -> tuple[dict[str, WelfordState], xr.Dataset]:
+) -> tuple[dict[str, WelfordState], np.ndarray]:
     """
     Process all ensemble members for a single output timestep.
 
@@ -120,11 +120,10 @@ def process_members_for_timestep(
             each member's processed data is written as a slice before finalizing.
 
     Returns:
-        Tuple of (accumulators, last_processed_dataset).
-        The last dataset is returned to provide template/coordinate information.
+        Tuple of (accumulators, time_value).
     """
     accumulators: dict[str, WelfordState] | None = None
-    last_processed: xr.Dataset | None = None
+    time_val: np.ndarray | None = None
 
     for member_i, wrfout_path in enumerate(wrfout_paths):
         if not wrfout_path.exists():
@@ -144,11 +143,10 @@ def process_members_for_timestep(
             )
             processed = pipeline.process(ds, context)
 
-            # Squeeze the time dimension because each wrfout file is a single
+            # Squeeze the time dimension — each wrfout file is a single
             # timestep so the leading t-dim is always size 1.  Removing it
             # here keeps shapes consistent with what the writers and Welford
             # accumulators expect (no extra leading dim).
-            # it works without this but we are just being explicit
             time_val = processed["t"].values
             processed = processed.squeeze("t", drop=False)
 
@@ -158,7 +156,6 @@ def process_members_for_timestep(
 
             # Update running statistics
             update_accumulators_from_dataset(accumulators, processed)
-            last_processed = processed
 
             # Write per-member slice if ensemble writer is active
             if ensemble_writer is not None:
@@ -167,13 +164,13 @@ def process_members_for_timestep(
                 }
                 ensemble_writer.write_member(member_data, time_val, member_i)
 
-    if accumulators is None:
+    if accumulators is None or time_val is None:
         raise ValueError("No member files were successfully processed")
 
     if ensemble_writer is not None:
         ensemble_writer.finalize_timestep()
 
-    return accumulators, last_processed
+    return accumulators, time_val
 
 
 def _build_ensemble_template(
@@ -319,6 +316,7 @@ def process_cycle_streaming(
         template_ds = pipeline.process(ds, context)
 
     template = get_structure_from_xarray(template_ds, reference_time=reference_time)
+    del template_ds
 
     log_files = f"{mean_path.name}, {sd_path.name}"
     if ensemble_path:
@@ -343,7 +341,7 @@ def process_cycle_streaming(
         ensemble_ctx as ensemble_writer,
     ):
         # Process first timestep
-        first_accumulators, first_ds = process_members_for_timestep(
+        first_accumulators, time_val = process_members_for_timestep(
             first_member_paths,
             pipeline,
             cycle,
@@ -351,7 +349,6 @@ def process_cycle_streaming(
             ensemble_writer=ensemble_writer,
         )
         means, stddevs = finalize_accumulators(first_accumulators)
-        time_val = first_ds["t"].values
         mean_writer.append_timestep(means, time_val)
         sd_writer.append_timestep(stddevs, time_val)
 
@@ -366,7 +363,7 @@ def process_cycle_streaming(
             ]
 
             # Process all members, accumulate statistics
-            accumulators, last_ds = process_members_for_timestep(
+            accumulators, time_val = process_members_for_timestep(
                 member_paths,
                 pipeline,
                 cycle,
@@ -376,7 +373,6 @@ def process_cycle_streaming(
 
             # Finalize and write this timestep
             means, stddevs = finalize_accumulators(accumulators)
-            time_val = last_ds["t"].values
             mean_writer.append_timestep(means, time_val)
             sd_writer.append_timestep(stddevs, time_val)
 
