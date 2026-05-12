@@ -109,8 +109,23 @@ class XWRFPostProcessor(DataProcessor):
         height = geopotential / 9.81
         model_level_thickness = np.diff(height, axis=1)  # This is a numpy array
 
-        # Compute more diagnostics and destagger
-        ds = ds.xwrf.postprocess().xwrf.destagger().compute()
+        # Compute more diagnostics and destagger (kept lazy at this point)
+        ds = ds.xwrf.postprocess().xwrf.destagger()
+
+        # Filter the lazy dataset before .compute() so that dask never
+        # materializes variables we don't need.
+        variables_to_keep = context.config.postprocess.variables_to_keep
+        if variables_to_keep:
+            patterns = [re.compile(v) for v in variables_to_keep]
+            vars_to_drop = [
+                v
+                for v in ds.data_vars
+                if not any(p.match(str(v)) for p in patterns)
+                and str(v) not in _XWRF_COMPUTATION_DEPS
+            ]
+            ds = ds.drop_vars(vars_to_drop)
+
+        ds = ds.compute()
 
         # Fix time dimension
         ds = ds.swap_dims({"Time": "t"})
@@ -122,20 +137,6 @@ class XWRFPostProcessor(DataProcessor):
 
         # Store level thickness
         ds["level_thickness"] = (("t", "z", "y", "x"), model_level_thickness)
-
-        # Early variable drop — remove data variables that won't survive the
-        # final filter and aren't needed for remaining computations (air_density).
-        # This frees memory before the downstream computations run.
-        variables_to_keep = context.config.postprocess.variables_to_keep
-        if variables_to_keep:
-            patterns = [re.compile(v) for v in variables_to_keep]
-            vars_to_drop = [
-                v
-                for v in ds.data_vars
-                if not any(p.match(str(v)) for p in patterns)
-                and str(v) not in _XWRF_COMPUTATION_DEPS
-            ]
-            ds = ds.drop_vars(vars_to_drop)
 
         # Compute air density
         column_mass_per_area = (ds["MU"] + ds["MUB"]) / 9.81
