@@ -104,6 +104,7 @@ def process_members_for_timestep(
     cycle: int,
     config: Config,
     ensemble_writer: StreamingEnsembleWriter | None = None,
+    precomputed_first_member: xr.Dataset | None = None,
 ) -> tuple[dict[str, WelfordState], np.ndarray]:
     """
     Process all ensemble members for a single output timestep.
@@ -118,6 +119,8 @@ def process_members_for_timestep(
         config: Experiment configuration.
         ensemble_writer: Optional ensemble writer for per-member output. If provided,
             each member's processed data is written as a slice before finalizing.
+        precomputed_first_member: If provided, used directly for member 0 instead of
+            re-opening and re-processing its wrfout file.
 
     Returns:
         Tuple of (accumulators, time_value).
@@ -126,43 +129,49 @@ def process_members_for_timestep(
     time_val: np.ndarray | None = None
 
     for member_i, wrfout_path in enumerate(wrfout_paths):
-        if not wrfout_path.exists():
-            logger.warning(f"Member file not found, skipping: {wrfout_path}")
-            continue
-
-        logger.debug(f"Processing member {member_i}: {wrfout_path.name}")
-
-        # Load and process through pipeline
-        with xr.open_dataset(wrfout_path) as ds:
-            context = ProcessingContext(
-                member=member_i,
-                cycle=cycle,
-                input_file=wrfout_path,
-                output_file=Path("/dev/null"),  # Not used in streaming mode
-                config=config,
+        # Use precomputed result for member 0 when available
+        if member_i == 0 and precomputed_first_member is not None:
+            logger.debug(
+                f"Using cached pipeline result for member 0: {wrfout_path.name}"
             )
-            processed = pipeline.process(ds, context)
+            processed = precomputed_first_member
+        else:
+            if not wrfout_path.exists():
+                logger.warning(f"Member file not found, skipping: {wrfout_path}")
+                continue
 
-            # Squeeze the time dimension — each wrfout file is a single
-            # timestep so the leading t-dim is always size 1.  Removing it
-            # here keeps shapes consistent with what the writers and Welford
-            # accumulators expect (no extra leading dim).
-            time_val = processed["t"].values
-            processed = processed.squeeze("t", drop=False)
+            logger.debug(f"Processing member {member_i}: {wrfout_path.name}")
 
-            # Initialize accumulators from first member's structure
-            if accumulators is None:
-                accumulators = create_welford_accumulators(processed)
+            with xr.open_dataset(wrfout_path) as ds:
+                context = ProcessingContext(
+                    member=member_i,
+                    cycle=cycle,
+                    input_file=wrfout_path,
+                    output_file=Path("/dev/null"),  # Not used in streaming mode
+                    config=config,
+                )
+                processed = pipeline.process(ds, context)
 
-            # Update running statistics
-            update_accumulators_from_dataset(accumulators, processed)
+        # Squeeze the time dimension — each wrfout file is a single
+        # timestep so the leading t-dim is always size 1.  Removing it
+        # here keeps shapes consistent with what the writers and Welford
+        # accumulators expect (no extra leading dim).
+        time_val = processed["t"].values
+        processed = processed.squeeze("t", drop=False)
 
-            # Write per-member slice if ensemble writer is active
-            if ensemble_writer is not None:
-                member_data = {
-                    var: processed[var].values for var in processed.data_vars
-                }
-                ensemble_writer.write_member(member_data, time_val, member_i)
+        # Initialize accumulators from first member's structure
+        if accumulators is None:
+            accumulators = create_welford_accumulators(processed)
+
+        # Update running statistics
+        update_accumulators_from_dataset(accumulators, processed)
+
+        # Write per-member slice if ensemble writer is active
+        if ensemble_writer is not None:
+            member_data = {
+                var: processed[var].values for var in processed.data_vars
+            }
+            ensemble_writer.write_member(member_data, time_val, member_i)
 
     if accumulators is None or time_val is None:
         raise ValueError("No member files were successfully processed")
@@ -298,13 +307,9 @@ def process_cycle_streaming(
     if keep_per_member:
         ensemble_path = output_dir / f"{source}_ensemble_cycle_{cycle:03d}.nc"
 
-    # We need the template before we can open writers, but also need to process
-    # the first timestep. Process first without ensemble writer to get template,
-    # then reprocess if needed — OR build template first by peeking at member_00.
-    # To avoid double-processing, peek at member_00 to build the template, then
-    # process all members (including member_00) for real inside the writer context.
-
-    # Peek at member_00 to build template
+    # Process member_00 through the pipeline once to discover the post-pipeline
+    # structure (variables, dims, dtypes).  The result is reused for the first
+    # timestep so member_00 is not processed twice.
     with xr.open_dataset(first_member_paths[0]) as ds:
         context = ProcessingContext(
             member=0,
@@ -316,7 +321,6 @@ def process_cycle_streaming(
         template_ds = pipeline.process(ds, context)
 
     template = get_structure_from_xarray(template_ds, reference_time=reference_time)
-    del template_ds
 
     log_files = f"{mean_path.name}, {sd_path.name}"
     if ensemble_path:
@@ -340,14 +344,16 @@ def process_cycle_streaming(
         _create_writer(sd_path, template, exp.cfg.postprocess) as sd_writer,
         ensemble_ctx as ensemble_writer,
     ):
-        # Process first timestep
+        # Process first timestep, reusing the template result for member_00
         first_accumulators, time_val = process_members_for_timestep(
             first_member_paths,
             pipeline,
             cycle,
             exp.cfg,
             ensemble_writer=ensemble_writer,
+            precomputed_first_member=template_ds,
         )
+        del template_ds
         means, stddevs = finalize_accumulators(first_accumulators)
         mean_writer.append_timestep(means, time_val)
         sd_writer.append_timestep(stddevs, time_val)
