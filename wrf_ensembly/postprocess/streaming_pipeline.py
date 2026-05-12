@@ -173,6 +173,8 @@ def process_members_for_timestep(
             }
             ensemble_writer.write_member(member_data, time_val, member_i)
 
+        del processed
+
     if accumulators is None or time_val is None:
         raise ValueError("No member files were successfully processed")
 
@@ -357,6 +359,7 @@ def process_cycle_streaming(
         means, stddevs = finalize_accumulators(first_accumulators)
         mean_writer.append_timestep(means, time_val)
         sd_writer.append_timestep(stddevs, time_val)
+        del first_accumulators, means, stddevs
 
         # Process remaining timesteps
         for wrfout_file in member_00_files[1:]:
@@ -381,6 +384,7 @@ def process_cycle_streaming(
             means, stddevs = finalize_accumulators(accumulators)
             mean_writer.append_timestep(means, time_val)
             sd_writer.append_timestep(stddevs, time_val)
+            del accumulators, means, stddevs
 
     logger.info(f"Completed {source} processing for cycle {cycle}")
     return mean_path, sd_path, ensemble_path
