@@ -77,6 +77,11 @@ class DataProcessor(ABC):
         pass
 
 
+# Variables that must survive the early variable filter in XWRFPostProcessor
+# because they are consumed by the air_density computation.
+_XWRF_COMPUTATION_DEPS = {"MU", "MUB", "DNW"}
+
+
 class XWRFPostProcessor(DataProcessor):
     """
     Processor that applies xWRF postprocessing operations as well as some other minor
@@ -118,6 +123,20 @@ class XWRFPostProcessor(DataProcessor):
         # Store level thickness
         ds["level_thickness"] = (("t", "z", "y", "x"), model_level_thickness)
 
+        # Early variable drop — remove data variables that won't survive the
+        # final filter and aren't needed for remaining computations (air_density).
+        # This frees memory before the downstream computations run.
+        variables_to_keep = context.config.postprocess.variables_to_keep
+        if variables_to_keep:
+            patterns = [re.compile(v) for v in variables_to_keep]
+            vars_to_drop = [
+                v
+                for v in ds.data_vars
+                if not any(p.match(str(v)) for p in patterns)
+                and str(v) not in _XWRF_COMPUTATION_DEPS
+            ]
+            ds = ds.drop_vars(vars_to_drop)
+
         # Compute air density
         column_mass_per_area = (ds["MU"] + ds["MUB"]) / 9.81
         layer_mass_per_area = np.stack(
@@ -129,6 +148,16 @@ class XWRFPostProcessor(DataProcessor):
             "units": "kg m-3",
             "standard_name": "air_density",
         }
+
+        # Drop computation-only variables that the user doesn't want in output
+        if variables_to_keep:
+            comp_to_drop = [
+                v
+                for v in _XWRF_COMPUTATION_DEPS
+                if v in ds.data_vars and not any(p.match(v) for p in patterns)
+            ]
+            if comp_to_drop:
+                ds = ds.drop_vars(comp_to_drop)
 
         # Rename XLONG and XLAT to longitude and latitude
         if "XLONG" in ds and "XLAT" in ds:
@@ -161,16 +190,7 @@ class XWRFPostProcessor(DataProcessor):
                     coordinates = coordinates.replace(k, v)
                 coordinates = coordinates.replace("CLAT", "").strip()
                 ds[var].encoding["coordinates"] = coordinates
-        ds = ds.drop("CLAT")
-
-        # Filter variables if needed, ensuring we keep time and vertical coordinates
-        variables_to_keep = context.config.postprocess.variables_to_keep
-        if variables_to_keep:
-            patterns = [re.compile(v) for v in variables_to_keep]
-            vars_to_drop = [
-                v for v in ds.data_vars if not any(p.match(str(v)) for p in patterns)
-            ]
-            ds = ds.drop_vars(vars_to_drop)
+        ds = ds.drop_vars("CLAT", errors="ignore")
 
         # Remove staggered dimensions
         ds = ds.drop_vars(
