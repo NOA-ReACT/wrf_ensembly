@@ -265,6 +265,7 @@ def welford_update(state: WelfordState, new_value: np.ndarray) -> None:
     """
 
     state.count += 1
+    new_value = new_value.astype(state.mean.dtype, copy=False)
     delta = new_value - state.mean
     state.mean += delta / state.count
     delta2 = new_value - state.mean
@@ -393,8 +394,8 @@ def create_welford_accumulators(template_ds: xr.Dataset) -> dict[str, WelfordSta
         shape = var.shape
         accumulators[var_name] = WelfordState(
             count=0,
-            mean=np.zeros(shape, dtype=np.float64),
-            m2=np.zeros(shape, dtype=np.float64),
+            mean=np.zeros(shape, dtype=np.float32),
+            m2=np.zeros(shape, dtype=np.float32),
         )
 
     return accumulators
