@@ -338,11 +338,16 @@ def get_structure_from_xarray(
             )
             # Don't store constant value - time will be written incrementally
         else:
+            # Always use float32 for float64 variables to save space
+            dtype = var.dtype
+            if dtype == np.float64:
+                dtype = np.float32
+
             nc_var = NetCDFVariable(
                 name=var_name,
                 dimensions=var.dims,
                 attributes=var_attrs,
-                dtype=var.dtype,
+                dtype=dtype,
             )
 
             # Store constant values for coordinate variables, non-numeric types,
