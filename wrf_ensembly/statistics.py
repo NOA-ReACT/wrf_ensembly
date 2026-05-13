@@ -8,20 +8,18 @@ as well as utilities for creating NetCDF files from templates.
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import UnknownType
 
 import netCDF4
 import numpy as np
 import xarray as xr
 
-from wrf_ensembly.console import logger
-
 
 def _get_variable_significant_digits(
     var_name: str,
-    default_digits: Optional[int],
-    overrides: Optional[dict[str, int]],
-) -> Optional[int]:
+    default_digits: int | None,
+    overrides: dict[str, int] | None,
+) -> int | None:
     """
     Get the significant_digits value for a variable based on regex pattern matching.
 
@@ -57,7 +55,7 @@ class NetCDFVariable:
     attributes: dict[str, str]
     dtype: np.dtype
 
-    constant_value = None
+    constant_value: UnknownType = None
 
 
 # List of coordinate variables name in wrf-ensembly forecast files.
@@ -106,48 +104,14 @@ def add_member_dimension(template: NetCDFFile, n_members: int) -> NetCDFFile:
     )
 
 
-def get_structure(file: Path) -> NetCDFFile:
-    """
-    Given a netCDF file, return its structure (dimensions, variables, attributes).
-    No data is read.
-    """
-
-    dims: dict[str, int] = {}
-    variables: dict[str, NetCDFVariable] = {}
-    attrs: dict[str, str] = {}
-
-    with netCDF4.Dataset(file, "r") as ds:
-        for dim_name, dim in ds.dimensions.items():
-            dims[dim_name] = len(dim)
-
-        for var_name, var in ds.variables.items():
-            variables[var_name] = NetCDFVariable(
-                name=var_name,
-                dimensions=var.dimensions,
-                attributes={attr: getattr(var, attr) for attr in var.ncattrs()},
-                dtype=var.dtype,
-            )
-
-            # Check if the variable is non-numeric or a coordinate variable and store the value as a constant
-            if (
-                not np.issubdtype(var.dtype, np.number)
-                or var_name in COORDINATE_VARIABLES
-            ):
-                variables[var_name].constant_value = var[:]
-
-        attrs = {attr: getattr(ds, attr) for attr in ds.ncattrs()}
-
-    return NetCDFFile(dims, variables, attrs)
-
-
 def create_file(
     path: Path,
     template: NetCDFFile,
     compression: str = "zlib",
     complevel: int = 4,
     shuffle: bool = True,
-    significant_digits: Optional[int] = None,
-    significant_digits_overrides: Optional[dict[str, int]] = None,
+    significant_digits: int | None = None,
+    significant_digits_overrides: dict[str, int] | None = None,
     quantize_mode: str = "GranularBitRound",
 ) -> netCDF4.Dataset:
     """
@@ -216,18 +180,18 @@ def create_file(
             error_msg = str(e)
             if "compression" in error_msg.lower():
                 raise RuntimeError(
-                    f"Failed to create variable '{var_name}' with compression='{compression}'. "
-                    f"The '{compression}' filter may not be available in your netCDF4 installation. "
-                    f"Try setting compression='zlib' or compression='none' in your config."
+                    f"""Failed to create variable '{var_name}' with compression='{compression}'.
+                    The '{compression}' filter may not be available in your netCDF4 installation.
+                    Try setting compression='zlib' or compression='none' in your config."""
                 ) from e
             elif (
                 "significant_digits" in error_msg.lower()
                 or "quantize" in error_msg.lower()
             ):
                 raise RuntimeError(
-                    f"Failed to create variable '{var_name}' with quantization. "
-                    f"Your netCDF4 installation may not support significant_digits. "
-                    f"Try setting significant_digits=null in your config."
+                    f"""Failed to create variable '{var_name}' with quantization.
+                    Your netCDF4 installation may not support significant_digits.
+                    Try setting significant_digits=null in your config."""
                 ) from e
             else:
                 raise
