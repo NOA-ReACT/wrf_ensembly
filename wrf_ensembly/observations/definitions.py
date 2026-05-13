@@ -241,6 +241,14 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         vmax=2,
         model_equivalent="AOD_355",
     ),
+    "AOD_440nm": QuantitySpec(
+        label="Aerosol Optical Depth @ 440nm",
+        units="",
+        cmap="Oranges",
+        vmin=0,
+        vmax=2,
+        model_equivalent="AOD_440",
+    ),
     "AOD_500nm": QuantitySpec(
         label="Aerosol Optical Depth @ 500nm",
         units="",
@@ -256,6 +264,22 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         vmin=0,
         vmax=2,
         model_equivalent="AOD_550",
+    ),
+    "AOD_665nm": QuantitySpec(
+        label="Aerosol Optical Depth @ 665nm",
+        units="",
+        cmap="Oranges",
+        vmin=0,
+        vmax=2,
+        model_equivalent="AOD_665",
+    ),
+    "AOD_870nm": QuantitySpec(
+        label="Aerosol Optical Depth @ 870nm",
+        units="",
+        cmap="Oranges",
+        vmin=0,
+        vmax=2,
+        model_equivalent="AOD_870",
     ),
     "AOD_1064nm": QuantitySpec(
         label="Aerosol Optical Depth @ 1064nm",
