@@ -2,7 +2,7 @@ import os
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Literal, override
 
 import rich
 import tomli
@@ -19,9 +19,11 @@ class UTCDatetimeStrategy(SerializationStrategy):
     If the datetime has no timezone info, assume UTC.
     """
 
+    @override
     def serialize(self, value: datetime) -> str:
         return value.isoformat()
 
+    @override
     def deserialize(self, value: str) -> datetime:
         dt = datetime.fromisoformat(value)
         # If no timezone info, assume UTC
@@ -95,16 +97,16 @@ class DomainControlConfig:
     truelat1: float
     """True latitude 1 for the projection"""
 
-    truelat2: Optional[float] = None
+    truelat2: float | None = None
     """True latitude 2 for the projection"""
 
-    stand_lon: Optional[float] = None
+    stand_lon: float | None = None
     """Standard longitude for the projection"""
 
-    pole_lat: Optional[float] = None
+    pole_lat: float | None = None
     """Pole latitude for the projection"""
 
-    pole_lon: Optional[float] = None
+    pole_lon: float | None = None
     """Pole longitude for the projection"""
 
     def is_equal(self, other) -> bool | str:
@@ -128,10 +130,10 @@ class DomainControlConfig:
 class CycleConfig:
     """Configuration overrides for a specific cycle"""
 
-    duration: Optional[int] = None
+    duration: int | None = None
     """Duration of the cycle in minutes"""
 
-    output_interval: Optional[int] = None
+    output_interval: int | None = None
     """Override the output interval for this cycle"""
 
 
@@ -154,10 +156,10 @@ class TimeControlConfig:
     analysis_interval: int = 60 * 6
     """Time between analysis/assimilation cycles, minutes"""
 
-    cycles: Dict[int, CycleConfig] = field(default_factory=dict)
+    cycles: dict[int, CycleConfig] = field(default_factory=dict)
     """Configuration overrides for specific cycles"""
 
-    runtime_io: Optional[list[str]] = field(default_factory=list)
+    runtime_io: list[str] | None = field(default_factory=list)
     """
     Optionally, add runtime I/O options to WRF. If set, it will create a text file in
     each member directory and set it's name in the `iofields_filename` namelist variable.
@@ -226,7 +228,7 @@ class DataConfig:
     For example, `/path/to/data/meteorology/member_%MEMBER%`.
     """
 
-    chemistry: Optional[ChemistryDataConfig] = None
+    chemistry: ChemistryDataConfig | None = None
     """Configuration about the chemistry data used in the experiment"""
 
     meteorology_glob: str = "*.grib"
@@ -309,10 +311,10 @@ class ThinningConfig:
 class ObservationsConfig:
     """Configuration related to observation preprocessing (mainly for the `observations preprocess-for-wrf` command)"""
 
-    instruments_to_assimilate: Optional[list[str]] = None
+    instruments_to_assimilate: list[str] | None = None
     """Which instruments to assimilate. If None, all available instruments are used."""
 
-    error_inflation_factor: Dict[str, float] = field(default_factory=dict)
+    error_inflation_factor: dict[str, float] = field(default_factory=dict)
     """
     Error inflation factor per instrument and quantity.
     The key is the `instrument.quantity` string, e.g. `sonde.U`.
@@ -413,7 +415,7 @@ class ValidationConfig:
 class GeogridConfig:
     """Configuration related to geogrid (geographical data preprocessing)."""
 
-    table: Optional[str] = "GEOGRID.TBL"
+    table: str | None = "GEOGRID.TBL"
 
 
 @dataclass
@@ -451,12 +453,13 @@ class PerturbationVariableConfig:
     boundary: int = 0
     """Size of the perturbation boundary, in grid points. If > 0, the given amount of rows/columns at the edges will not be pertubated (with a smoothing filter)."""
 
-    min_value: Optional[float] = None
+    min_value: float | None = None
     """Minimum value of the perturbation field. If None, no minimum is applied."""
 
-    max_value: Optional[float] = None
+    max_value: float | None = None
     """Maximum value of the perturbation field. If None, no maximum is applied."""
 
+    @override
     def __str__(self) -> str:
         return f"operation={self.operation}, mean={self.mean:.2f}, sd={self.sd:.2f}, gaussian_sigma={self.gaussian_sigma}, boundary={self.boundary}"
 
@@ -468,7 +471,7 @@ class PerturbationsConfig:
     variables: dict[str, PerturbationVariableConfig] = field(default_factory=dict)
     """Configuration for each variable"""
 
-    seed: Optional[int] = None
+    seed: int | None = None
     """RNG seed to use when generating perturbation fields. If none, it will be randomly generated."""
 
 
@@ -622,32 +625,32 @@ class PlotVariableConfig:
     name: str
     """Variable name in the netCDF file"""
 
-    level: Optional[int] = None
+    level: int | None = None
     """Vertical level index to select. None means the variable is 2D."""
 
-    pressure_level: Optional[float] = None
+    pressure_level: float | None = None
     """Pressure level in hPa to interpolate to. Requires an `air_pressure` variable in the dataset.
     If set, takes precedence over `level`."""
 
-    extent: Optional[tuple[float, float, float, float]] = None
+    extent: tuple[float, float, float, float] | None = None
     """Geographical extent of the plot (in degrees, min_lon, max_lon, min_lat, max_lat)"""
 
-    vmin: Optional[float] = None
+    vmin: float | None = None
     """Colorbar minimum for forecast/analysis panels. None means auto."""
 
-    vmax: Optional[float] = None
+    vmax: float | None = None
     """Colorbar maximum for forecast/analysis panels. None means auto."""
 
-    diff_vmin: Optional[float] = None
+    diff_vmin: float | None = None
     """Colorbar minimum for the difference panel. None means auto."""
 
-    diff_vmax: Optional[float] = None
+    diff_vmax: float | None = None
     """Colorbar maximum for the difference panel. None means auto."""
 
-    spread_vmin: Optional[float] = None
+    spread_vmin: float | None = None
     """Colorbar minimum for forecast/analysis spread panels. None means auto."""
 
-    spread_vmax: Optional[float] = None
+    spread_vmax: float | None = None
     """Colorbar maximum for forecast/analysis spread panels. None means auto."""
 
     cmap: str = "viridis"
@@ -713,7 +716,7 @@ class CopyFileConfig:
     source: Path
     """Path to the source file to copy"""
 
-    destination_name: Optional[str] = None
+    destination_name: str | None = None
     """Path to the destination file inside the DART directory. If None, will use the same name as the source file."""
 
 
