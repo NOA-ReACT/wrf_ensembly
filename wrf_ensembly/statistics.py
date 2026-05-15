@@ -8,7 +8,6 @@ as well as utilities for creating NetCDF files from templates.
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import UnknownType
 
 import netCDF4
 import numpy as np
@@ -55,7 +54,9 @@ class NetCDFVariable:
     attributes: dict[str, str]
     dtype: np.dtype
 
-    constant_value: UnknownType = None
+    constant_value: (
+        int | float | str | bytes | np.generic | np.datetime64 | np.timedelta64 | None
+    ) = None
 
 
 # List of coordinate variables name in wrf-ensembly forecast files.
