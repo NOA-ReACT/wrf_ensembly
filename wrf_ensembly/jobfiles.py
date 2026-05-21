@@ -179,7 +179,11 @@ def generate_advance_array_jobfile(
     }
 
     base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} ensemble advance-member"
-    commands = [_build_command(base_cmd, "", member="$SLURM_ARRAY_TASK_ID")]
+    commands = [
+        "sleep 2",
+        "sleep $((SLURM_ARRAY_TASK_ID % 10))",
+        _build_command(base_cmd, "", member="$SLURM_ARRAY_TASK_ID"),
+    ]
 
     jobfile.write_text(
         templates.generate(
