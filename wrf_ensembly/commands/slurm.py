@@ -1,6 +1,5 @@
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 
@@ -49,7 +48,7 @@ def make_analysis(experiment_path: Path, cycle: int):
     `cycle` will be run with the `--use-forecast` flag.
     """
 
-    logger.setup(f"slurm-make-analysis", experiment_path)
+    logger.setup("slurm-make-analysis", experiment_path)
     exp = experiment.Experiment(experiment_path)
     jobfiles.generate_make_analysis_jobfile(exp, cycle)
 
@@ -65,10 +64,10 @@ def make_analysis(experiment_path: Path, cycle: int):
 def postprocess(experiment_path: Path, cycle: int, clean_scratch: bool):
     """Create a SLURM jobfile to postprocess the WRF output"""
 
-    logger.setup(f"slurm-postprocessing", experiment_path)
+    logger.setup("slurm-postprocessing", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    logger.info(f"Writing jobfile for postprocessing...")
+    logger.info("Writing jobfile for postprocessing...")
     jobfiles.generate_postprocess_jobfile(exp, cycle, clean_scratch)
 
 
@@ -98,8 +97,8 @@ def postprocess(experiment_path: Path, cycle: int, clean_scratch: bool):
 def queue_all_postprocessing(
     experiment_path: Path,
     clean_scratch: bool,
-    first_cycle: Optional[int],
-    last_cycle: Optional[int],
+    first_cycle: int | None,
+    last_cycle: int | None,
     max_parallel: int,
 ):
     """Queue postprocessing for all cycles of the experiment as a SLURM job array"""
@@ -149,6 +148,12 @@ def queue_all_postprocessing(
 @click.option(
     "--run-until", type=int, required=False, help="Run until this cycle (end-inclusive)"
 )
+@click.option(
+    "--max-parallel",
+    type=int,
+    required=False,
+    help="Maximum number of parallel jobs to run",
+)
 @pass_experiment_path
 def run_experiment(
     experiment_path: Path,
@@ -157,6 +162,7 @@ def run_experiment(
     clean_scratch: bool,
     only_advance: bool,
     run_until: int | None,
+    max_parallel: int | None,
 ):
     """
     Creates jobfiles for all experiment steps and queues them in the correct order. This
@@ -181,7 +187,7 @@ def run_experiment(
 
     # Generate and queue the advance members job array
     advance_job_id: int | None = None
-    result = jobfiles.generate_advance_array_jobfile(exp)
+    result = jobfiles.generate_advance_array_jobfile(exp, max_parallel)
     if result is not None:
         jf, pending_members = result
         res = external.runc([*slurm_command.split(" "), str(jf.resolve())])
@@ -217,11 +223,13 @@ def run_experiment(
         run_until,
     )
     if advance_job_id is not None:
-        res = external.runc([
-            *slurm_command.split(" "),
-            f"--dependency=afterok:{advance_job_id}",
-            str(jf.resolve()),
-        ])
+        res = external.runc(
+            [
+                *slurm_command.split(" "),
+                f"--dependency=afterok:{advance_job_id}",
+                str(jf.resolve()),
+            ]
+        )
     else:
         res = external.runc([*slurm_command.split(" "), str(jf.resolve())])
 
