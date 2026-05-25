@@ -8,7 +8,6 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import numpy as np
 import pandas as pd
 import xarray as xr
-
 from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
@@ -55,7 +54,7 @@ class ModelInterpolation:
             Total number of observations updated across both sources, or 0 on failure
         """
 
-        needed_combos = self._determine_needed_combos()
+        needed_combos = self.determine_needed_combos()
         if not needed_combos:
             logger.info("No valid instrument/quantity combos found, cannot proceed!")
             return 0
@@ -94,7 +93,7 @@ class ModelInterpolation:
                     f"No {source} mean files found, skipping {source} interpolation"
                 )
                 continue
-            result_df = self._interpolate_all(needed_combos, ds_mean, source)
+            result_df = self.interpolate_all(needed_combos, ds_mean, source)
             n_updated += self._save_output(result_df, source)
 
             if not spread_combos:
@@ -114,7 +113,7 @@ class ModelInterpolation:
                 if v in ds_mean.data_vars:
                     ds_sd[v] = ds_mean[v]
 
-            spread_df = self._interpolate_all(spread_combos, ds_sd, source)
+            spread_df = self.interpolate_all(spread_combos, ds_sd, source)
             n_updated += self._save_spread_output(spread_df, source)
 
         return n_updated
@@ -136,7 +135,7 @@ class ModelInterpolation:
         placeholders = ", ".join("?" for _ in instruments)
         return f"{prefix} instrument IN ({placeholders})", instruments
 
-    def _determine_needed_combos(self) -> list[dict]:
+    def determine_needed_combos(self) -> list[dict]:
         """Determine which instrument/quantity combinations need interpolation.
 
         Queries DuckDB for distinct combinations and resolves their WRF
@@ -222,7 +221,9 @@ class ModelInterpolation:
         available = [v for v in needed_vars if v in ds.data_vars]
         missing = [v for v in needed_vars if v not in ds.data_vars]
         if missing:
-            logger.warning(f"Variables not found in {source}/{file_type} files: {missing}")
+            logger.warning(
+                f"Variables not found in {source}/{file_type} files: {missing}"
+            )
         ds = ds[available]
 
         # Check for duplicate coordinates
@@ -251,7 +252,7 @@ class ModelInterpolation:
 
         return ds
 
-    def _interpolate_all(
+    def interpolate_all(
         self,
         needed_combos: list[dict],
         ds: xr.Dataset,
@@ -271,7 +272,7 @@ class ModelInterpolation:
         3. Collect: concatenate all results.
 
         Args:
-            needed_combos: List of combo dicts from _determine_needed_combos
+            needed_combos: List of combo dicts from determine_needed_combos
             ds: Lazy Dataset (forecast or analysis, mean or sd)
             source: Either 'forecast' or 'analysis'. For analysis, observation
                 times are snapped to the nearest available time in the dataset
@@ -280,7 +281,9 @@ class ModelInterpolation:
         Returns:
             DataFrame with all observations and their model_value
         """
-        instrument_filter, instrument_params = self._instrument_where_clause(prefix="AND")
+        instrument_filter, instrument_params = self._instrument_where_clause(
+            prefix="AND"
+        )
         all_results = []
 
         ds_times = pd.DatetimeIndex(ds["t"].values)
@@ -356,8 +359,7 @@ class ModelInterpolation:
             n_invalid_time = int(invalid_time.sum())
             if n_invalid_time > 0:
                 logger.warning(
-                    f"{tag} {n_invalid_time}/{n_obs} obs are >1h outside dataset time "
-                    f"range; their model values will be NaN"
+                    f"{tag} {n_invalid_time}/{n_obs} obs are >1h outside dataset time range; their model values will be NaN"
                 )
 
             # Find bracketing timestep indices for each observation.
@@ -405,8 +407,7 @@ class ModelInterpolation:
         max_inflight = max_workers + 2
         n_brackets = len(sorted_brackets)
         logger.info(
-            f"Processing {n_brackets} unique brackets "
-            f"with up to {max_workers} workers"
+            f"Processing {n_brackets} unique brackets with up to {max_workers} workers"
         )
 
         bracket_iter = iter(sorted_brackets)
@@ -431,9 +432,7 @@ class ModelInterpolation:
             logger.debug(f"  Loading bracket t[{bl}]..t[{br}]")
             # Materialize only the 1-2 needed timesteps in the main thread.
             # scheduler="synchronous" prevents dask from spawning its own threads.
-            ds_sub = ds.isel(t=slice(bl, br + 1)).compute(
-                scheduler="synchronous"
-            )
+            ds_sub = ds.isel(t=slice(bl, br + 1)).compute(scheduler="synchronous")
             future = executor.submit(
                 self._process_bracket,
                 ds_sub,
@@ -671,9 +670,7 @@ class ModelInterpolation:
 
         # Check that all required model fields are available
         missing_fields = [
-            f.name
-            for f in operator.required_model_fields
-            if f.name not in ds.data_vars
+            f.name for f in operator.required_model_fields if f.name not in ds.data_vars
         ]
         if missing_fields:
             logger.warning(
@@ -695,6 +692,7 @@ class ModelInterpolation:
 
         # Batch all 3D fields + vertical coord, then do per-field vertical interp
         if fields_3d:
+            flip = False
             if z_type == "height":
                 vert_coord = "geopotential_height"
                 flip = False
@@ -710,9 +708,7 @@ class ModelInterpolation:
             if vert_coord is not None:
                 names_3d = [f.name for f in fields_3d]
                 all_3d_vars = list(set(names_3d + [vert_coord]))
-                interped = self._hor_interp(
-                    ds, all_3d_vars, obs_t, obs_x, obs_y
-                )
+                interped = self._hor_interp(ds, all_3d_vars, obs_t, obs_x, obs_y)
                 coord_profiles = interped[vert_coord]
                 if flip:
                     coord_profiles = coord_profiles[:, ::-1]
@@ -729,8 +725,7 @@ class ModelInterpolation:
         for key in operator.required_metadata:
             if key not in metadata:
                 logger.error(
-                    f"Required metadata '{key}' not found in observation data. "
-                    "Check that the converter populates this field."
+                    f"Required metadata '{key}' not found in observation data. Check that the converter populates this field."
                 )
                 return np.full(n_obs, np.nan)
             vals = metadata[key]
@@ -739,8 +734,7 @@ class ModelInterpolation:
             )
             if n_invalid > 0:
                 logger.warning(
-                    f"Metadata '{key}' has {n_invalid}/{n_obs} NaN values "
-                    f"({100 * n_invalid / n_obs:.1f}%)"
+                    f"Metadata '{key}' has {n_invalid}/{n_obs} NaN values ({100 * n_invalid / n_obs:.1f}%)"
                 )
 
         return operator.func(model_fields, metadata)
@@ -782,7 +776,7 @@ class ModelInterpolation:
             ds, [wrf_var, vertical_coord_var], obs_t, obs_x, obs_y
         )
 
-        profiles = interped[wrf_var]            # (n_obs, n_levels)
+        profiles = interped[wrf_var]  # (n_obs, n_levels)
         coord_profiles = interped[vertical_coord_var]  # (n_obs, n_levels)
 
         if flip:
@@ -863,7 +857,9 @@ class ModelInterpolation:
 
             if vert_dims:
                 z_dim = vert_dims[0]
-                data = var.transpose("t", "x", "y", z_dim).values  # (n_t, n_x, n_y, n_z)
+                data = var.transpose(
+                    "t", "x", "y", z_dim
+                ).values  # (n_t, n_x, n_y, n_z)
                 # Pad to 2 along each axis so idx+1 is always valid
                 if data.shape[0] == 1:
                     data = np.concatenate([data, data], axis=0)

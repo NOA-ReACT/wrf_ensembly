@@ -483,6 +483,55 @@ class ExperimentObservations:
 
         return len(update_df)
 
+    def get_member_values(
+        self,
+        source: str = "forecast",
+        instrument: str | None = None,
+        quantity: str | None = None,
+    ) -> pd.DataFrame | None:
+        """
+        Read per-member model interpolation results from parquet.
+
+        Requires interpolate-model-per-member to have been run first. Returns a
+        long-form DataFrame with columns: rowid, instrument, quantity, time, member, value.
+
+        Args:
+            source: Either 'forecast' or 'analysis'.
+            instrument: If set, filter to this instrument.
+            quantity: If set, filter to this quantity.
+
+        Returns:
+            DataFrame of per-member values, or None if the parquet does not exist
+            or no rows match the filters.
+        """
+        parquet_path = self.paths.data / "validation" / f"model_member_{source}.parquet"
+        if not parquet_path.exists():
+            return None
+
+        conditions = []
+        params: list = [str(parquet_path)]
+        if instrument is not None:
+            conditions.append("instrument = ?")
+            params.append(instrument)
+        if quantity is not None:
+            conditions.append("quantity = ?")
+            params.append(quantity)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        with duckdb.connect(read_only=True) as con:
+            result = con.execute(
+                f"SELECT * FROM read_parquet(?) {where}", params
+            ).fetchdf()
+
+        if result.empty:
+            return None
+
+        if "time" in result.columns and result["time"].dt.tz is None:
+            result["time"] = result["time"].dt.tz_localize("UTC")
+
+        return result
+
     def get_model_interpolated(
         self,
         start_date: dt.datetime | None = None,

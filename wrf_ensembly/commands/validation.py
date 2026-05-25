@@ -6,7 +6,7 @@ import click
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import experiment
-from wrf_ensembly.validation import FirstDeparturesAnalysis, ModelInterpolation
+from wrf_ensembly.validation import FirstDeparturesAnalysis, ModelInterpolation, PerMemberModelInterpolation
 from wrf_ensembly.wrf import get_wrf_cartopy_crs
 
 
@@ -30,6 +30,26 @@ def interpolate_model(experiment_path: Path):
     exp = experiment.Experiment(experiment_path)
 
     interpolation = ModelInterpolation(exp)
+    interpolation.run()
+
+
+@validation_cli.command()
+@pass_experiment_path
+def interpolate_model_per_member(experiment_path: Path):
+    """
+    Interpolate each ensemble member's model output to observation locations.
+
+    Reads the per-member ensemble files produced when postprocess.keep_per_member
+    is true and writes results to data/validation/model_member_{forecast,analysis}.parquet.
+    Each parquet file is in long form: one row per (observation × member).
+
+    The existing model_forecast / model_analysis columns in DuckDB are not modified.
+    Run interpolate-model first to populate those.
+    """
+    logger.setup("validation-interpolate-model-per-member", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    interpolation = PerMemberModelInterpolation(exp)
     interpolation.run()
 
 
