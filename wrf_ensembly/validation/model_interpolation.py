@@ -399,12 +399,10 @@ class ModelInterpolation:
         # interpolation in parallel (numpy/scipy release the GIL).
         sorted_brackets = sorted(bracket_work.keys())
         max_workers = max(1, (os.cpu_count() or 4) - 1)
-        # Keep a deep queue so workers always have something to do.
-        # Loading one bracket (1-2 timesteps) is typically slower than
-        # computing it, so with max_inflight = max_workers + 2 workers
-        # drain the queue and idle. A 4x multiplier pre-loads enough
-        # brackets that the pipeline stays full even if I/O is bursty.
-        max_inflight = max_workers * 4
+        # Loading happens on the main thread, so a deeper buffer doesn't
+        # increase throughput — it just delays draining of completed
+        # futures and makes the progress bar appear frozen.
+        max_inflight = max_workers + 2
         n_brackets = len(sorted_brackets)
         logger.info(
             f"Processing {n_brackets} unique brackets "
@@ -470,6 +468,12 @@ class ModelInterpolation:
                         _load_and_submit(next(bracket_iter))
                     except StopIteration:
                         break
+                    # Reap any futures that finished while we were loading
+                    # so progress and the "in queue" counter stay accurate.
+                    for f in [f for f in pending if f.done()]:
+                        pending.pop(f)
+                        all_results.extend(f.result())
+                        progress.advance(task_done)
                 _update_progress()
 
         # --- Phase 3: Collect ---
