@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
 
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
@@ -74,7 +73,7 @@ class FirstDeparturesAnalysis:
         # Set map projection
         self.map_proj = proj or ccrs.PlateCarree()
 
-    def _get_regime_config(self) -> Optional[FirstDeparturesRegimeConfig]:
+    def _get_regime_config(self) -> FirstDeparturesRegimeConfig | None:
         """Get regime configuration for this instrument-quantity pair if it exists."""
         for regime in self.exp.cfg.validation.first_departures.regimes:
             if (
@@ -84,7 +83,7 @@ class FirstDeparturesAnalysis:
                 return regime
         return None
 
-    def run(self, df: pd.DataFrame) -> Dict:
+    def run(self, df: pd.DataFrame) -> dict:
         """Run the complete first departures analysis.
 
         Args:
@@ -117,11 +116,11 @@ class FirstDeparturesAnalysis:
         }
 
         # Compute overall statistics
-        stats = self.compute_statistics(df)
-        results["statistics"] = stats
+        fp_stats = self.compute_statistics(df)
+        results["statistics"] = fp_stats
 
         # Save statistics in a CSV file
-        stats_file = self._save_statistics(stats)
+        stats_file = self._save_statistics(fp_stats)
         results["statistics_file"] = stats_file
 
         # Generate plots if configured
@@ -157,7 +156,7 @@ class FirstDeparturesAnalysis:
         valid = total_var > 0
         normalised = d.loc[valid, "departure"] / np.sqrt(total_var[valid])
 
-        stats = FirstDeparturesStatistics(
+        fp_stats = FirstDeparturesStatistics(
             count=len(departure),
             bias=float(departure.mean()),
             std=float(departure.std()),
@@ -178,15 +177,15 @@ class FirstDeparturesAnalysis:
         )
 
         logger.info(f"Statistics for {self.instrument}.{self.quantity}:")
-        logger.info(f"  Count: {stats.count}")
-        logger.info(f"  Bias: {stats.bias:.6f}")
-        logger.info(f"  Std: {stats.std:.6f}")
-        logger.info(f"  RMSE: {stats.rmse:.6f}")
-        logger.info(f"  Normalised innovation mean: {stats.norm_bias:+.3f}")
-        logger.info(f"  Normalised innovation std: {stats.norm_std:.3f}")
-        logger.info(f"  Mean σ_B / σ_o ratio: {stats.spread_to_obserr_ratio:.3f}")
+        logger.info(f"  Count: {fp_stats.count}")
+        logger.info(f"  Bias: {fp_stats.bias:.6f}")
+        logger.info(f"  Std: {fp_stats.std:.6f}")
+        logger.info(f"  RMSE: {fp_stats.rmse:.6f}")
+        logger.info(f"  Normalised innovation mean: {fp_stats.norm_bias:+.3f}")
+        logger.info(f"  Normalised innovation std: {fp_stats.norm_std:.3f}")
+        logger.info(f"  Mean σ_B / σ_o ratio: {fp_stats.spread_to_obserr_ratio:.3f}")
 
-        return stats
+        return fp_stats
 
     def _save_statistics(self, stats: FirstDeparturesStatistics) -> Path:
         """Save statistics to a CSV file.
