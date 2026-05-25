@@ -395,7 +395,7 @@ class ExperimentDatabase:
                 conn = sqlite3.connect(
                     self.db_path,
                     timeout=60.0,  # Increased timeout
-                    isolation_level="DEFERRED",  # Less aggressive locking
+                    isolation_level="IMMEDIATE",  # Less aggressive locking
                 )
 
                 # Trying our best to make the database easier on the FS
