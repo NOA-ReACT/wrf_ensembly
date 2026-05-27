@@ -485,9 +485,9 @@ class ExperimentObservations:
 
     def get_member_values(
         self,
+        instrument: str,
+        quantity: str,
         source: str = "forecast",
-        instrument: str | None = None,
-        quantity: str | None = None,
     ) -> pd.DataFrame | None:
         """
         Read per-member model interpolation results from parquet.
@@ -497,31 +497,38 @@ class ExperimentObservations:
 
         Args:
             source: Either 'forecast' or 'analysis'.
-            instrument: If set, filter to this instrument.
-            quantity: If set, filter to this quantity.
+            instrument: Filter to this instrument.
+            quantity: Filter to this quantity.
 
         Returns:
             DataFrame of per-member values, or None if the parquet does not exist
-            or no rows match the filters.
+            or no rows match the filters. The returned DataFrame will have columns time,
+            model_forecast, x, y, z, latitude, longitude, and value (obs).
         """
         parquet_path = self.paths.data / "validation" / f"model_member_{source}.parquet"
         if not parquet_path.exists():
             return None
 
-        conditions = []
-        params: list = [str(parquet_path)]
-        if instrument is not None:
-            conditions.append("instrument = ?")
-            params.append(instrument)
-        if quantity is not None:
-            conditions.append("quantity = ?")
-            params.append(quantity)
+        params: list = [str(parquet_path), instrument, quantity]
 
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-        with duckdb.connect(read_only=True) as con:
+        with self._get_duckdb(read_only=True) as con:
             result = con.execute(
-                f"SELECT * FROM read_parquet(?) {where}", params
+                # sql
+                """
+                with pm as (select * from read_parquet(?) where instrument = ? and quantity = ?)
+                select
+                    pm.member,
+                    pm.time,
+                    pm.value as "model_forecast",
+                    obs.x,
+                    obs.y,
+                    obs.z,
+                    obs.latitude,
+                    obs.longitude,
+                    obs.value from pm
+                left join observations obs on (obs.ROWID = pm.rowid)
+                """,
+                params,
             ).fetchdf()
 
         if result.empty:
