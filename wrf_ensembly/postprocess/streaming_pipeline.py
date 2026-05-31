@@ -167,12 +167,7 @@ def process_members_for_timestep(
         # timestep so the leading t-dim is always size 1.  Removing it
         # here keeps shapes consistent with what the writers and Welford
         # accumulators expect (no extra leading dim).
-        time_val = processed["t"].values
         processed = processed.squeeze("t", drop=False)
-
-        # Initialize accumulators from first member's structure
-        if accumulators is None:
-            accumulators = create_welford_accumulators(processed)
 
         # Update running statistics
         update_accumulators_from_dataset(accumulators, processed)
