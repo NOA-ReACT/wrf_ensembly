@@ -152,6 +152,17 @@ def process_members_for_timestep(
                 )
                 processed = pipeline.process(ds, context)
 
+        time_val = processed["t"].values
+
+        # Initialize accumulators from the first member's *un-squeezed* structure.
+        # create_welford_accumulators uses the presence of the 't' dimension to
+        # tell genuinely time-varying variables apart from ensemble-invariant
+        # constants (e.g. latitude/longitude). Squeezing first would strip 't'
+        # from every variable, leaving the accumulators empty and the mean/sd
+        # output files with no data.
+        if accumulators is None:
+            accumulators = create_welford_accumulators(processed)
+
         # Squeeze the time dimension — each wrfout file is a single
         # timestep so the leading t-dim is always size 1.  Removing it
         # here keeps shapes consistent with what the writers and Welford

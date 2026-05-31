@@ -361,7 +361,10 @@ def create_welford_accumulators(template_ds: xr.Dataset) -> dict[str, WelfordSta
         if "t" not in var.dims:
             continue
 
-        shape = var.shape
+        # Allocate per-timestep arrays without the size-1 't' dimension: members
+        # are accumulated one timestep at a time, so the data fed to
+        # welford_update has 't' already squeezed out.
+        shape = tuple(size for dim, size in zip(var.dims, var.shape) if dim != "t")
         accumulators[var_name] = WelfordState(
             count=0,
             mean=np.zeros(shape, dtype=np.float32),
