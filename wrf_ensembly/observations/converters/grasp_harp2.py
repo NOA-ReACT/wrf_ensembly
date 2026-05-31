@@ -37,13 +37,21 @@ def convert_grasp_harp2(
 
     ds = xr.open_dataset(nc_path, decode_times=True)
 
+    # Time has some extra dimensions (instrument, measurement_type, observation) but
+    # the data is the same in all of these, so we just pick the minimum value. Using
+    # the maximum would produce the same value.
+    time = (
+        ds["measurement_time_unix"]
+        .min(dim=("instrument", "measurement_type", "observation"))
+        .astype("datetime64[s]")
+    ).values  # (y, x, band)
     latitude = ds["latitude"].values  # (y, x)
     longitude = ds["longitude"].values  # (y, x)
     aod_total = ds["aerosol_optical_depth_total"].values  # (y, x, band)
     bands = ds["band"].values.tolist()  # list of str
 
-    # Scalar time — broadcast to all pixels
-    t_decoded = pd.Timestamp(ds["t"].values.item()).tz_localize("UTC")
+    print("aod total sizes:", aod_total.shape)
+    print("time sizes: ", time.shape)
 
     y_size, x_size, n_bands = aod_total.shape
     orig_shape = (y_size, x_size, n_bands)
@@ -75,6 +83,7 @@ def convert_grasp_harp2(
         quantity = BAND_TO_QUANTITY[band_str]
 
         aod = aod_total[:, :, band_idx]  # (y, x)
+        time_band = time[:, :, band_idx]  # (y, x)
         valid_mask = (
             ~np.isnan(aod) & ~np.isnan(latitude) & ~np.isnan(longitude) & (aod >= 0)
         )
@@ -83,6 +92,7 @@ def convert_grasp_harp2(
             continue
 
         aod_flat = aod.flatten()
+        t_flat = time_band.flatten()
         lat_flat = latitude.flatten()
         lon_flat = longitude.flatten()
         valid_flat = valid_mask.flatten()
@@ -117,7 +127,7 @@ def convert_grasp_harp2(
             {
                 "instrument": "GRASP_HARP2",
                 "quantity": quantity,
-                "time": t_decoded,
+                "time": t_flat,
                 "latitude": lat_flat,
                 "longitude": lon_flat,
                 "z": 0.0,
