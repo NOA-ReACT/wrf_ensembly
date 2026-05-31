@@ -611,6 +611,7 @@ class ExperimentObservations:
         qc_flags: list[int] | None = None,
         start_date: dt.datetime | None = None,
         end_date: dt.datetime | None = None,
+        metadata_filters: list[tuple[str, str, str]] | None = None,
     ) -> pd.DataFrame | None:
         """
         Retrieves observations for a specific instrument/quantity pair that have model_forecast set.
@@ -624,6 +625,10 @@ class ExperimentObservations:
             qc_flags: If set, only return observations with qc_flag in this list.
             start_date: If set, only return observations at or after this time.
             end_date: If set, only return observations before or at this time.
+            metadata_filters: If set, a list of (key, op, value) tuples filtering on the
+                metadata JSON column, where op is '=' or '!='. Comparisons are textual.
+                Observations whose metadata lacks the key are always kept (the filter only
+                removes rows that have the key and fail the comparison).
 
         Returns:
             DataFrame of observations, or None if none exist.
@@ -655,6 +660,14 @@ class ExperimentObservations:
         if end_date is not None:
             query += " AND time <= ?"
             params.append(end_date)
+        # Metadata JSON filters. Observations whose metadata lacks the key are kept
+        # (NULL extraction), so this only drops rows that have the key and fail the match.
+        for key, op, value in metadata_filters or []:
+            query += (
+                " AND (json_extract_string(metadata, ?) IS NULL"
+                f"      OR json_extract_string(metadata, ?) {op} ?)"
+            )
+            params.extend([key, key, value])
 
         with self._get_duckdb(read_only=True) as con:
             result = con.execute(query, params).fetchdf()

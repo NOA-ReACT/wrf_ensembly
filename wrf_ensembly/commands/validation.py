@@ -16,6 +16,24 @@ def validation_cli():
     pass
 
 
+def _parse_metadata_filters(raw: tuple[str, ...]) -> list[tuple[str, str, str]]:
+    """Parse 'key=value' / 'key!=value' strings into (key, op, value) tuples."""
+    parsed: list[tuple[str, str, str]] = []
+    for f in raw:
+        if "!=" in f:
+            key, value = f.split("!=", 1)
+            op = "!="
+        elif "=" in f:
+            key, value = f.split("=", 1)
+            op = "="
+        else:
+            raise click.BadParameter(
+                f"Invalid metadata filter '{f}'. Expected 'key=value' or 'key!=value'."
+            )
+        parsed.append((key.strip(), op, value.strip()))
+    return parsed
+
+
 @validation_cli.command()
 @pass_experiment_path
 def interpolate_model(experiment_path: Path):
@@ -69,12 +87,23 @@ def interpolate_model_per_member(experiment_path: Path):
     type=click.DateTime(),
     help="Last timestamp to consider in the analysis (ISO format)",
 )
+@click.option(
+    "--metadata-filter",
+    "metadata_filter",
+    multiple=True,
+    help="Filter observations on a metadata JSON key. Use 'key=value' to keep only "
+    "matching obs, or 'key!=value' to exclude them. Repeatable. Observations whose "
+    "metadata lacks the key are always kept. Values are matched as text, so use "
+    "is_over_land=1 (not =true). E.g. --metadata-filter is_over_land=1 keeps only "
+    "sea observations.",
+)
 @pass_experiment_path
 def analyze_first_departures(
     experiment_path: Path,
     instrument_quantity: tuple[str, ...],
     start_time: dt.datetime | None = None,
     end_time: dt.datetime | None = None,
+    metadata_filter: tuple[str, ...] = (),
 ):
     """
     Analyze first departures (O-B) statistics for validation.
@@ -95,6 +124,12 @@ def analyze_first_departures(
 
     logger.setup("validation-analyze-first-departures", experiment_path)
     exp = experiment.Experiment(experiment_path)
+
+    metadata_filters = _parse_metadata_filters(metadata_filter)
+    if metadata_filters:
+        logger.info(
+            f"Applying metadata filters: {['{} {} {}'.format(*f) for f in metadata_filters]}"
+        )
 
     # Get cartopy projection
     try:
@@ -172,6 +207,7 @@ def analyze_first_departures(
             qc_flags=[0, -1],
             start_date=start_time,
             end_date=end_time,
+            metadata_filters=metadata_filters,
         )
 
         if pair_df is None or len(pair_df) == 0:
