@@ -20,12 +20,15 @@ BAND_TO_QUANTITY: dict[str, str] = {
 def convert_grasp_harp2(
     nc_path: Path,
     disabled_bands: tuple[str, ...] = (),
+    imerg_path: Path | None = None,
 ) -> pd.DataFrame | None:
     """Convert a GRASP HARP2 netCDF file to WRF-Ensembly Observation format.
 
     Args:
         nc_path: Path to the GRASP HARP2 netCDF file.
         disabled_bands: Band wavelength strings to exclude (e.g. ("440.16",)).
+        imerg_path: Optional path to IMERG Land/Sea mask netCDF. When provided, each
+            observation is tagged with ``is_over_land`` in its metadata (0 = land, 1 = sea).
 
     Returns:
         A pandas DataFrame in WRF-Ensembly Observation format, or None if no valid
@@ -45,6 +48,20 @@ def convert_grasp_harp2(
     y_size, x_size, n_bands = aod_total.shape
     orig_shape = (y_size, x_size, n_bands)
     orig_names = ("y", "x", "band")
+
+    # Compute IMERG land/sea mask on the full spatial grid once, reused per band.
+    # >60 = ocean (is_over_land=0), <=40 = land (is_over_land=1).
+    # Longitude is [0, 360] in the IMERG data so we first change it to [-180, 180]
+    is_over_land_flat: np.ndarray | None = None
+    if imerg_path is not None:
+        imerg_ds = xr.open_dataset(imerg_path)
+        imerg_ds = imerg_ds.assign_coords(
+            lon=(((imerg_ds.lon + 180) % 360) - 180)
+        ).sortby("lon")
+        lat_da = xr.DataArray(latitude.flatten(), dims="points")
+        lon_da = xr.DataArray(longitude.flatten(), dims="points")
+        interp = imerg_ds["landseamask"].interp(lat=lat_da, lon=lon_da, method="linear")
+        is_over_land_flat = (interp.values <= 40).astype(int)
 
     all_dfs: list[pd.DataFrame] = []
 
@@ -86,6 +103,13 @@ def convert_grasp_harp2(
             for i in range(n)
         ]
 
+        if is_over_land_flat is not None:
+            metadata_list = [
+                {"is_over_land": int(is_over_land_flat[i])} for i in range(n)
+            ]
+        else:
+            metadata_list = [pd.NA] * n
+
         # Come up with some uncertainty based on AOD because there is nothing in the file
         uncertainty = np.maximum(0.05 + 0.15 * aod_flat, 0.05)
 
@@ -102,7 +126,7 @@ def convert_grasp_harp2(
                 "value_uncertainty": uncertainty,
                 "qc_flag": (~valid_flat).astype(int),
                 "orig_filename": nc_path.name,
-                "metadata": pd.NA,
+                "metadata": metadata_list,
             }
         )
         df["orig_coords"] = orig_coords
@@ -133,10 +157,18 @@ def convert_grasp_harp2(
     type=click.Choice(list(BAND_TO_QUANTITY.keys())),
     help="Band to exclude (repeatable). E.g. --disable-band 440.16",
 )
+@click.option(
+    "--imerg-land-sea",
+    "imerg_land_sea",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to IMERG Land/Sea mask netCDF to tag observations with is_over_land (0=land, 1=sea).",
+)
 def grasp_harp2(
     input_path: Path,
     output_path: Path,
     disabled_bands: tuple[str, ...],
+    imerg_land_sea: Path | None,
 ):
     """Convert a GRASP HARP2 netCDF file to WRF-Ensembly observation format.
 
@@ -150,9 +182,13 @@ def grasp_harp2(
     print(f"Converting GRASP HARP2 file: {input_path}")
     if disabled_bands:
         print(f"Disabled bands: {', '.join(disabled_bands)}")
+    if imerg_land_sea:
+        print(f"IMERG Land/Sea mask: {imerg_land_sea}")
     print(f"Output path: {output_path}")
 
-    converted_df = convert_grasp_harp2(input_path, disabled_bands=disabled_bands)
+    converted_df = convert_grasp_harp2(
+        input_path, disabled_bands=disabled_bands, imerg_path=imerg_land_sea
+    )
 
     if converted_df is None or converted_df.empty:
         print("No valid observations found in the input file, aborting")
