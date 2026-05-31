@@ -50,9 +50,6 @@ def convert_grasp_harp2(
     aod_total = ds["aerosol_optical_depth_total"].values  # (y, x, band)
     bands = ds["band"].values.tolist()  # list of str
 
-    print("aod total sizes:", aod_total.shape)
-    print("time sizes: ", time.shape)
-
     y_size, x_size, n_bands = aod_total.shape
     orig_shape = (y_size, x_size, n_bands)
     orig_names = ("y", "x", "band")
@@ -140,6 +137,7 @@ def convert_grasp_harp2(
             }
         )
         df["orig_coords"] = orig_coords
+        df["time"] = df["time"].dt.tz_localize("UTC")
 
         all_dfs.append(df)
 
