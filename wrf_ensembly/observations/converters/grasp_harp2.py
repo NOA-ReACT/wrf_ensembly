@@ -58,7 +58,9 @@ def convert_grasp_harp2(
         quantity = BAND_TO_QUANTITY[band_str]
 
         aod = aod_total[:, :, band_idx]  # (y, x)
-        valid_mask = ~np.isnan(aod) & ~np.isnan(latitude) & ~np.isnan(longitude)
+        valid_mask = (
+            ~np.isnan(aod) & ~np.isnan(latitude) & ~np.isnan(longitude) & (aod >= 0)
+        )
 
         if not np.any(valid_mask):
             continue
