@@ -190,7 +190,6 @@ class ExperimentObservations:
 
         if ignore_instrument_quantity_pairs:
             for pair in ignore_instrument_quantity_pairs:
-                logger.info(f"Ignoring instrument-quantity pair: {pair}")
                 instrument, quantity = pair.split(".")
                 df = df[
                     ~((df["instrument"] == instrument) & (df["quantity"] == quantity))
