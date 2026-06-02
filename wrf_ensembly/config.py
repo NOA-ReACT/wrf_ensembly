@@ -392,7 +392,10 @@ class FirstDeparturesConfig:
     excluded_bboxes: list[tuple[float, float, float, float]] = field(
         default_factory=list
     )
-    """List of bounding boxes to exclude from the analysis (list of 4 floats: min_lat, min_lon, max_lat, max_lon)."""
+    """List of bounding boxes to exclude from the analysis (list of 4 floats: min_lat, min_lon, max_lat, max_lon). Contradicts the included_bboxes setting."""
+
+    analysis_bbox: tuple[float, float, float, float] | None = None
+    """If defined, only do analysis inside this box. Applied before `excluded_bboxes`."""
 
     regimes: list[FirstDeparturesRegimeConfig] = field(default_factory=list)
     """Regime configurations for different instrument-quantity pairs."""

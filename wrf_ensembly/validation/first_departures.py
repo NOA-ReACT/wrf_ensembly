@@ -30,6 +30,7 @@ class FirstDeparturesStatistics:
     norm_bias: float
     norm_std: float
     spread_to_obserr_ratio: float
+    r_est: float
 
 
 class FirstDeparturesAnalysis:
@@ -99,6 +100,14 @@ class FirstDeparturesAnalysis:
         # Compute O-B if not already present
         if "departure" not in df.columns:
             df["departure"] = df["value"] - df["model_forecast"]
+
+        if self.exp.cfg.validation.first_departures.analysis_bbox is not None:
+            bbox = self.exp.cfg.validation.first_departures.analysis_bbox
+            logger.debug(f"Only including region {bbox}")
+            df = df[
+                df["latitude"].between(bbox[0], bbox[2])
+                & df["longitude"].between(bbox[1], bbox[3])
+            ]
 
         # Remove any regions marked as excluded (cfg option `exclude_bboxes`)
         # After adding the new column so we avoid a `.copy()` and any 'assigning a view' problems
@@ -176,6 +185,7 @@ class FirstDeparturesAnalysis:
                     / d.loc[valid, "value_uncertainty"]
                 ).mean()
             ),
+            r_est=d["departure"].var() - (d["model_forecast_spread"] ** 2).mean(),
         )
 
     def compute_statistics(self, df: pd.DataFrame) -> FirstDeparturesStatistics:
