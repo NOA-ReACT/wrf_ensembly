@@ -139,11 +139,13 @@ class FirstDeparturesAnalysis:
         )
         return results
 
-    def compute_statistics(self, df: pd.DataFrame) -> FirstDeparturesStatistics:
-        """Compute overall O-B statistics.
+    @staticmethod
+    def _compute_statistics(df: pd.DataFrame) -> FirstDeparturesStatistics:
+        """Compute the full set of O-B statistics for a DataFrame.
 
         Args:
-            df: DataFrame with 'departure' column
+            df: DataFrame with 'departure', 'model_forecast_spread' and
+                'value_uncertainty' columns
 
         Returns:
             Statistics dataclass
@@ -156,7 +158,7 @@ class FirstDeparturesAnalysis:
         valid = total_var > 0
         normalised = d.loc[valid, "departure"] / np.sqrt(total_var[valid])
 
-        fp_stats = FirstDeparturesStatistics(
+        return FirstDeparturesStatistics(
             count=len(departure),
             bias=float(departure.mean()),
             std=float(departure.std()),
@@ -175,6 +177,17 @@ class FirstDeparturesAnalysis:
                 ).mean()
             ),
         )
+
+    def compute_statistics(self, df: pd.DataFrame) -> FirstDeparturesStatistics:
+        """Compute overall O-B statistics.
+
+        Args:
+            df: DataFrame with 'departure' column
+
+        Returns:
+            Statistics dataclass
+        """
+        fp_stats = self._compute_statistics(df)
 
         logger.info(f"Statistics for {self.instrument}.{self.quantity}:")
         logger.info(f"  Count: {fp_stats.count}")
@@ -419,15 +432,14 @@ class FirstDeparturesAnalysis:
             labels=self.regime_config.labels,
         )
 
-        # Compute statistics per regime
-        regime_stats = df.groupby("regime", observed=True)["departure"].agg(
-            [
-                ("count", "count"),
-                ("bias", "mean"),
-                ("std", "std"),
-                ("rmse", lambda x: np.sqrt((x**2).mean())),
-            ]
-        )
+        # Compute the full set of statistics per regime
+        regime_stats = pd.DataFrame(
+            {
+                regime: vars(self._compute_statistics(group))
+                for regime, group in df.groupby("regime", observed=True)
+            }
+        ).T
+        regime_stats.index.name = "regime"
 
         # Save statistics
         stats_file = self.output_dir / "regime_statistics.csv"
