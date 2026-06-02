@@ -76,9 +76,13 @@ def convert_grasp_harp2(
         (aod_total, BAND_TO_QUANTITY),
     ]
     if not disable_fine_mode:
-        datasets.append((ds["aerosol_fine_mode_optical_depth"].values, BAND_TO_FINE_QUANTITY))
+        datasets.append(
+            (ds["aerosol_fine_mode_optical_depth"].values, BAND_TO_FINE_QUANTITY)
+        )
     if not disable_coarse_mode:
-        datasets.append((ds["aerosol_coarse_mode_optical_depth"].values, BAND_TO_COARSE_QUANTITY))
+        datasets.append(
+            (ds["aerosol_coarse_mode_optical_depth"].values, BAND_TO_COARSE_QUANTITY)
+        )
 
     # Compute IMERG land/sea mask on the full spatial grid once, reused per band.
     # I am using 100 as a strict ocean mask. The documentation mentions:
@@ -149,8 +153,9 @@ def convert_grasp_harp2(
             else:
                 metadata_list = [pd.NA] * n
 
-            # Come up with some uncertainty based on AOD because there is nothing in the file
-            uncertainty = np.maximum(0.05 + 0.15 * aod_flat, 0.05)
+            # Uncertainty based on 1-week O-B analysis
+            uncertainty = np.maximum(aod_flat * 0.2853 + 0.0267, 0.0267)
+            uncertainty[uncertainty > 0.3] = 0.3
 
             df = pd.DataFrame(
                 {
