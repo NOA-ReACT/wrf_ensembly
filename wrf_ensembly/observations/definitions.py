@@ -163,6 +163,12 @@ INSTRUMENT_REGISTRY: dict[str, InstrumentSpec] = {
         x=AxisSpec(dim="x", label="X", coord="longitude"),
         y=AxisSpec(dim="y", label="Y", coord="latitude"),
     ),
+    "GRASP_HARP2": InstrumentSpec(
+        label="GRASP HARP2",
+        geometry=Geometry.MAP_SWATH,
+        x=AxisSpec(dim="x", label="X", coord="x"),
+        y=AxisSpec(dim="y", label="Y", coord="y"),
+    ),
 }
 
 

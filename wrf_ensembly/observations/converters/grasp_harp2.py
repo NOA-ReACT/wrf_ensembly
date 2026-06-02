@@ -68,9 +68,9 @@ def convert_grasp_harp2(
     bands = ds["band"].values.tolist()  # list of str
 
     aod_total = ds["aerosol_optical_depth_total"].values  # (y, x, band)
-    y_size, x_size, n_bands = aod_total.shape
-    orig_shape = (y_size, x_size, n_bands)
-    orig_names = ("y", "x", "band")
+    y_size, x_size, _ = aod_total.shape
+    orig_shape = (y_size, x_size)
+    orig_names = ("y", "x")
 
     datasets: list[tuple[np.ndarray, dict[str, str]]] = [
         (aod_total, BAND_TO_QUANTITY),
@@ -139,7 +139,7 @@ def convert_grasp_harp2(
             n = len(aod_flat)
             orig_coords = [
                 {
-                    "indices": (int(y_flat[i]), int(x_flat[i]), band_idx),
+                    "indices": (int(y_flat[i]), int(x_flat[i])),
                     "shape": orig_shape,
                     "names": orig_names,
                 }
