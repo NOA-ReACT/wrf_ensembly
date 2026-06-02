@@ -163,7 +163,10 @@ class ExperimentObservations:
             return result.rowcount
 
     def trim_observation_file(
-        self, input_path: Path, output_path: Path
+        self,
+        input_path: Path,
+        output_path: Path,
+        ignore_instrument_quantity_pairs: list[str] | None = None,
     ) -> tuple[str, int, int]:
         """
         Trims an observation file temporally and spatially according to the experiment configuration.
@@ -174,6 +177,7 @@ class ExperimentObservations:
         Args:
             input_path: Path to the input observation file
             output_path: Path where the trimmed observation file will be saved
+            ignore_instrument_quantity_pairs: Optional list of instrument-quantity pairs to ignore (e.g. ["instrument1.quantity1", "instrument2.quantity2"])
 
         Returns:
             The input file name, the number of observations in the original file, and the
@@ -183,6 +187,14 @@ class ExperimentObservations:
         filename = input_path.name
         df = obs.io.read_obs(input_path)
         original_len = len(df.index)
+
+        if ignore_instrument_quantity_pairs:
+            for pair in ignore_instrument_quantity_pairs:
+                logger.info(f"Ignoring instrument-quantity pair: {pair}")
+                instrument, quantity = pair.split(".")
+                df = df[
+                    ~((df["instrument"] == instrument) & (df["quantity"] == quantity))
+                ]
 
         # Find wrfinput file
         if not self.cfg.data.per_member_meteorology:

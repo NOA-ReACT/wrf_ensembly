@@ -39,8 +39,21 @@ def observations_cli():
 @click.option(
     "--jobs", "-j", type=int, default=1, help="Number of parallel jobs to use"
 )
+@click.option(
+    "--ignore",
+    "-i",
+    "ignore_instrument_quantity_pairs",
+    type=str,
+    multiple=True,
+    help="Instrument-quantity pair to ignore (e.g. instrument.quantity), can be specified multiple times",
+)
 @pass_experiment_path
-def add(experiment_path: Path, files: list[Path], jobs: int):
+def add(
+    experiment_path: Path,
+    files: list[Path],
+    jobs: int,
+    ignore_instrument_quantity_pairs: tuple[str, ...],
+):
     """
     Bulk add observations to the experiment
     The files are first spatially and temporally trimmed according to the experiment configuration,
@@ -79,6 +92,7 @@ def add(experiment_path: Path, files: list[Path], jobs: int):
                 exp.obs.trim_observation_file,
                 input_path=input_path,
                 output_path=output_path,
+                ignore_instrument_quantity_pairs=list(ignore_instrument_quantity_pairs) or None,
             )
             for input_path, output_path in io_paths
         ]
