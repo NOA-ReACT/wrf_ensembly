@@ -26,6 +26,23 @@ def parse_metadata_json_string(metadata_str: str) -> dict:
     return metadata
 
 
+def format_obs_meta(metadata_str: str) -> str:
+    """
+    Format an observation's metadata into the `key=value|key=value` string the DART
+    converter expects.
+
+    Nested fields (dicts/lists, e.g. the `superob` summary) are skipped: their string
+    representation contains commas which would break the CSV the Fortran converter
+    parses. Only scalar key/value pairs make it into the obs_seq metadata.
+    """
+    pairs = []
+    for k, v in parse_metadata_json_string(metadata_str).items():
+        if isinstance(v, (dict, list)):
+            continue
+        pairs.append(f"{k}={v}")
+    return "|".join(pairs)
+
+
 def convert_to_dart_obs_seq(
     dart_path: Path, observations: pd.DataFrame, output_location: Path
 ) -> ExternalProcess:
@@ -74,9 +91,7 @@ def convert_to_dart_obs_seq(
     observations["vert"] = observations["z"]
     observations["obs_value"] = observations["value"]
     observations["obs_error"] = observations["value_uncertainty"]
-    observations["obs_meta"] = observations["metadata"].apply(
-        lambda x: "|".join(f"{k}={v}" for k, v in parse_metadata_json_string(x).items())
-    )
+    observations["obs_meta"] = observations["metadata"].apply(format_obs_meta)
     observations = observations[
         [
             "obs_type",
