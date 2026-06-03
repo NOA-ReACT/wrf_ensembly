@@ -400,6 +400,23 @@ def generate_filter_stats_plots(
     log_info(f"Saved {output_dir / 'diagnostic_scatter_dartqc_ok.png'}")
     plt.close(fig)
 
+    # A map of observation locations
+    fig, ax = plt.subplots(
+        figsize=(10, 6), subplot_kw={"projection": ccrs.PlateCarree()}
+    )
+    ax.scatter(
+        df["longitude"],
+        df["latitude"],
+        color="black",
+        s=10,
+        transform=ccrs.PlateCarree(),
+    )
+    ax.coastlines()
+
+    fig.savefig(output_dir / "observation_locations.png", dpi=dpi, bbox_inches="tight")
+    log_info(f"Saved {output_dir / 'observation_locations.png'}")
+    plt.close(fig)
+
     # For rank histograms, only use observations with valid prior/posterior
     key_cols = [
         "obs",
