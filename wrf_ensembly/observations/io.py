@@ -69,10 +69,10 @@ def validate_schema(df: pd.DataFrame):
                 f"orig_coords must contain 'indices', 'shape', and 'names' keys at row {i}"
             )
 
-        if (
+        if not (
             len(orig_coords["indices"])
-            != len(orig_coords["names"])
-            != len(orig_coords["shape"])
+            == len(orig_coords["names"])
+            == len(orig_coords["shape"])
         ):
             raise ValueError(
                 f"orig_coords 'indices', 'shape', and 'names' must have the same length at row {i}"

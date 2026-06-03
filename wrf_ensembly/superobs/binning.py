@@ -13,21 +13,31 @@ def parse_orig_coords(df: pd.DataFrame) -> pd.DataFrame:
     Expand orig_coords struct into flat columns named after each dimension.
 
     For a row with orig_coords = {names: ["profile", "height_bin"], indices: [42, 7]},
-    this adds columns `profile=42` and `height_bin=7`.
+    this adds columns `_coord_profile=42` and `_coord_height_bin=7`.
+
+    Columns are prefixed with `_coord_` so native grid dimension names (which can be
+    `x`, `y`, `z`, `latitude`, ... for swath instruments like HARP2) never collide with
+    the existing projected-coordinate columns on the dataframe.
 
     Returns a copy of df with the extra columns appended.
     """
 
     def _extract(row) -> dict:
         oc = row["orig_coords"]
-        return {name: int(idx) for name, idx in zip(oc["names"], oc["indices"])}
+        return {
+            f"_coord_{name}": int(idx)
+            for name, idx in zip(oc["names"], oc["indices"])
+        }
 
     coord_cols = df.apply(_extract, axis=1, result_type="expand")
     return pd.concat([df, coord_cols], axis=1)
 
 
 def _aggregate_group(
-    group: pd.DataFrame, new_shape: tuple[int, ...], bin_indices: tuple[int, ...]
+    group: pd.DataFrame,
+    new_shape: tuple[int, ...],
+    bin_indices: tuple[int, ...],
+    dim_names: tuple[str, ...],
 ) -> pd.Series | None:
     """
     Collapse one bin group into a single superob row, preserving the full schema.
@@ -36,6 +46,9 @@ def _aggregate_group(
         group: Should contain all observations inside the bin
         new_shape: Dimensions of the new grid
         bin_indices: The indices (x/y/z/...) of the observation in the **new** grid.
+        dim_names: Native names of the binned dimensions, aligned with `new_shape`
+            and `bin_indices`. The superob's coordinate names are these with a
+            `_bin` suffix.
 
     Uncertainty model:
         instrument_err = rms(individual errors) / sqrt(n)   [reduces with n]
@@ -79,14 +92,12 @@ def _aggregate_group(
     mean_z = agg_group["z"].mean()
     mean_time = agg_group["time"].mean()
 
-    # Handle coordinates: use the `bin_indices` and `new_shape`, append `_bin` to all names
+    # Handle coordinates: describe the *new* binned grid. indices/shape/names are all
+    # aligned with the binned dimensions (group_cols), with a `_bin` suffix on names.
     orig_coords = {
         "indices": np.array(bin_indices, dtype=np.int32),
         "shape": np.array(new_shape, dtype=np.int32),
-        "names": np.array(
-            [name + "_bin" for name in first["orig_coords"]["names"].tolist()],
-            dtype=object,
-        ),
+        "names": np.array([name + "_bin" for name in dim_names], dtype=object),
     }
 
     # Metadata: Keep existing from the first observation, add superob information
@@ -149,20 +160,21 @@ def grid_bin(
     for dim in hoz_dim_names:
         label = f"_grp_{dim}"
         bin_size = hoz_bins.get(dim, 1)
-        df[label] = df[dim] // bin_size
+        df[label] = df[f"_coord_{dim}"] // bin_size
         group_cols.append(label)
 
     for dim in vert_dim_names:
         label = f"_grp_{dim}"
         bin_size = vert_bins.get(dim, 1)
-        df[label] = df[dim] // bin_size
+        df[label] = df[f"_coord_{dim}"] // bin_size
         group_cols.append(label)
 
     new_shape = tuple(int(df[col].max()) + 1 for col in group_cols)
+    dim_names = tuple(hoz_dim_names + vert_dim_names)
 
     def _agg(group):
         bin_indices = tuple(int(group[col].iloc[0]) for col in group_cols)
-        return _aggregate_group(group, new_shape, bin_indices)
+        return _aggregate_group(group, new_shape, bin_indices, dim_names)
 
     result = df.groupby(group_cols, group_keys=False).apply(_agg).reset_index(drop=True)
 
