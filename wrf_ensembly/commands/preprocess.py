@@ -415,10 +415,9 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
 
     if missing_times:
         string_times = ", ".join([str(t) for t in missing_times])
-        logger.error(
-            f"Global model is missing data for the following times: {string_times}"
+        logger.warning(
+            f"Global model is missing data for the following times, interpolation will be used!: {string_times}"
         )
-        sys.exit(1)
 
     # Disable HDF5 locking since we are taking care only to write from one process at each file
     os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"  # Good luck!
