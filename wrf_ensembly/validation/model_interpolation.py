@@ -2,6 +2,8 @@
 
 import glob
 import os
+import queue
+import threading
 from collections import defaultdict
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
@@ -264,11 +266,14 @@ class ModelInterpolation:
         1. Gather: fetch all observation data from DuckDB and compute time
            bracket assignments for every combo. All DuckDB access is
            concentrated here, in the main thread.
-        2. Execute: iterate over unique brackets (across all combos). Each
-           bracket's 1-2 timesteps are materialized in the main thread
-           (safe for dask), then the scipy interpolation for every combo
-           sharing that bracket is dispatched to a ThreadPoolExecutor.
-           A bounded prefetch queue overlaps I/O with compute.
+        2. Execute: iterate over unique brackets (across all combos). A
+           dedicated loader thread owns all access to the lazy `ds` and
+           materializes each bracket's 1-2 timesteps via
+           `compute(scheduler="synchronous")`. A bounded queue hands the
+           materialized datasets off to a ThreadPoolExecutor that runs
+           scipy interpolation in parallel (numpy/scipy release the GIL).
+           Loading and processing overlap, and the main thread stays
+           reactive enough to drain completions and refresh progress.
         3. Collect: concatenate all results.
 
         Args:
@@ -395,22 +400,45 @@ class ModelInterpolation:
         if not combo_work_list:
             return pd.DataFrame(columns=["rowid", "model_value"])
 
-        # --- Phase 2: Execute with ThreadPoolExecutor (bounded prefetch) ---
-        # The main thread materializes 1-2 timesteps per bracket synchronously
-        # (avoids dask thread-safety issues), while worker threads run scipy
-        # interpolation in parallel (numpy/scipy release the GIL).
+        # --- Phase 2: Producer/consumer pipeline ---
+        # A dedicated loader thread owns all access to the lazy `ds` and
+        # materializes 1-2 timesteps per bracket (scheduler="synchronous"
+        # so dask doesn't spawn its own threads). Loaded brackets are
+        # handed off on a bounded queue. The main thread submits them to
+        # a ThreadPoolExecutor that runs scipy interpolation in parallel
+        # (numpy/scipy release the GIL), and stays reactive enough to
+        # drain completions and refresh progress while loading happens
+        # concurrently.
         sorted_brackets = sorted(bracket_work.keys())
         max_workers = max(1, (os.cpu_count() or 4) - 1)
-        # Loading happens on the main thread, so a deeper buffer doesn't
-        # increase throughput — it just delays draining of completed
-        # futures and makes the progress bar appear frozen.
-        max_inflight = max_workers + 2
         n_brackets = len(sorted_brackets)
         logger.info(
             f"Processing {n_brackets} unique brackets with up to {max_workers} workers"
         )
 
-        bracket_iter = iter(sorted_brackets)
+        # Bounded handoff: blocks the loader once we have enough materialized
+        # timesteps in flight, keeping memory bounded.
+        load_queue: queue.Queue = queue.Queue(maxsize=max_workers + 2)
+        loader_error: list[BaseException] = []
+        stop_loader = threading.Event()
+
+        def _loader() -> None:
+            try:
+                for bkey in sorted_brackets:
+                    if stop_loader.is_set():
+                        break
+                    bl = int(bkey // n_times)
+                    br = int(bkey % n_times)
+                    logger.debug(f"  Loading bracket t[{bl}]..t[{br}]")
+                    ds_sub = ds.isel(t=slice(bl, br + 1)).compute(
+                        scheduler="synchronous"
+                    )
+                    load_queue.put((bkey, ds_sub))
+            except BaseException as exc:
+                loader_error.append(exc)
+            finally:
+                load_queue.put(None)
+
         pending: dict = {}
 
         progress = Progress(
@@ -426,54 +454,85 @@ class ModelInterpolation:
         def _update_progress() -> None:
             progress.update(task_done, extra=f"[dim]{len(pending)} in queue[/dim]")
 
-        def _load_and_submit(bkey: int) -> None:
-            bl = int(bkey // n_times)
-            br = int(bkey % n_times)
-            logger.debug(f"  Loading bracket t[{bl}]..t[{br}]")
-            # Materialize only the 1-2 needed timesteps in the main thread.
-            # scheduler="synchronous" prevents dask from spawning its own threads.
-            ds_sub = ds.isel(t=slice(bl, br + 1)).compute(scheduler="synchronous")
-            future = executor.submit(
-                self._process_bracket,
-                ds_sub,
-                bracket_work[bkey],
-                combo_work_list,
-                bkey,
-                n_times,
-            )
-            pending[future] = bkey
-            _update_progress()
-
         with progress, ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Seed with just enough brackets to keep all workers busy immediately.
-            # The drain loop below tops up to max_inflight after each batch of
-            # completions, so the deep queue is maintained without blocking the
-            # main thread for a long time before any draining begins.
-            for _ in range(min(max_workers + 2, n_brackets)):
-                try:
-                    _load_and_submit(next(bracket_iter))
-                except StopIteration:
-                    break
+            loader_thread = threading.Thread(
+                target=_loader, name="bracket-loader", daemon=True
+            )
+            loader_thread.start()
+            loader_done = False
 
-            while pending:
-                done, _ = wait(pending.keys(), return_when=FIRST_COMPLETED)
-                for future in done:
-                    pending.pop(future)
-                    all_results.extend(future.result())
-                    progress.advance(task_done)
-                # Top up to max_inflight after each drain batch
-                while len(pending) < max_inflight:
-                    try:
-                        _load_and_submit(next(bracket_iter))
-                    except StopIteration:
-                        break
-                    # Reap any futures that finished while we were loading
-                    # so progress and the "in queue" counter stay accurate.
-                    for f in [f for f in pending if f.done()]:
-                        pending.pop(f)
-                        all_results.extend(f.result())
+            try:
+                while not loader_done or pending:
+                    # Submit every loaded bracket that's ready right now.
+                    while not loader_done:
+                        try:
+                            item = load_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                        if item is None:
+                            loader_done = True
+                            break
+                        bkey, ds_sub = item
+                        future = executor.submit(
+                            self._process_bracket,
+                            ds_sub,
+                            bracket_work[bkey],
+                            combo_work_list,
+                            bkey,
+                            n_times,
+                        )
+                        pending[future] = bkey
+                        _update_progress()
+
+                    if not pending:
+                        # Loader still has work to deliver — block briefly
+                        # on the queue rather than busy-waiting.
+                        if not loader_done:
+                            try:
+                                item = load_queue.get(timeout=0.1)
+                            except queue.Empty:
+                                continue
+                            if item is None:
+                                loader_done = True
+                                continue
+                            bkey, ds_sub = item
+                            future = executor.submit(
+                                self._process_bracket,
+                                ds_sub,
+                                bracket_work[bkey],
+                                combo_work_list,
+                                bkey,
+                                n_times,
+                            )
+                            pending[future] = bkey
+                            _update_progress()
+                        continue
+
+                    # Wait briefly for processing to complete so we can
+                    # also re-check the loader queue for new work.
+                    done, _ = wait(
+                        pending.keys(), return_when=FIRST_COMPLETED, timeout=0.1
+                    )
+                    for future in done:
+                        pending.pop(future)
+                        all_results.extend(future.result())
                         progress.advance(task_done)
-                _update_progress()
+                    if done:
+                        _update_progress()
+            except BaseException:
+                stop_loader.set()
+                # Drain the queue so the loader isn't stuck on .put().
+                try:
+                    while True:
+                        load_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                raise
+            finally:
+                loader_thread.join()
+
+            if loader_error:
+                raise loader_error[0]
 
         # --- Phase 3: Collect ---
         return pd.concat(all_results, ignore_index=True)
