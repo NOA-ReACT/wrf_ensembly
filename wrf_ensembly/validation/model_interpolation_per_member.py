@@ -6,9 +6,19 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import xarray as xr
 
-from wrf_ensembly.console import logger
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TextColumn,
+    TimeElapsedColumn,
+)
+
+from wrf_ensembly.console import console, logger
 from wrf_ensembly.experiment.experiment import Experiment
 from wrf_ensembly.validation.model_interpolation import ModelInterpolation
 
@@ -119,32 +129,66 @@ class PerMemberModelInterpolation:
                 f"Ensemble file has {n_members} members but config says {cfg_members}"
             )
 
-        all_dfs: list[pd.DataFrame] = []
-        for m in range(n_members):
-            logger.info(f"Interpolating {source} member {m + 1}/{n_members}")
-            ds_m = ds_ensemble.isel(member=m)
-            df_m = self._base.interpolate_all(needed_combos, ds_m, source=source)
-            if df_m.empty:
-                continue
-            df_m["member"] = np.int32(m)
-            all_dfs.append(df_m)
+        output_path = output_dir / f"model_member_{source}.parquet"
+        writer: pq.ParquetWriter | None = None
+        total_rows = 0
 
-        if not all_dfs:
+        member_progress = Progress(
+            TextColumn("[bold]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            TextColumn("{task.fields[extra]}"),
+            console=console,
+        )
+        member_task = member_progress.add_task(
+            "Members", total=n_members, extra=source
+        )
+
+        try:
+            with member_progress:
+                for m in range(n_members):
+                    logger.info(
+                        f"Interpolating {source} member {m + 1}/{n_members}"
+                    )
+                    ds_m = ds_ensemble.isel(member=m)
+                    member_idx = np.int32(m)
+
+                    def _flush_member(batch_df: pd.DataFrame) -> None:
+                        nonlocal writer, total_rows
+                        if batch_df.empty:
+                            return
+                        batch_df["member"] = member_idx
+                        enriched = self._enrich_with_metadata(batch_df)
+                        table = pa.Table.from_pandas(enriched, preserve_index=False)
+                        if writer is None:
+                            writer = pq.ParquetWriter(
+                                str(output_path), table.schema
+                            )
+                        writer.write_table(table)
+                        total_rows += len(enriched)
+
+                    self._base.interpolate_all(
+                        needed_combos,
+                        ds_m,
+                        source=source,
+                        result_callback=_flush_member,
+                        progress=member_progress,
+                    )
+                    member_progress.advance(member_task)
+        finally:
+            if writer is not None:
+                writer.close()
+
+        if total_rows == 0:
             logger.warning(f"No interpolation results for {source}")
             return 0
 
-        combined = pd.concat(all_dfs, ignore_index=True)
-        enriched = self._enrich_with_metadata(combined)
-
-        output_path = output_dir / f"model_member_{source}.parquet"
-        enriched.to_parquet(output_path, index=False)
-
-        n_rows = len(enriched)
-        n_obs = n_rows // n_members if n_members else n_rows
+        n_obs = total_rows // n_members if n_members else total_rows
         logger.info(
-            f"Wrote {n_rows} rows ({n_members} members × ~{n_obs} obs) to {output_path}"
+            f"Wrote {total_rows} rows ({n_members} members × ~{n_obs} obs) to {output_path}"
         )
-        return n_rows
+        return total_rows
 
     def _enrich_with_metadata(self, df: pd.DataFrame) -> pd.DataFrame:
         """Join per-member results with the obs DB to add instrument, quantity, time."""

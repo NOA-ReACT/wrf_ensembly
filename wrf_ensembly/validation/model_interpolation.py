@@ -1,10 +1,12 @@
 """Model interpolation to observation locations and times."""
 
+import contextlib
 import glob
 import os
 import queue
 import threading
 from collections import defaultdict
+from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import numpy as np
@@ -21,6 +23,9 @@ from rich.progress import (
 from wrf_ensembly.console import console, logger
 from wrf_ensembly.experiment.experiment import Experiment
 from wrf_ensembly.observations import QUANTITY_REGISTRY, OperatorSpec
+
+# Maximum number of result rows to accumulate before flushing via result_callback.
+_FLUSH_ROWS = 2_000_000
 
 
 class ModelInterpolation:
@@ -95,8 +100,14 @@ class ModelInterpolation:
                     f"No {source} mean files found, skipping {source} interpolation"
                 )
                 continue
-            result_df = self.interpolate_all(needed_combos, ds_mean, source)
-            n_updated += self._save_output(result_df, source)
+
+            def _flush_mean(batch: pd.DataFrame) -> None:
+                nonlocal n_updated
+                n_updated += self._save_output(batch, source)
+
+            self.interpolate_all(
+                needed_combos, ds_mean, source, result_callback=_flush_mean
+            )
 
             if not spread_combos:
                 continue
@@ -115,8 +126,13 @@ class ModelInterpolation:
                 if v in ds_mean.data_vars:
                     ds_sd[v] = ds_mean[v]
 
-            spread_df = self.interpolate_all(spread_combos, ds_sd, source)
-            n_updated += self._save_spread_output(spread_df, source)
+            def _flush_spread(batch: pd.DataFrame) -> None:
+                nonlocal n_updated
+                n_updated += self._save_spread_output(batch, source)
+
+            self.interpolate_all(
+                spread_combos, ds_sd, source, result_callback=_flush_spread
+            )
 
         return n_updated
 
@@ -259,6 +275,8 @@ class ModelInterpolation:
         needed_combos: list[dict],
         ds: xr.Dataset,
         source: str = "forecast",
+        result_callback: Callable[[pd.DataFrame], None] | None = None,
+        progress: Progress | None = None,
     ) -> pd.DataFrame:
         """Interpolate model forecasts to all observation combos.
 
@@ -282,14 +300,23 @@ class ModelInterpolation:
             source: Either 'forecast' or 'analysis'. For analysis, observation
                 times are snapped to the nearest available time in the dataset
                 since analysis files have only one timestep per cycle.
+            result_callback: If provided, results are flushed through this
+                callback in batches during processing to bound memory usage.
+                When set, the returned DataFrame is empty.
+            progress: If provided, the bracket progress task is added to this
+                existing Progress instance instead of creating a new one.
+                Useful for nesting under an outer progress bar.
 
         Returns:
-            DataFrame with all observations and their model_value
+            DataFrame with all observations and their model_value, or an
+            empty DataFrame if result_callback was provided (results are
+            delivered through the callback instead).
         """
         instrument_filter, instrument_params = self._instrument_where_clause(
             prefix="AND"
         )
         all_results = []
+        accumulated_rows = 0
 
         ds_times = pd.DatetimeIndex(ds["t"].values)
         ds_times_values = ds_times.values
@@ -441,20 +468,23 @@ class ModelInterpolation:
 
         pending: dict = {}
 
-        progress = Progress(
-            TextColumn("[bold]{task.description}"),
-            BarColumn(),
-            MofNCompleteColumn(),
-            TimeElapsedColumn(),
-            TextColumn("{task.fields[extra]}"),
-            console=console,
-        )
+        owns_progress = progress is None
+        if owns_progress:
+            progress = Progress(
+                TextColumn("[bold]{task.description}"),
+                BarColumn(),
+                MofNCompleteColumn(),
+                TimeElapsedColumn(),
+                TextColumn("{task.fields[extra]}"),
+                console=console,
+            )
         task_done = progress.add_task("Brackets", total=n_brackets, extra="")
 
         def _update_progress() -> None:
             progress.update(task_done, extra=f"[dim]{len(pending)} in queue[/dim]")
 
-        with progress, ThreadPoolExecutor(max_workers=max_workers) as executor:
+        progress_ctx = progress if owns_progress else contextlib.nullcontext()
+        with progress_ctx, ThreadPoolExecutor(max_workers=max_workers) as executor:
             loader_thread = threading.Thread(
                 target=_loader, name="bracket-loader", daemon=True
             )
@@ -515,10 +545,20 @@ class ModelInterpolation:
                     )
                     for future in done:
                         pending.pop(future)
-                        all_results.extend(future.result())
+                        bracket_results = future.result()
+                        all_results.extend(bracket_results)
+                        accumulated_rows += sum(len(df) for df in bracket_results)
                         progress.advance(task_done)
                     if done:
                         _update_progress()
+
+                    if result_callback and accumulated_rows >= _FLUSH_ROWS:
+                        logger.debug(
+                            f"Flushing {accumulated_rows} accumulated result rows"
+                        )
+                        result_callback(pd.concat(all_results, ignore_index=True))
+                        all_results.clear()
+                        accumulated_rows = 0
             except BaseException:
                 stop_loader.set()
                 # Drain the queue so the loader isn't stuck on .put().
@@ -535,7 +575,13 @@ class ModelInterpolation:
                 raise loader_error[0]
 
         # --- Phase 3: Collect ---
-        return pd.concat(all_results, ignore_index=True)
+        if not all_results:
+            return pd.DataFrame(columns=["rowid", "model_value"])
+        final = pd.concat(all_results, ignore_index=True)
+        if result_callback:
+            result_callback(final)
+            return pd.DataFrame(columns=["rowid", "model_value"])
+        return final
 
     def _process_bracket(
         self,
