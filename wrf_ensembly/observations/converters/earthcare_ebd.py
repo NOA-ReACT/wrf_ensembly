@@ -6,8 +6,30 @@ import click
 import numpy as np
 import pandas as pd
 import xarray as xr
+from scipy.ndimage import binary_dilation
 
 from wrf_ensembly.observations import io as obs_io
+
+# QC parameters (calibrated on the 2024-08 golden-week dust_alpha free run,
+# see certainty/analysis/dust_alpha_bias/ebd_alpha_obs_error.py):
+# Physical ceiling for dust extinction at 355 nm. The previous blanket cap of
+# 3e-4 1/m amputated real plume cores (~17% of aerosol-classified cells);
+# values above ~2e-3 1/m (2/km) are cloud contamination, not dust.
+DUST_EXT_CEILING = 2e-3
+# Cloud-adjacency buffer: aerosol/clear cells within this many along-track
+# profiles / height cells of any cloud/attenuated/invalid cell are rejected.
+# We do not re-classify anything — we use the product's own classification and
+# stay away from its edges. 98.5% of the physically implausible > 2e-3 cells
+# sit inside this buffer.
+CLOUD_BUFFER_PROFILES = 2
+CLOUD_BUFFER_HEIGHT = 3
+# Observation error sigma_o = INTERCEPT + SLOPE * extinction, N-weighted fit of
+# binned sigma(O-B) in the screened SAL envelope at dust_alpha = 0.5. An upper
+# bound (still contains model error); to be iterated with Desroziers once a DA
+# run exists. Replaces the previous ad-hoc values (the 20% relative term was
+# kept; the old 5e-6 floor was ~14x too small).
+SIGMA_O_INTERCEPT = 6.8e-5  # 1/m
+SIGMA_O_SLOPE = 0.20
 
 
 def get_index_tuples(arr):
@@ -49,12 +71,23 @@ def convert_earthcare_ebd(
     # Prepare qc flag, 0 = valid, 1 = invalid:
     # 1) No NaN extinction
     # 2) Only aerosol (3) or clear air (0)
-    # 3) Extinction in larger than 0.0003
-    qc_flag = ec["particle_extinction_coefficient_355nm_low_resolution"].isnull()
-    qc_flag |= ~(
-        (ec["simple_classification"] == 0) | (ec["simple_classification"] == 3)
+    # 3) Aerosol extinction above the physical dust ceiling (cloud leakage)
+    # 4) Cells adjacent to cloud/attenuated/invalid cells (cloud buffer)
+    ext = ec["particle_extinction_coefficient_355nm_low_resolution"]
+    cloudish = (
+        ~((ec["simple_classification"] == 0) | (ec["simple_classification"] == 3))
+        | ext.isnull()
     )
-    qc_flag |= ec["particle_extinction_coefficient_355nm_low_resolution"] > 0.0003
+    # Dilate the cloud/invalid mask; data dims are (along_track, height).
+    near_cloud = binary_dilation(
+        cloudish.to_numpy(),
+        structure=np.ones(
+            (2 * CLOUD_BUFFER_PROFILES + 1, 2 * CLOUD_BUFFER_HEIGHT + 1), dtype=bool
+        ),
+    )
+    qc_flag = cloudish.copy()
+    qc_flag |= ext > DUST_EXT_CEILING
+    qc_flag |= xr.DataArray(near_cloud, dims=cloudish.dims, coords=cloudish.coords)
 
     # Clamp extinction to zero
     ec["particle_extinction_coefficient_355nm_low_resolution"] = ec[
@@ -69,14 +102,7 @@ def convert_earthcare_ebd(
         "particle_extinction_coefficient_355nm_low_resolution"
     ].to_numpy()
     value = particle_extinction.flatten()
-    value_uncertainty = (
-        ec["particle_extinction_coefficient_355nm_low_resolution_error"]
-        .to_numpy()
-        .flatten()
-    )
-    uncertainty_is_zero = value_uncertainty == 0
     height = ec["height"].to_numpy().flatten()
-    simple_classification = ec["simple_classification"].to_numpy().flatten()
     qc_flag = ec["qc_flag"].to_numpy().flatten()
 
     # The coordinates are 1D arrays that need to be broadcast to the shape of the data
@@ -107,19 +133,12 @@ def convert_earthcare_ebd(
     coord_names = ec["particle_extinction_coefficient_355nm_low_resolution"].dims
     coord_shape = ec["particle_extinction_coefficient_355nm_low_resolution"].shape
 
-    # Uncertainty:
-    # - 0.0025 1/km for clear air fixed
-    # - 20% of extinction value for aerosol, with a minimum value of 0.0025 1/km
-    # Remember that everything needs to be in 1/m
-    value_uncertainty = np.full_like(value_uncertainty, 0.0025)
-    clear_mask = simple_classification != 3
-    value_uncertainty[clear_mask] = 0.0015
-    aerosol_mask = simple_classification == 3
-    value_uncertainty[aerosol_mask] = np.maximum(
-        0.20 * value[aerosol_mask],  # 20% relative error
-        0.005,  # Higher floor for aerosol regions
+    # Uncertainty: sigma_o = intercept + slope * extinction (1/m), fitted to the
+    # binned O-B spread of the golden-week dust_alpha free run (see constants
+    # at the top). Clear-air cells (value clamped to 0) get the intercept.
+    value_uncertainty = SIGMA_O_INTERCEPT + SIGMA_O_SLOPE * np.nan_to_num(
+        np.maximum(value, 0.0)
     )
-    value_uncertainty = value_uncertainty / 1000.0  # Convert to 1/m
 
     # Shapes of everything
     shapes = {
