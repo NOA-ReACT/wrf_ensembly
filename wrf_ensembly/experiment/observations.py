@@ -303,7 +303,10 @@ class ExperimentObservations:
 
                 before_n = len(group)
                 group = grid_bin(
-                    group, superob_options.hoz_bin_sizes, superob_options.vert_bin_sizes
+                    group,
+                    superob_options.hoz_bin_sizes,
+                    superob_options.vert_bin_sizes,
+                    superob_options.reduce_instrument_error,
                 )
                 print(
                     f"{iq}: Generated {len(group)} superobs from {before_n} observations."
@@ -333,7 +336,12 @@ class ExperimentObservations:
                 group = df.loc[df["instrument_quantity"] == iq]
                 tb_cfg = self.cfg.observations.temporal_binning[iq]
                 before_n = len(group)
-                group = time_bin(group, tb_cfg.bin_minutes, tb_cfg.offset_minutes)
+                group = time_bin(
+                    group,
+                    tb_cfg.bin_minutes,
+                    tb_cfg.offset_minutes,
+                    tb_cfg.reduce_instrument_error,
+                )
                 print(
                     f"{iq}: Temporal binning: {len(group)} bins from {before_n} obs "
                     f"({tb_cfg.bin_minutes} min windows, offset {tb_cfg.offset_minutes} min)."

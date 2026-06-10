@@ -240,15 +240,18 @@ Observations are often denser than the model grid, so WRF-Ensembly supports thre
 
 Groups observations into spatial bins defined by their original array dimensions, then averages each bin into a single superobservation. Uncertainty is reduced by sqrt(n) for the instrument error component and augmented by the within-bin standard deviation as representativeness error.
 
+The sqrt(n) reduction assumes the errors of the observations inside a bin are independent. For products where they are correlated — e.g. retrievals that are horizontally smoothed at scales larger than the bin, like EarthCARE ATLID EBD — set `reduce_instrument_error = false`: averaging correlated errors does not reduce them, so the superob keeps the rms of the individual errors as its instrument error component.
+
 ```toml
 [observations.superobs."AEOLUS_L2A_MLE.LIDAR_EXTINCTION_355nm"]
 hoz_bin_sizes = {profile = 5}       # Bin every 5 profiles together
 vert_bin_sizes = {height_bin = 2}   # Bin every 2 height levels together
+reduce_instrument_error = false     # In-bin errors are correlated: no sqrt(n) reduction
 ```
 
 ### Temporal Binning (`temporal_binning`)
 
-Groups observations into fixed-width UTC time windows, producing one superob per window. Cannot be used together with `superobs` for the same instrument-quantity pair.
+Groups observations into fixed-width UTC time windows, producing one superob per window. Cannot be used together with `superobs` for the same instrument-quantity pair. The same uncertainty model (and `reduce_instrument_error` option) as spatial superobbing applies.
 
 ```toml
 [observations.temporal_binning."AERONET.AOD_550nm"]

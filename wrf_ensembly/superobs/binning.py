@@ -38,6 +38,7 @@ def _aggregate_group(
     new_shape: tuple[int, ...],
     bin_indices: tuple[int, ...],
     dim_names: tuple[str, ...],
+    reduce_instrument_error: bool = True,
 ) -> pd.Series | None:
     """
     Collapse one bin group into a single superob row, preserving the full schema.
@@ -49,9 +50,14 @@ def _aggregate_group(
         dim_names: Native names of the binned dimensions, aligned with `new_shape`
             and `bin_indices`. The superob's coordinate names are these with a
             `_bin` suffix.
+        reduce_instrument_error: Whether averaging n observations reduces the
+            instrument error by sqrt(n). True assumes independent in-bin errors;
+            set False when they are correlated (e.g. horizontally smoothed
+            retrievals), in which case averaging does not reduce the error.
 
     Uncertainty model:
-        instrument_err = rms(individual errors) / sqrt(n)   [reduces with n]
+        instrument_err = rms(individual errors) / sqrt(n)   [reduce_instrument_error]
+        instrument_err = rms(individual errors)             [otherwise]
         repr_err       = std(values within group)           [does not reduce]
         total_err      = sqrt(instrument_err^2 + repr_err^2)
 
@@ -76,9 +82,9 @@ def _aggregate_group(
 
     # Deal with value and uncertainty
     mean_val = agg_group["value"].mean()
-    instr_err = float(
-        np.sqrt((agg_group["value_uncertainty"] ** 2).mean()) / np.sqrt(n)
-    )
+    instr_err = float(np.sqrt((agg_group["value_uncertainty"] ** 2).mean()))
+    if reduce_instrument_error:
+        instr_err /= np.sqrt(n)
     repr_err = (
         float(agg_group["value"].std()) if n > 1 else float(first["value_uncertainty"])
     )
@@ -134,6 +140,7 @@ def grid_bin(
     df: pd.DataFrame,
     hoz_bins: dict[str, int],
     vert_bins: dict[str, int],
+    reduce_instrument_error: bool = True,
 ) -> pd.DataFrame:
     """
     Bin a dataframe along its native instrument grid dimensions.
@@ -142,6 +149,9 @@ def grid_bin(
         df: Observations for a single (instrument, quantity) pair.
         hoz_bins: Bin size per horizontal dimension, in native grid steps.
         vert_bins: Bin size per vertical dimension, in native grid steps.
+        reduce_instrument_error: Whether the superob instrument error is reduced
+            by sqrt(n). Set False when in-bin errors are correlated (e.g.
+            smoothed retrievals); see `_aggregate_group`.
 
     Returns:
         pd.DataFrame with the same schema as the input, one row per superob.
@@ -174,14 +184,21 @@ def grid_bin(
 
     def _agg(group):
         bin_indices = tuple(int(group[col].iloc[0]) for col in group_cols)
-        return _aggregate_group(group, new_shape, bin_indices, dim_names)
+        return _aggregate_group(
+            group, new_shape, bin_indices, dim_names, reduce_instrument_error
+        )
 
     result = df.groupby(group_cols, group_keys=False).apply(_agg).reset_index(drop=True)
 
     return result
 
 
-def time_bin(df: pd.DataFrame, bin_minutes: int, offset_minutes: int = 0) -> pd.DataFrame:
+def time_bin(
+    df: pd.DataFrame,
+    bin_minutes: int,
+    offset_minutes: int = 0,
+    reduce_instrument_error: bool = True,
+) -> pd.DataFrame:
     """
     Bin observations into fixed-width UTC time windows using pandas time grouping.
 
@@ -190,7 +207,8 @@ def time_bin(df: pd.DataFrame, bin_minutes: int, offset_minutes: int = 0) -> pd.
     produces bins from :30 to :30, centering each window on a full hour.
 
     Empty bins are dropped. The same uncertainty model as grid_bin is applied:
-    instrument error reduces with sqrt(n), representativeness error is the std of
+    instrument error reduces with sqrt(n) (unless reduce_instrument_error is
+    False, for correlated in-bin errors), representativeness error is the std of
     values within the bin.
 
     Incompatible with grid_bin (spatial superobbing) — the two operations produce
@@ -201,6 +219,8 @@ def time_bin(df: pd.DataFrame, bin_minutes: int, offset_minutes: int = 0) -> pd.
         df: Observations for a single (instrument, quantity) pair.
         bin_minutes: Width of each time window in minutes.
         offset_minutes: Shift bin boundaries by this many minutes (default 0).
+        reduce_instrument_error: Whether the binned instrument error is reduced
+            by sqrt(n); see `grid_bin`.
 
     Returns:
         pd.DataFrame with same schema, one row per non-empty bin.
@@ -236,9 +256,12 @@ def time_bin(df: pd.DataFrame, bin_minutes: int, offset_minutes: int = 0) -> pd.
         mean_val = agg_group["value"].mean()
 
         unc = agg_group["value_uncertainty"].dropna()
-        instr_err = (
-            float(np.sqrt((unc**2).mean()) / np.sqrt(len(unc))) if len(unc) > 0 else float("nan")
-        )
+        if len(unc) > 0:
+            instr_err = float(np.sqrt((unc**2).mean()))
+            if reduce_instrument_error:
+                instr_err /= np.sqrt(len(unc))
+        else:
+            instr_err = float("nan")
         unc_val = first["value_uncertainty"]
         repr_err = (
             float(agg_group["value"].std())

@@ -281,6 +281,13 @@ class TemporalBinConfig:
     centering each window on a full hour — useful when comparing against hourly model output.
     """
 
+    reduce_instrument_error: bool = True
+    """
+    Whether averaging n observations into a bin reduces the instrument error by sqrt(n).
+    Set to false when the errors within a bin are correlated (e.g. smoothed retrievals),
+    in which case the binned instrument error stays at rms(individual errors).
+    """
+
 
 @dataclass
 class SuperObsConfig:
