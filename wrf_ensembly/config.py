@@ -192,7 +192,7 @@ class TimeControlConfig:
         forecasts produced, never the assimilation state, so it is safe to change on restart.
         """
 
-        ignored_fields = ["runtime_io", "cycles"]
+        ignored_fields = ["runtime_io", "cycles", "forecast_extension"]
 
         if type(self) is not type(other):
             return False
@@ -318,6 +318,14 @@ class SuperObsConfig:
     """
     A dictionary where keys are vertical dimension names (e.g. height_bin) and values are how long is each bin.
     All valid-QC observations inside the bin are combined into one superob.
+    """
+
+    reduce_instrument_error: bool = True
+    """
+    Whether averaging n observations into a superob reduces the instrument error by sqrt(n).
+    Set to false when the errors within a bin are correlated (e.g. horizontally smoothed
+    retrievals such as EarthCARE ATLID EBD), in which case the superob instrument error
+    stays at rms(individual errors) — averaging correlated errors does not reduce them.
     """
 
 
