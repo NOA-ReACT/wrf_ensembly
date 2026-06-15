@@ -165,9 +165,12 @@ def generate_wrf_namelist(
             "paths must be provided when generating a member-specific namelist"
         )
 
-    # Determine start/end times
+    # Determine start/end times. The forward run (and the boundary conditions
+    # produced by real.exe) extend to `forecast_end`, which equals `cycle.end`
+    # unless a forecast extension is configured. The assimilation boundary itself
+    # stays at `cycle.end` and is handled outside namelist generation.
     start = cycle.start
-    end = cycle.end
+    end = cycle.forecast_end
 
     # Add time and domain control
     wrf_namelist = {

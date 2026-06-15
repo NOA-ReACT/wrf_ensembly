@@ -136,6 +136,9 @@ class CycleConfig:
     output_interval: int | None = None
     """Override the output interval for this cycle"""
 
+    forecast_extension: int | None = None
+    """Override the forecast extension (minutes past the cycle end) for this cycle"""
+
 
 @dataclass
 class TimeControlConfig:
@@ -156,6 +159,16 @@ class TimeControlConfig:
     analysis_interval: int = 60 * 6
     """Time between analysis/assimilation cycles, minutes"""
 
+    forecast_extension: int = 0
+    """
+    Number of minutes to integrate each cycle's forward (member) run past its end.
+    The extra timesteps fall inside the next cycle's window but are independent of the
+    analysis produced at the cycle end, providing longer-lead forecasts for verification.
+    Does not affect the assimilation boundary: the analysis, DART prior and the next
+    cycle's start are still keyed off the (unextended) cycle end. Defaults to 0 (disabled).
+    The final cycle is clamped to the experiment end, since no boundary data exists beyond it.
+    """
+
     cycles: dict[int, CycleConfig] = field(default_factory=dict)
     """Configuration overrides for specific cycles"""
 
@@ -174,7 +187,9 @@ class TimeControlConfig:
         If they are exactly the same, returns True. If any field is different, returns
         the field name. If `other` is of different type, returns False.
 
-        The `runtime_io` and `cycles` fields is not included in the comparison.
+        The `runtime_io`, `cycles` and `forecast_extension` fields are not included in
+        the comparison. `forecast_extension` only changes forward-run length and the
+        forecasts produced, never the assimilation state, so it is safe to change on restart.
         """
 
         ignored_fields = ["runtime_io", "cycles"]
@@ -414,6 +429,20 @@ class ValidationConfig:
 
     instruments: list[str] = field(default_factory=lambda: [])
     """List of instruments to use for validation, if missing it will use all available instruments."""
+
+    prefer_extended_forecast: bool = True
+    """
+    When forecasts overlap in time (because `time_control.forecast_extension` is set),
+    decide which forecast frame to use at each timestamp during interpolation.
+
+    If true (default), prefer the longer-lead, independent forecast from the earlier cycle
+    (i.e. the extended forecast that has not seen the analysis at the cycle end) — the
+    correct background for O-B verification. If false, prefer the shorter-lead,
+    analysis-driven forecast from the later cycle (the legacy behaviour).
+
+    Applied experiment-wide so every row in the validation output shares one semantics.
+    A no-op when `forecast_extension` is 0 (no overlap exists).
+    """
 
     first_departures: FirstDeparturesConfig = field(
         default_factory=FirstDeparturesConfig

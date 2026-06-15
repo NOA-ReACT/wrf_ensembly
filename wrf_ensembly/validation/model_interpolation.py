@@ -270,6 +270,81 @@ class ModelInterpolation:
 
         return ds
 
+    @staticmethod
+    def _cycle_index_from_path(path: Path) -> int:
+        """Parse the cycle index from a per-cycle output file path.
+
+        Files are named ``<source>_<type>_cycle_NNN.nc`` inside a ``cycle_NNN``
+        directory, so either component yields the index.
+        """
+        for candidate in (path.name, path.parent.name):
+            m = re.search(r"cycle_(\d+)", candidate)
+            if m is not None:
+                return int(m.group(1))
+        raise ValueError(f"Could not parse cycle index from {path}")
+
+    def _open_forecast_resolved(self, files: list[str]) -> xr.Dataset:
+        """Open per-cycle forecast files, resolving overlapping timestamps.
+
+        With a forecast extension, a cycle's forward run reaches past its end into
+        the next cycle's window, so consecutive files share timestamps. Files are
+        concatenated along the time axis without de-duplicating coordinates; then,
+        for each duplicated timestamp, one frame is kept based on lead time:
+
+        - ``prefer_extended_forecast=True`` (default): keep the longer-lead frame,
+          i.e. the independent forecast from the earlier cycle that has not seen the
+          analysis at the cycle end. Correct background for O-B verification.
+        - ``prefer_extended_forecast=False``: keep the shorter-lead, analysis-driven
+          frame from the later cycle (legacy behaviour).
+
+        Returns a dataset with a unique, monotonic time axis, ready for
+        ``interpolate_all``. Works for both the mean/sd files and the per-member
+        ensemble files (extra dimensions such as ``member`` are left untouched).
+        """
+        prefer_extended = self.exp.cfg.validation.prefer_extended_forecast
+
+        def _attach_lead(ds_i: xr.Dataset) -> xr.Dataset:
+            src = Path(ds_i.encoding["source"])
+            cycle_start = self.exp.cycles[self._cycle_index_from_path(src)].start
+            cycle_start64 = np.datetime64(cycle_start.replace(tzinfo=None))
+            lead = ds_i["t"].values - cycle_start64
+            return ds_i.assign_coords(lead=("t", lead))
+
+        ds = xr.open_mfdataset(
+            files,
+            combine="nested",
+            concat_dim="t",
+            preprocess=_attach_lead,
+            chunks={"time": 1},
+            coords="minimal",
+        )
+
+        # For each duplicated timestamp keep exactly one frame: the largest lead
+        # (extended) or the smallest lead (analysis-driven). Done on the 1-D time
+        # and lead coordinates only, so no data is materialised.
+        t_vals = ds["t"].values
+        lead_vals = ds["lead"].values
+        selection = pd.DataFrame(
+            {"t": t_vals, "lead": lead_vals, "i": np.arange(len(t_vals))}
+        ).sort_values(["t", "lead"], kind="stable")
+        grouped = selection.groupby("t", sort=True)
+        chosen = grouped.tail(1) if prefer_extended else grouped.head(1)
+        keep = np.sort(chosen["i"].to_numpy())
+
+        n_dropped = len(t_vals) - len(keep)
+        if n_dropped > 0:
+            which = (
+                "longer-lead (extended)"
+                if prefer_extended
+                else "shorter-lead (analysis-driven)"
+            )
+            logger.info(
+                f"Forecast overlap: {len(t_vals)} frames across cycles, dropping "
+                f"{n_dropped} duplicate-time frame(s), keeping the {which} forecast"
+            )
+
+        return ds.isel(t=keep).drop_vars("lead")
+
     def interpolate_all(
         self,
         needed_combos: list[dict],
