@@ -89,12 +89,18 @@ class PerMemberModelInterpolation:
             return 0
 
         logger.info(f"Opening {len(matched)} {source} ensemble file(s)")
-        ds_ensemble = xr.open_mfdataset(
-            glob_pattern,
-            combine="by_coords",
-            chunks={"time": 1},
-            coords="minimal",
-        )
+        # Forecast files overlap in time when a forecast extension is configured;
+        # resolve the overlap into a unique time axis (preferring the extended or
+        # analysis-driven forecast per config). Analysis files never overlap.
+        if source == "forecast" and self.exp.cfg.time_control.forecast_extension > 0:
+            ds_ensemble = self._base._open_forecast_resolved(sorted(matched))
+        else:
+            ds_ensemble = xr.open_mfdataset(
+                glob_pattern,
+                combine="by_coords",
+                chunks={"time": 1},
+                coords="minimal",
+            )
 
         available = [v for v in needed_vars if v in ds_ensemble.data_vars]
         missing = [v for v in needed_vars if v not in ds_ensemble.data_vars]

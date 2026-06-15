@@ -4,10 +4,12 @@ import contextlib
 import glob
 import os
 import queue
+import re
 import threading
 from collections import defaultdict
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -225,16 +227,24 @@ class ModelInterpolation:
             glob_pattern = f"{self.exp.paths.data_analysis}/cycle_**/{source}_{file_type}_cycle_*.nc"
 
         logger.debug(f"Globbing {source}/{file_type} files: {glob_pattern}")
-        if not glob.glob(glob_pattern):
+        files = sorted(glob.glob(glob_pattern))
+        if not files:
             logger.debug(f"No files matched for {source}/{file_type}")
             return None
 
-        ds = xr.open_mfdataset(
-            glob_pattern,
-            combine="by_coords",
-            chunks={"time": 1},
-            coords="minimal",
-        )
+        # Forecast files can overlap in time when a forecast extension is configured
+        # (a cycle's forward run reaches into the next cycle's window). Resolve the
+        # overlap into a unique time axis according to the configured preference.
+        # Analysis files have one frame per cycle and never overlap.
+        if source == "forecast" and self.exp.cfg.time_control.forecast_extension > 0:
+            ds = self._open_forecast_resolved(files)
+        else:
+            ds = xr.open_mfdataset(
+                files,
+                combine="by_coords",
+                chunks={"time": 1},
+                coords="minimal",
+            )
 
         available = [v for v in needed_vars if v in ds.data_vars]
         missing = [v for v in needed_vars if v not in ds.data_vars]

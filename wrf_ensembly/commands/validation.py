@@ -35,8 +35,16 @@ def _parse_metadata_filters(raw: tuple[str, ...]) -> list[tuple[str, str, str]]:
 
 
 @validation_cli.command()
+@click.option(
+    "--extended/--no-extended",
+    "prefer_extended",
+    default=None,
+    help="When forecasts overlap (forecast_extension > 0), use the longer-lead "
+    "independent forecast (--extended) or the shorter-lead analysis-driven one "
+    "(--no-extended). Overrides validation.prefer_extended_forecast in the config.",
+)
 @pass_experiment_path
-def interpolate_model(experiment_path: Path):
+def interpolate_model(experiment_path: Path, prefer_extended: bool | None):
     """
     Interpolate the model outputs to the observation locations and times.
 
@@ -47,13 +55,24 @@ def interpolate_model(experiment_path: Path):
     logger.setup("validation-interpolate-model", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
+    if prefer_extended is not None:
+        exp.cfg.validation.prefer_extended_forecast = prefer_extended
+
     interpolation = ModelInterpolation(exp)
     interpolation.run()
 
 
 @validation_cli.command()
+@click.option(
+    "--extended/--no-extended",
+    "prefer_extended",
+    default=None,
+    help="When forecasts overlap (forecast_extension > 0), use the longer-lead "
+    "independent forecast (--extended) or the shorter-lead analysis-driven one "
+    "(--no-extended). Overrides validation.prefer_extended_forecast in the config.",
+)
 @pass_experiment_path
-def interpolate_model_per_member(experiment_path: Path):
+def interpolate_model_per_member(experiment_path: Path, prefer_extended: bool | None):
     """
     Interpolate each ensemble member's model output to observation locations.
 
@@ -66,6 +85,9 @@ def interpolate_model_per_member(experiment_path: Path):
     """
     logger.setup("validation-interpolate-model-per-member", experiment_path)
     exp = experiment.Experiment(experiment_path)
+
+    if prefer_extended is not None:
+        exp.cfg.validation.prefer_extended_forecast = prefer_extended
 
     interpolation = PerMemberModelInterpolation(exp)
     interpolation.run()
