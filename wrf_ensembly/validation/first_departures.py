@@ -437,7 +437,7 @@ class FirstDeparturesAnalysis:
         # Create regime bins
         df = df.copy()
         df["regime"] = pd.cut(
-            df["model_forecast"],
+            0.5 * (df["model_forecast"] + df["value"]),
             bins=self.regime_config.bins,
             labels=self.regime_config.labels,
         )
