@@ -430,16 +430,40 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
     if exp.cfg.data.per_member_meteorology:
         members = list(range(exp.cfg.assimilation.n_members))
 
+    # Optionally compute a per-member horizontal-shift perturbation. The shift is drawn
+    # once per member and kept fixed across all cycles so the chem field stays consistent.
+    member_shifts: dict[int, tuple[int, int]] = {}
+    if chem.hoz_shift.enabled:
+        if not exp.cfg.data.per_member_meteorology:
+            logger.warning(
+                "data.chemistry.hoz_shift is enabled but per_member_meteorology is False; "
+                "all members share the same IC/BC files, so the shift will not create "
+                "ensemble spread."
+            )
+        rng = np.random.default_rng(chem.hoz_shift.seed)
+        lo, hi = chem.hoz_shift.min_shift, chem.hoz_shift.max_shift
+        for member_i in members:
+            lon_shift = int(rng.integers(lo, hi + 1))
+            lat_shift = int(rng.integers(lo, hi + 1))
+            member_shifts[member_i] = (lon_shift, lat_shift)
+            logger.info(
+                f"Member {member_i:02d} hoz-shift: lon={lon_shift}, lat={lat_shift}"
+            )
+
     for member_i in members:
+        args = [
+            "interpolator-for-wrfchem",
+            chem.model_name,
+            chem.path,
+            mapping_path,
+            exp.paths.ic_path(member_i, 0),
+        ]
+        if member_i in member_shifts:
+            lon_shift, lat_shift = member_shifts[member_i]
+            args.append(f"--hoz-shift={lon_shift},{lat_shift}")
         commands.append(
             external.ExternalProcess(
-                [
-                    "interpolator-for-wrfchem",
-                    chem.model_name,
-                    chem.path,
-                    mapping_path,
-                    exp.paths.ic_path(member_i, 0),
-                ],
+                args,
                 log_filename="interpolator_wrfinput.log",
             )
         )
@@ -447,17 +471,21 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
         for member_i in members:
             wrfinput_path = exp.paths.ic_path(member_i, cycle.index)
             wrfbdy_path = exp.paths.bc_path(member_i, cycle.index)
+            args = [
+                "interpolator-for-wrfchem",
+                chem.model_name,
+                chem.path,
+                mapping_path,
+                wrfinput_path,
+                f"--wrfbdy={wrfbdy_path}",
+                "--no-ic",
+            ]
+            if member_i in member_shifts:
+                lon_shift, lat_shift = member_shifts[member_i]
+                args.append(f"--hoz-shift={lon_shift},{lat_shift}")
             commands.append(
                 external.ExternalProcess(
-                    [
-                        "interpolator-for-wrfchem",
-                        chem.model_name,
-                        chem.path,
-                        mapping_path,
-                        wrfinput_path,
-                        f"--wrfbdy={wrfbdy_path}",
-                        "--no-ic",
-                    ],
+                    args,
                     log_filename=f"interpolator_wrfbdy_cycle_{cycle.index}.log",
                 )
             )

@@ -206,6 +206,29 @@ class TimeControlConfig:
 
 
 @dataclass
+class ChemHozShiftConfig:
+    """
+    Per-member horizontal-shift perturbation of the global chemistry fields, applied
+    via interpolator-for-wrfchem's `--hoz-shift`. When enabled, each member is assigned
+    a random integer (lon, lat) shift (in grid cells) drawn from [min_shift, max_shift],
+    fixed across all cycles. Requires `data.per_member_meteorology = True` to produce
+    ensemble spread.
+    """
+
+    enabled: bool = False
+    """Whether to apply the per-member horizontal-shift perturbation."""
+
+    min_shift: int = -3
+    """Lower bound (inclusive) of the random shift, in grid cells, applied to both lon and lat."""
+
+    max_shift: int = 3
+    """Upper bound (inclusive) of the random shift, in grid cells, applied to both lon and lat."""
+
+    seed: int | None = None
+    """RNG seed for picking the per-member shifts. If None, shifts are non-reproducible."""
+
+
+@dataclass
 class ChemistryDataConfig:
     """
     Configuration related to the chemistry global model fields used in the experiment
@@ -221,6 +244,9 @@ class ChemistryDataConfig:
     """
     Name of the chemistry model used to generate the chemistry fields.
     """
+
+    hoz_shift: ChemHozShiftConfig = field(default_factory=ChemHozShiftConfig)
+    """Per-member horizontal-shift perturbation of the chemistry fields."""
 
 
 @dataclass
