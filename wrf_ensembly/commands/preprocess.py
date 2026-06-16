@@ -433,6 +433,12 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
     # Optionally compute a per-member horizontal-shift perturbation. The shift is drawn
     # once per member and kept fixed across all cycles so the chem field stays consistent.
     member_shifts: dict[int, tuple[int, int]] = {}
+
+    # Constant per-variable scaling, applied identically to all members/cycles.
+    multiplier_args = [
+        f"--multiplier={var}={coeff}" for var, coeff in chem.multipliers.items()
+    ]
+
     if chem.hoz_shift.enabled:
         if not exp.cfg.data.per_member_meteorology:
             logger.warning(
@@ -461,6 +467,7 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
         if member_i in member_shifts:
             lon_shift, lat_shift = member_shifts[member_i]
             args.append(f"--hoz-shift={lon_shift},{lat_shift}")
+        args.extend(multiplier_args)
         commands.append(
             external.ExternalProcess(
                 args,
@@ -483,6 +490,7 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
             if member_i in member_shifts:
                 lon_shift, lat_shift = member_shifts[member_i]
                 args.append(f"--hoz-shift={lon_shift},{lat_shift}")
+            args.extend(multiplier_args)
             commands.append(
                 external.ExternalProcess(
                     args,

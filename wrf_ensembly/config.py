@@ -248,6 +248,15 @@ class ChemistryDataConfig:
     hoz_shift: ChemHozShiftConfig = field(default_factory=ChemHozShiftConfig)
     """Per-member horizontal-shift perturbation of the chemistry fields."""
 
+    multipliers: dict[str, float] = field(default_factory=dict)
+    """
+    Optional constant scaling applied to interpolated chemistry variables, passed to
+    interpolator-for-wrfchem's `--multiplier`. Keys are WRF target variable names (the
+    keys of `species_map.toml`'s `species_map` table); values are the multiplicative
+    coefficients. Applied to both initial and boundary conditions, identically for all
+    members and cycles. Empty by default (no scaling).
+    """
+
 
 @dataclass
 class DataConfig:
