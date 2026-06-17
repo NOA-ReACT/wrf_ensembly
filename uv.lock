@@ -730,7 +730,7 @@ wheels = [
 
 [[package]]
 name = "interpolator-for-wrfchem"
-version = "1.6.0"
+version = "1.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cftime" },
@@ -738,13 +738,14 @@ dependencies = [
     { name = "netcdf4" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "pyproj" },
     { name = "scipy" },
     { name = "tomli" },
     { name = "xarray" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/dd/39/1bc3db8d6512e6b74809969810c5d1f6a68ede5351d55869c666bcdb7114/interpolator_for_wrfchem-1.6.0.tar.gz", hash = "sha256:9ac02be22d54c8813e265592a249590f6a7e730d52eece3e3c6b5d8cac51ad60", size = 22676, upload-time = "2026-03-06T16:03:17.236Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fc/2e/27f7b11ef98be5cd78e48cc9b08a25df730ebd41fd9fe3fc98420b060f55/interpolator_for_wrfchem-1.11.0.tar.gz", hash = "sha256:caa6d9c0941828fdc73150ae9fcddb9ebaab2a0926f23dcb78b032ed4aeaccd6", size = 221118, upload-time = "2026-06-17T13:18:10.139Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/52/285f554858dcde9174f361f40b5f7e97d63e2215d593bb335fd056376b29/interpolator_for_wrfchem-1.6.0-py3-none-any.whl", hash = "sha256:e3590c18519cd70af35f89c9aed1f05fad74fbdb7508563699901663cea82c12", size = 24637, upload-time = "2026-03-06T16:03:16.001Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/fd/87faeee7391cc3ea90925308502e756d538b0956107365be4963c0daa27c/interpolator_for_wrfchem-1.11.0-py3-none-any.whl", hash = "sha256:878a3b09d97e8eb4f8b2eee37d7c4433f21be4db9d38dbc98399d8389c326c98", size = 35897, upload-time = "2026-06-17T13:18:08.967Z" },
 ]
 
 [[package]]
@@ -2818,7 +2819,7 @@ wheels = [
 
 [[package]]
 name = "wrf-ensembly"
-version = "1.8.0"
+version = "1.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "cartopy" },
@@ -2877,7 +2878,7 @@ requires-dist = [
     { name = "dask", specifier = ">=2025.9.1" },
     { name = "dataclass-binder", specifier = ">=0.3.4" },
     { name = "duckdb", specifier = ">=1.4.0" },
-    { name = "interpolator-for-wrfchem", specifier = "==1.6.0" },
+    { name = "interpolator-for-wrfchem", specifier = "==1.11.0" },
     { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=6.29.5" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "mashumaro", extras = ["toml"], specifier = ">=3.15" },
