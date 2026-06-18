@@ -418,17 +418,23 @@ class ExperimentObservations:
 
         return len(df.index)
 
-    def update_model_source_values(self, df: pd.DataFrame, source: str) -> int:
+    def update_model_source_values(
+        self, df: pd.DataFrame, source: str, clear: bool = True
+    ) -> int:
         """
         Update model_forecast or model_analysis for observations using their rowid.
 
         The DataFrame must contain 'rowid' and 'model_value' columns.
-        All existing entries for the target column are reset to NULL before
-        applying the new values.
 
         Args:
             df: DataFrame with 'rowid' and 'model_value' columns.
             source: Either 'forecast' or 'analysis', selects the target column.
+            clear: If True, reset all existing entries for the target column to
+                NULL before applying the new values. Callers that write the
+                result in multiple chunks must pass ``clear=True`` only for the
+                first chunk; otherwise each chunk would wipe the previous ones
+                (the whole column is cleared, but each call only writes its own
+                rowids).
 
         Returns:
             The number of rows updated.
@@ -443,9 +449,10 @@ class ExperimentObservations:
             # the populating UPDATE cannot leave the column fully NULLed.
             con.execute("BEGIN TRANSACTION")
             try:
-                con.execute(
-                    f"UPDATE observations SET {col} = NULL WHERE {col} IS NOT NULL"
-                )
+                if clear:
+                    con.execute(
+                        f"UPDATE observations SET {col} = NULL WHERE {col} IS NOT NULL"
+                    )
                 con.execute(
                     f"""
                     UPDATE observations
@@ -461,17 +468,21 @@ class ExperimentObservations:
 
         return len(update_df)
 
-    def update_model_source_spread_values(self, df: pd.DataFrame, source: str) -> int:
+    def update_model_source_spread_values(
+        self, df: pd.DataFrame, source: str, clear: bool = True
+    ) -> int:
         """
         Update model_forecast_spread or model_analysis_spread for observations using their rowid.
 
         The DataFrame must contain 'rowid' and 'model_value' columns.
-        All existing entries for the target column are reset to NULL before
-        applying the new values.
 
         Args:
             df: DataFrame with 'rowid' and 'model_value' columns.
             source: Either 'forecast' or 'analysis', selects the target column.
+            clear: If True, reset all existing entries for the target column to
+                NULL before applying the new values. Callers that write the
+                result in multiple chunks must pass ``clear=True`` only for the
+                first chunk; otherwise each chunk would wipe the previous ones.
 
         Returns:
             The number of rows updated.
@@ -484,9 +495,10 @@ class ExperimentObservations:
 
             con.execute("BEGIN TRANSACTION")
             try:
-                con.execute(
-                    f"UPDATE observations SET {col} = NULL WHERE {col} IS NOT NULL"
-                )
+                if clear:
+                    con.execute(
+                        f"UPDATE observations SET {col} = NULL WHERE {col} IS NOT NULL"
+                    )
                 con.execute(
                     f"""
                     UPDATE observations

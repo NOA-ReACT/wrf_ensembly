@@ -103,9 +103,15 @@ class ModelInterpolation:
                 )
                 continue
 
+            # Results arrive in multiple chunks (see _FLUSH_ROWS). Only the
+            # first chunk may clear the column; later chunks must append, or
+            # each would wipe the rows written by the previous ones.
+            mean_first = True
+
             def _flush_mean(batch: pd.DataFrame) -> None:
-                nonlocal n_updated
-                n_updated += self._save_output(batch, source)
+                nonlocal n_updated, mean_first
+                n_updated += self._save_output(batch, source, clear=mean_first)
+                mean_first = False
 
             self.interpolate_all(
                 needed_combos, ds_mean, source, result_callback=_flush_mean
@@ -128,9 +134,12 @@ class ModelInterpolation:
                 if v in ds_mean.data_vars:
                     ds_sd[v] = ds_mean[v]
 
+            spread_first = True
+
             def _flush_spread(batch: pd.DataFrame) -> None:
-                nonlocal n_updated
-                n_updated += self._save_spread_output(batch, source)
+                nonlocal n_updated, spread_first
+                n_updated += self._save_spread_output(batch, source, clear=spread_first)
+                spread_first = False
 
             self.interpolate_all(
                 spread_combos, ds_sd, source, result_callback=_flush_spread
@@ -1169,33 +1178,39 @@ class ModelInterpolation:
 
         return result
 
-    def _save_output(self, obs: pd.DataFrame, source: str) -> int:
+    def _save_output(self, obs: pd.DataFrame, source: str, clear: bool = True) -> int:
         """Save interpolated values to the DuckDB observations table.
 
         Args:
             obs: DataFrame with 'rowid' and 'model_value' columns
             source: Either 'forecast' or 'analysis'; selects the target column
+            clear: Whether to NULL the target column before writing. Must be
+                True only for the first chunk of a multi-flush write.
 
         Returns:
             Number of rows updated
         """
-        n_updated = self.exp.obs.update_model_source_values(obs, source)
+        n_updated = self.exp.obs.update_model_source_values(obs, source, clear=clear)
         logger.info(
             f"Updated {n_updated} observations with {source} model values in DuckDB"
         )
         return n_updated
 
-    def _save_spread_output(self, obs: pd.DataFrame, source: str) -> int:
+    def _save_spread_output(self, obs: pd.DataFrame, source: str, clear: bool = True) -> int:
         """Save interpolated spread values to the DuckDB observations table.
 
         Args:
             obs: DataFrame with 'rowid' and 'model_value' columns
             source: Either 'forecast' or 'analysis'; selects the target column
+            clear: Whether to NULL the target column before writing. Must be
+                True only for the first chunk of a multi-flush write.
 
         Returns:
             Number of rows updated
         """
-        n_updated = self.exp.obs.update_model_source_spread_values(obs, source)
+        n_updated = self.exp.obs.update_model_source_spread_values(
+            obs, source, clear=clear
+        )
         logger.info(
             f"Updated {n_updated} observations with {source} spread values in DuckDB"
         )

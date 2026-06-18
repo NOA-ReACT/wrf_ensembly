@@ -1,0 +1,14 @@
+netcdf IMERG_land_sea_mask {
+dimensions:
+	lon = 3602 ;
+	lat = 1800 ;
+variables:
+	double lon(lon) ;
+		lon:units = "degrees_east" ;
+		lon:long_name = "Longitude" ;
+	double lat(lat) ;
+		lat:units = "degrees_north" ;
+		lat:long_name = "Latitude" ;
+	float landseamask(lat, lon) ;
+		landseamask:_FillValue = -9.99e+08f ;
+}

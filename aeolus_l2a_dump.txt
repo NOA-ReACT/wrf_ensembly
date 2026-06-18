@@ -1,0 +1,267 @@
+/mph/product
+/mph/proc_stage
+/mph/ref_doc
+/mph/acquisition_station
+/mph/proc_center
+/mph/proc_time [s since 2000-01-01]
+/mph/software_ver
+/mph/baseline
+/mph/sensing_start [s since 2000-01-01]
+/mph/sensing_stop [s since 2000-01-01]
+/mph/phase
+/mph/cycle
+/mph/rel_orbit
+/mph/abs_orbit
+/mph/state_vector_time [s since 2000-01-01]
+/mph/delta_ut1 [s]
+/mph/x_position [m]
+/mph/y_position [m]
+/mph/z_position [m]
+/mph/x_velocity [m/s]
+/mph/y_velocity [m/s]
+/mph/z_velocity [m/s]
+/mph/vector_source
+/mph/utc_sbt_time [s since 2000-01-01]
+/mph/sat_binary_time
+/mph/clock_step [ps]
+/mph/leap_utc [s since 2000-01-01]
+/mph/gps_utc_time_difference [s]
+/mph/leap_sign [s]
+/mph/leap_err
+/mph/product_err
+/mph/tot_size [bytes]
+/mph/sph_size [bytes]
+/mph/num_dsd
+/mph/dsd_size [bytes]
+/mph/num_data_sets
+/sph/sph_descriptor
+/sph/intersect_start_lat [1e-6 degrees_north]
+/sph/intersect_start_long [1e-6 degrees_east]
+/sph/intersect_stop_lat [1e-6 degrees_north]
+/sph/intersect_stop_long [1e-6 degrees_east]
+/sph/sat_track [degrees]
+/sph/num_brc
+/sph/num_meas_max_brc
+/sph/num_bins_per_meas
+/sph/num_prof_sca
+/sph/num_prof_mle
+/sph/num_prof_mca
+/sph/num_group_tot
+/sph/num_prof_per_brc_mlesub
+/sph/denoising_optimizer_switch_on
+/dsd[24]/ds_name
+/dsd[24]/ds_type
+/dsd[24]/filename
+/dsd[24]/ds_offset [bytes]
+/dsd[24]/ds_size [bytes]
+/dsd[24]/num_dsr
+/dsd[24]/dsr_size [bytes]
+/dsd[24]/byte_order
+/geolocation[698]/start_of_obs_time [s since 2000-01-01]
+/geolocation[698]/num_meas_eff
+/geolocation[698]/measurement_geolocation[30]/centroid_time [s since 2000-01-01]
+/geolocation[698]/measurement_geolocation[30]/mie_geolocation_height_bin[25]/longitude_of_height_bin [1e-6 degrees_east]
+/geolocation[698]/measurement_geolocation[30]/mie_geolocation_height_bin[25]/latitude_of_height_bin [1e-6 degrees_north]
+/geolocation[698]/measurement_geolocation[30]/mie_geolocation_height_bin[25]/altitude_of_height_bin [m]
+/geolocation[698]/measurement_geolocation[30]/rayleigh_geolocation_height_bin[25]/longitude_of_height_bin [1e-6 degrees_east]
+/geolocation[698]/measurement_geolocation[30]/rayleigh_geolocation_height_bin[25]/latitude_of_height_bin [1e-6 degrees_north]
+/geolocation[698]/measurement_geolocation[30]/rayleigh_geolocation_height_bin[25]/altitude_of_height_bin [m]
+/geolocation[698]/measurement_geolocation[30]/rayleigh_range_height_bin[25] [m]
+/geolocation[698]/measurement_geolocation[30]/longitude_of_dem_intersection [1e-6 degrees_east]
+/geolocation[698]/measurement_geolocation[30]/latitude_of_dem_intersection [1e-6 degrees_north]
+/geolocation[698]/measurement_geolocation[30]/altitude_of_dem_intersection [m]
+/geolocation[698]/geoid_separation [m]
+/meas_pcd[698]/start_of_obs_time [s since 2000-01-01]
+/meas_pcd[698]/l1b_input_screening/l1b_obs_screening
+/meas_pcd[698]/l1b_input_screening/l1b_obs_screening_flags[40]
+/meas_pcd[698]/l1b_input_screening/l1b_mie_meas_screening[30]/l1b_mie_meas_qc
+/meas_pcd[698]/l1b_input_screening/l1b_mie_meas_screening[30]/l1b_mie_meas_qc_flags[8]
+/meas_pcd[698]/l1b_input_screening/l1b_rayleigh_meas_screening[30]/l1b_rayleigh_meas_qc
+/meas_pcd[698]/l1b_input_screening/l1b_rayleigh_meas_screening[30]/l1b_rayleigh_meas_qc_flags[8]
+/meas_pcd[698]/l1b_cal_screening/cal_valid
+/meas_pcd[698]/l2a_processing_qc/sca_applied
+/meas_pcd[698]/l2a_processing_qc/mca_applied
+/meas_pcd[698]/l2a_processing_qc/feature_finder_indicators/lowest_computable_bin[30]
+/sca_pcd[698]/starttime [s since 2000-01-01]
+/sca_pcd[698]/firstmatchingbin
+/sca_pcd[698]/bin_1_clear
+/sca_pcd[698]/last_computation_bin
+/sca_pcd[698]/profile_pcd_bins[24]/extinction_variance [m^-2]
+/sca_pcd[698]/profile_pcd_bins[24]/backscatter_variance [m^-2 sr^-2]
+/sca_pcd[698]/profile_pcd_bins[24]/lr_variance
+/sca_pcd[698]/profile_pcd_bins[24]/ber_variance
+/sca_pcd[698]/profile_pcd_bins[24]/rayleigh_heterogeneity_index
+/sca_pcd[698]/profile_pcd_bins[24]/mie_heterogeneity_index
+/sca_pcd[698]/profile_pcd_bins[24]/lod_variance
+/sca_pcd[698]/profile_pcd_bins[24]/processing_qc_flag
+/sca_pcd[698]/profile_pcd_bins[24]/cloud_mask
+/sca_pcd[698]/profile_pcd_mid_bins[23]/extinction_variance [m^-2]
+/sca_pcd[698]/profile_pcd_mid_bins[23]/backscatter_variance [m^-2 sr^-2]
+/sca_pcd[698]/profile_pcd_mid_bins[23]/lod_variance
+/sca_pcd[698]/profile_pcd_mid_bins[23]/ber_variance
+/sca_pcd[698]/profile_pcd_mid_bins[23]/lr_variance
+/sca_pcd[698]/profile_pcd_mid_bins[23]/processing_qc_flag
+/sca_pcd[698]/profile_pcd_mid_bins[23]/cloud_mask
+/sca_pcd[698]/radiometric_correction_performed
+/sca_pcd[698]/Kray
+/sca_pcd[698]/Kmie
+/sca_mle_pcd[698]/starttime [s since 2000-01-01]
+/sca_mle_pcd[698]/overall_quality
+/sca_mle_pcd[698]/profile_pcd_bins[24]/extinction_variance [m^-2]
+/sca_mle_pcd[698]/profile_pcd_bins[24]/backscatter_variance [m^-2 sr^-2]
+/sca_mle_pcd[698]/profile_pcd_bins[24]/lr_variance
+/sca_mle_pcd[698]/profile_pcd_bins[24]/ber_variance
+/sca_mle_pcd[698]/profile_pcd_bins[24]/sr_variance
+/sca_mle_pcd[698]/profile_pcd_bins[24]/lod_variance
+/sca_mle_pcd[698]/profile_pcd_bins[24]/slod_variance
+/sca_mle_pcd[698]/profile_pcd_bins[24]/qc
+/sca_mle_pcd[698]/profile_pcd_bins[24]/cloud_mask
+/sca_mle_pcd[698]/covariance_matrix[49,49]
+/sca_mlesub_pcd[4188]/starttime [s since 2000-01-01]
+/sca_mlesub_pcd[4188]/overall_quality
+/sca_mlesub_pcd[4188]/sca_mlesub_pcd_bins[24]/extinction_variance [m^-2]
+/sca_mlesub_pcd[4188]/sca_mlesub_pcd_bins[24]/backscatter_variance [m^-2 sr^-2]
+/sca_mlesub_pcd[4188]/sca_mlesub_pcd_bins[24]/lr_variance
+/sca_mlesub_pcd[4188]/sca_mlesub_pcd_bins[24]/ber_variance
+/sca_mlesub_pcd[4188]/sca_mlesub_pcd_bins[24]/sr_variance
+/sca_mlesub_pcd[4188]/sca_mlesub_pcd_bins[24]/lod_variance
+/sca_mlesub_pcd[4188]/sca_mlesub_pcd_bins[24]/slod_variance
+/sca_mlesub_pcd[4188]/sca_mlesub_pcd_bins[24]/qc
+/sca_mlesub_pcd[4188]/covariance_matrix[49,49]
+/ael_pro_pcd[698]/starttime [s since 2000-01-01]
+/ael_pro_pcd[698]/overall_quality
+/ael_pro_pcd[698]/starting_cost_function_value_pass1
+/ael_pro_pcd[698]/ending_cost_function_value_pass1
+/ael_pro_pcd[698]/number_of_iterations_pass1
+/ael_pro_pcd[698]/measurement_ael_pro_pcd[30]/starting_cost_function_value_pass2
+/ael_pro_pcd[698]/measurement_ael_pro_pcd[30]/ending_cost_function_value_pass2
+/ael_pro_pcd[698]/measurement_ael_pro_pcd[30]/number_of_iterations_pass2
+/ael_pro_pcd[698]/measurement_ael_pro_pcd[30]/quality_index
+/ael_pro_pcd[698]/measurement_ael_pro_pcd[30]/height_bin_ael_pro_pcd[24]/error_extinction [10^-6 m^-1]
+/ael_pro_pcd[698]/measurement_ael_pro_pcd[30]/height_bin_ael_pro_pcd[24]/error_lr [sr]
+/ael_pro_pcd[698]/measurement_ael_pro_pcd[30]/height_bin_ael_pro_pcd[24]/error_particle_effective_area_radius
+/mca_pcd[698]/starttime [s since 2000-01-01]
+/mca_pcd[698]/processing_qc_flag_bin[24]
+/amd_pcd[698]/starttime [s since 2000-01-01]
+/amd_pcd[698]/l2b_amd_screening_qc
+/amd_pcd[698]/l2b_amd_screening_qc_flags
+/amd_pcd[698]/l2b_amd_collocations[30]/l2b_amd_collocation_qc
+/amd_pcd[698]/l2b_amd_collocations[30]/l2b_amd_collocation_qc_flags
+/group_pcd[2705]/starttime [s since 2000-01-01]
+/group_pcd[2705]/brc_start
+/group_pcd[2705]/measurement_start
+/group_pcd[2705]/brc_end
+/group_pcd[2705]/measurement_end
+/group_pcd[2705]/height_bin_index
+/group_pcd[2705]/particle_extinction_variance [m^-2]
+/group_pcd[2705]/particle_backscatter_variance [m^-2 sr^-2]
+/group_pcd[2705]/particle_lod_variance
+/group_pcd[2705]/qc_flag
+/group_pcd[2705]/mid_particle_extinction_variance_top [m^-2]
+/group_pcd[2705]/mid_particle_backscatter_variance_top [m^-2 sr^-2]
+/group_pcd[2705]/mid_particle_lod_variance_top
+/group_pcd[2705]/mid_particle_ber_variance_top [sr^-2]
+/group_pcd[2705]/mid_particle_extinction_variance_bot [m^-2]
+/group_pcd[2705]/mid_particle_backscatter_variance_bot [m^-2 sr^-2]
+/group_pcd[2705]/mid_particle_lod_variance_bot
+/group_pcd[2705]/mid_particle_ber_variance_bot [sr^-2]
+/sca_optical_properties[698]/starttime [s since 2000-01-01]
+/sca_optical_properties[698]/sca_optical_properties[24]/extinction [10^-6 m^-1]
+/sca_optical_properties[698]/sca_optical_properties[24]/backscatter [10^-6 sr m^-1]
+/sca_optical_properties[698]/sca_optical_properties[24]/lod
+/sca_optical_properties[698]/sca_optical_properties[24]/sr
+/sca_optical_properties[698]/sca_optical_properties[24]/lr [sr]
+/sca_optical_properties[698]/geolocation_middle_bins[24]/longitude [1e-6 degrees_east]
+/sca_optical_properties[698]/geolocation_middle_bins[24]/latitude [1e-6 degrees_north]
+/sca_optical_properties[698]/geolocation_middle_bins[24]/altitude [m]
+/sca_optical_properties[698]/sca_optical_properties_mid_bins[23]/extinction [10^-6 m^-1]
+/sca_optical_properties[698]/sca_optical_properties_mid_bins[23]/backscatter [10^-6 sr m^-1]
+/sca_optical_properties[698]/sca_optical_properties_mid_bins[23]/lod
+/sca_optical_properties[698]/sca_optical_properties_mid_bins[23]/ber
+/sca_optical_properties[698]/sca_optical_properties_mid_bins[23]/lr [sr]
+/sca_optical_properties[698]/attenuated_backscatter_values[30,24]/attenuated_molecular_backscatter [sr^-1 m^-1]
+/sca_optical_properties[698]/attenuated_backscatter_values[30,24]/attenuated_particulate_backscatter [sr^-1 m^-1]
+/sca_mle_opt_properties[698]/starttime [s since 2000-01-01]
+/sca_mle_opt_properties[698]/slod_psat
+/sca_mle_opt_properties[698]/sca_mle_optical_properties[24]/extinction [10^-6 m^-1]
+/sca_mle_opt_properties[698]/sca_mle_optical_properties[24]/backscatter [10^-6 sr m^-1]
+/sca_mle_opt_properties[698]/sca_mle_optical_properties[24]/lr [sr]
+/sca_mle_opt_properties[698]/sca_mle_optical_properties[24]/ber
+/sca_mle_opt_properties[698]/sca_mle_optical_properties[24]/sr
+/sca_mle_opt_properties[698]/sca_mle_optical_properties[24]/lod
+/sca_mle_opt_properties[698]/sca_mle_optical_properties[24]/slod
+/sca_mlesub_opt_properties[4188]/starttime [s since 2000-01-01]
+/sca_mlesub_opt_properties[4188]/slod_psat
+/sca_mlesub_opt_properties[4188]/sca_mle_optical_properties_bins[24]/extinction [10^-6 m^-1]
+/sca_mlesub_opt_properties[4188]/sca_mle_optical_properties_bins[24]/backscatter [10^-6 sr m^-1]
+/sca_mlesub_opt_properties[4188]/sca_mle_optical_properties_bins[24]/lr [sr]
+/sca_mlesub_opt_properties[4188]/sca_mle_optical_properties_bins[24]/ber
+/sca_mlesub_opt_properties[4188]/sca_mle_optical_properties_bins[24]/sr
+/sca_mlesub_opt_properties[4188]/sca_mle_optical_properties_bins[24]/lod
+/sca_mlesub_opt_properties[4188]/sca_mle_optical_properties_bins[24]/slod
+/ael_pro_opt_properties[698]/starttime [s since 2000-01-01]
+/ael_pro_opt_properties[698]/measurement_ael_pro_optical_properties[30]/tropopause_altitude [m]
+/ael_pro_opt_properties[698]/measurement_ael_pro_optical_properties[30]/retrieved_lidar_calibration_constant [ACCD_counts m^2 sr]
+/ael_pro_opt_properties[698]/measurement_ael_pro_optical_properties[30]/height_bin_ael_pro_optical_properties[24]/extinction [10^-6 m^-1]
+/ael_pro_opt_properties[698]/measurement_ael_pro_optical_properties[30]/height_bin_ael_pro_optical_properties[24]/lr [sr]
+/ael_pro_opt_properties[698]/measurement_ael_pro_optical_properties[30]/height_bin_ael_pro_optical_properties[24]/particle_effective_area_radius [microns]
+/ael_pro_opt_properties[698]/measurement_ael_pro_optical_properties[30]/height_bin_ael_pro_optical_properties[24]/classification
+/mca_optical_properties[698]/starttime [s since 2000-01-01]
+/mca_optical_properties[698]/mca_optical_properties[24]/climber [sr]
+/mca_optical_properties[698]/mca_optical_properties[24]/extinction [10^-6 m^-1]
+/mca_optical_properties[698]/mca_optical_properties[24]/lod
+/amd[698]/starttime [s since 2000-01-01]
+/amd[698]/amd_properties[24]/pressure_fp [Pa]
+/amd[698]/amd_properties[24]/temperature_fp [10^-2 K]
+/amd[698]/amd_properties[24]/frequencyshift_fp [MHz]
+/amd[698]/amd_properties[24]/relativehumidity_fp
+/amd[698]/amd_properties[24]/molecularlod_fp
+/amd[698]/amd_properties[24]/molecularbackscatter_fp [10^-6 m^-1 sr^-1]
+/amd[698]/amd_properties[24]/pressure_fiz [Pa]
+/amd[698]/amd_properties[24]/temperature_fiz [10^-2 K]
+/amd[698]/amd_properties[24]/frequencyshift_fiz [MHz]
+/amd[698]/amd_properties[24]/relativehumidity_fiz
+/amd[698]/amd_properties[24]/molecularlod_fiz
+/amd[698]/amd_properties[24]/molecularbackscatter_fiz [10^-6 m^-1 sr^-1]
+/group_optical_properties[2705]/starttime [s since 2000-01-01]
+/group_optical_properties[2705]/height_bin_index
+/group_optical_properties[2705]/group_optical_property/group_extinction [10^-6 m^-1]
+/group_optical_properties[2705]/group_optical_property/group_backscatter [10^-6 m^-1 sr^-1]
+/group_optical_properties[2705]/group_optical_property/group_lod
+/group_optical_properties[2705]/group_optical_property/group_sr
+/group_optical_properties[2705]/group_geolocation_middle_bins/start_longitude [1e-6 degrees_east]
+/group_optical_properties[2705]/group_geolocation_middle_bins/start_latitude [1e-6 degrees_north]
+/group_optical_properties[2705]/group_geolocation_middle_bins/start_altitude [m]
+/group_optical_properties[2705]/group_geolocation_middle_bins/mid_longitude [1e-6 degrees_east]
+/group_optical_properties[2705]/group_geolocation_middle_bins/mid_latitude [1e-6 degrees_north]
+/group_optical_properties[2705]/group_geolocation_middle_bins/mid_altitude [m]
+/group_optical_properties[2705]/group_geolocation_middle_bins/stop_longitude [1e-6 degrees_east]
+/group_optical_properties[2705]/group_geolocation_middle_bins/stop_latitude [1e-6 degrees_north]
+/group_optical_properties[2705]/group_geolocation_middle_bins/stop_altitude [m]
+/group_optical_properties[2705]/group_optical_property_middle_bins/mid_extinction_top [10^-6 m^-1]
+/group_optical_properties[2705]/group_optical_property_middle_bins/mid_backscatter_top [10^-6 sr^-1 m^-1]
+/group_optical_properties[2705]/group_optical_property_middle_bins/mid_lod_top
+/group_optical_properties[2705]/group_optical_property_middle_bins/mid_ber_top [sr]
+/group_optical_properties[2705]/group_optical_property_middle_bins/mid_extinction_bot [10^-6 m^-1]
+/group_optical_properties[2705]/group_optical_property_middle_bins/mid_backscatter_bot [10^-6 sr^-1 m^-1]
+/group_optical_properties[2705]/group_optical_property_middle_bins/mid_lod_bot
+/group_optical_properties[2705]/group_optical_property_middle_bins/mid_ber_bot [sr]
+/scene_classification[2705]/starttime [s since 2000-01-01]
+/scene_classification[2705]/height_bin_index
+/scene_classification[2705]/aladin_cloud_flag/clrh
+/scene_classification[2705]/aladin_cloud_flag/clsr
+/scene_classification[2705]/aladin_cloud_flag/downclber
+/scene_classification[2705]/aladin_cloud_flag/topclber
+/scene_classification[2705]/nwp_cloud_flag
+/scene_classification[2705]/l2a_group_class_reliability
+/feature_mask[698]/starttime [s since 2000-01-01]
+/feature_mask[698]/overall_quality
+/feature_mask[698]/feature_mask_indices[30,24]/feature_mask_index
+/msp_atb[698]/starttime [s since 2000-01-01]
+/msp_atb[698]/effective_msp_spectral_response[16]/effective_msp_spectral_response
+/msp_atb[698]/number_of_detected_missed_hot_pixels
+/msp_atb[698]/height_bin_emsr_data_used_masks[24]/emsr_data_used_mask
+/msp_atb[698]/measurement_msp_atb_properties[30]/height_bin_msp_atb_property[24]/attenuated_mie_backscatter_msp [m^-1 sr^-1]
+/msp_atb[698]/measurement_msp_atb_properties[30]/height_bin_msp_atb_property[24]/err_attenuated_mie_backscatter_msp [m^-1 sr^-1]
+/msp_atb[698]/measurement_msp_atb_properties[30]/height_bin_msp_atb_property[24]/attenuated_rayleigh_backscatter_msp [m^-1 sr^-1]
+/msp_atb[698]/measurement_msp_atb_properties[30]/height_bin_msp_atb_property[24]/err_attenuated_rayleigh_backscatter_msp [m^-1 sr^-1]
