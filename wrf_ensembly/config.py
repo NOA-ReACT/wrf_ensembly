@@ -198,7 +198,7 @@ class TimeControlConfig:
             return False
 
         for f in fields(self):
-            if f in ignored_fields:
+            if f.name in ignored_fields:
                 continue
             if getattr(self, f.name) != getattr(other, f.name):
                 return f.name
