@@ -1,5 +1,6 @@
 """Utilities for reading and computing statistics from DART filter diagnostics."""
 
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Iterable
 
@@ -84,7 +85,12 @@ def read_obs_seq_nc(path: Path) -> pd.DataFrame:
         idx = copy_indices[copy_name]
         result[col_name] = ds["observations"].isel(copy=idx).values
 
-    result["longitude"] = ds["location"].isel(locdim=0).values
+    # obs_seq stores longitude in 0-360 degrees; normalise to -180..180 so it
+    # matches the DB / model-domain convention used everywhere else (otherwise
+    # obs west of the prime meridian wrap to ~347-360 and land-sea / map lookups
+    # and plots place them in the wrong hemisphere).
+    lon = ds["location"].isel(locdim=0).values
+    result["longitude"] = ((lon + 180.0) % 360.0) - 180.0
     result["latitude"] = ds["location"].isel(locdim=1).values
     result["z"] = ds["location"].isel(locdim=2).values
     result["dart_qc"] = ds["qc"].isel(qc_copy=dart_qc_index).values
@@ -163,3 +169,203 @@ def compute_rank_histogram(
     }
 
     return hist, ranks, diagnostics
+
+
+def _rms(x) -> float:
+    """Root-mean-square of the finite entries. NaN when nothing is finite."""
+
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return float("nan")
+    return float(np.sqrt(np.mean(x**2)))
+
+
+def _correlation(a, b) -> float:
+    """
+    Pearson correlation over the pairwise-finite entries.
+
+    Returns NaN rather than warning when fewer than two pairs survive or when
+    either series is constant (`np.corrcoef` divides by a zero standard deviation
+    in that case).
+    """
+
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    valid = np.isfinite(a) & np.isfinite(b)
+    a, b = a[valid], b[valid]
+    if a.size < 2 or np.std(a) == 0.0 or np.std(b) == 0.0:
+        return float("nan")
+    return float(np.corrcoef(a, b)[0, 1])
+
+
+def _safe_mean(x) -> float:
+    """Mean of the finite entries. NaN when nothing is finite."""
+
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return float("nan")
+    return float(np.mean(x))
+
+
+@dataclass
+class CycleConsistencyMetrics:
+    """
+    Data assimilation consistency diagnostics for one cycle.
+
+    O-B is the innovation before the analysis (obs minus prior mean) and O-A the
+    residual after it (obs minus posterior mean). A working filter reduces the RMS
+    from the former to the latter.
+    """
+
+    cycle: int
+    obs_type: str
+    """Observation type these metrics cover, or "ALL" for every type combined."""
+
+    n_total: int
+    """Observations in the cycle, at any quality control flag."""
+    n_assim: int
+    """Observations actually assimilated (DART QC 0). All statistics below use these."""
+    n_qc4_forward_op_fail: int
+    n_qc7_outlier: int
+
+    omb_mean: float
+    omb_rms: float
+    oma_mean: float
+    oma_rms: float
+    rms_reduction_pct: float
+    """Percentage drop from the O-B RMS to the O-A RMS. Positive means the analysis
+    moved the model toward the observations."""
+
+    r_prior: float
+    r_posterior: float
+    mean_sigma_o: float
+    """Mean assigned observation error standard deviation."""
+    mean_prior_spread: float
+
+    spread_skill_ratio: float
+    """var(O-B) / (sigma_o^2 + prior_spread^2), which is ~1 when the assigned
+    observation error and the ensemble spread together explain the innovations.
+    Below 1 means the observation error is over-specified (observations are
+    under-weighted and increments are conservative); above 1 means it is
+    under-specified, risking over-fitting."""
+
+    sigma_o_desroziers: float
+    """Desroziers estimate of the observation error, sqrt(E[d_a . d_b]). Compare
+    against `mean_sigma_o`: a large gap means the assigned error should move
+    toward this value."""
+
+
+def compute_cycle_consistency(
+    df: pd.DataFrame, cycle: int, obs_type: str = "ALL"
+) -> CycleConsistencyMetrics:
+    """
+    Compute consistency diagnostics for one cycle's obs_seq.final table.
+
+    Quality control counts are taken over every row; every other statistic is
+    computed over the assimilated subset (DART QC 0) only. Values are in the
+    observation's native units - no unit conversion is applied.
+
+    Args:
+        df: Frame from `read_obs_seq_nc`, containing all QC values. Filter it by
+            observation type before calling if `obs_type` is not "ALL".
+        cycle: Cycle index, recorded on the result.
+        obs_type: Label for the observation type covered, or "ALL".
+
+    Returns:
+        Metrics for the cycle. Statistical fields are NaN when fewer than two
+        observations were assimilated.
+    """
+
+    n_total = len(df)
+    dart_qc = df["dart_qc"] if "dart_qc" in df.columns else pd.Series(dtype=float)
+    n_qc4 = int((dart_qc == 4).sum())
+    n_qc7 = int((dart_qc == 7).sum())
+
+    assimilated = df[df["dart_qc"] == 0] if n_total else df
+    n_assim = len(assimilated)
+
+    nan = float("nan")
+    if n_assim < 2:
+        return CycleConsistencyMetrics(
+            cycle=cycle,
+            obs_type=obs_type,
+            n_total=n_total,
+            n_assim=n_assim,
+            n_qc4_forward_op_fail=n_qc4,
+            n_qc7_outlier=n_qc7,
+            omb_mean=nan,
+            omb_rms=nan,
+            oma_mean=nan,
+            oma_rms=nan,
+            rms_reduction_pct=nan,
+            r_prior=nan,
+            r_posterior=nan,
+            mean_sigma_o=nan,
+            mean_prior_spread=nan,
+            spread_skill_ratio=nan,
+            sigma_o_desroziers=nan,
+        )
+
+    obs = assimilated["obs"].to_numpy(dtype=float)
+    prior_mean = assimilated["prior_mean"].to_numpy(dtype=float)
+    posterior_mean = assimilated["posterior_mean"].to_numpy(dtype=float)
+    prior_spread = assimilated["prior_spread"].to_numpy(dtype=float)
+    sigma_o = np.sqrt(assimilated["obs_variance"].to_numpy(dtype=float))
+
+    omb = obs - prior_mean
+    oma = obs - posterior_mean
+
+    omb_rms = _rms(omb)
+    oma_rms = _rms(oma)
+    if not np.isfinite(omb_rms) or omb_rms == 0.0 or not np.isfinite(oma_rms):
+        rms_reduction_pct = nan
+    else:
+        rms_reduction_pct = 100.0 * (1.0 - oma_rms / omb_rms)
+
+    # var(O-B) should equal sigma_o^2 + prior_spread^2 if the error budget is right
+    mean_omb_sq = _safe_mean(omb**2)
+    denominator = _safe_mean(sigma_o**2) + _safe_mean(prior_spread**2)
+    if not np.isfinite(denominator) or denominator == 0.0:
+        spread_skill_ratio = nan
+    else:
+        spread_skill_ratio = mean_omb_sq / denominator
+
+    # Desroziers: E[d_a . d_b] estimates the observation error variance
+    desroziers_var = _safe_mean(oma * omb)
+    sigma_o_desroziers = (
+        float(np.sqrt(max(desroziers_var, 0.0)))
+        if np.isfinite(desroziers_var)
+        else nan
+    )
+
+    return CycleConsistencyMetrics(
+        cycle=cycle,
+        obs_type=obs_type,
+        n_total=n_total,
+        n_assim=n_assim,
+        n_qc4_forward_op_fail=n_qc4,
+        n_qc7_outlier=n_qc7,
+        omb_mean=_safe_mean(omb),
+        omb_rms=omb_rms,
+        oma_mean=_safe_mean(oma),
+        oma_rms=oma_rms,
+        rms_reduction_pct=rms_reduction_pct,
+        r_prior=_correlation(obs, prior_mean),
+        r_posterior=_correlation(obs, posterior_mean),
+        mean_sigma_o=_safe_mean(sigma_o),
+        mean_prior_spread=_safe_mean(prior_spread),
+        spread_skill_ratio=spread_skill_ratio,
+        sigma_o_desroziers=sigma_o_desroziers,
+    )
+
+
+def consistency_metrics_to_dataframe(
+    rows: Iterable[CycleConsistencyMetrics],
+) -> pd.DataFrame:
+    """Collect consistency metrics into a DataFrame, one row each, in field order."""
+
+    columns = [f.name for f in fields(CycleConsistencyMetrics)]
+    records = [{c: getattr(row, c) for c in columns} for row in rows]
+    return pd.DataFrame(records, columns=columns)

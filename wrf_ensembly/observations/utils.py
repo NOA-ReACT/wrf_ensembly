@@ -1,5 +1,7 @@
 """Functions related to handling WRF-Ensembly observation files under the context of an experiment."""
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pyproj
@@ -145,3 +147,89 @@ def reconstruct_array(
             dataset = dataset.dropna(dim=dim, how="all", subset=[value_columns[0]])
 
     return dataset
+
+
+def reconstruct_curtain(
+    df: pd.DataFrame, value_columns: list[str]
+) -> tuple[dict[str, np.ndarray], np.ndarray, str, str]:
+    """
+    Reconstruct a two-dimensional profile onto an (along-track, altitude) curtain.
+
+    Instruments that sample a vertical curtain (lidars, radar profilers) store two
+    native dimensions: one along the track and one in the vertical. This grids the
+    observations back onto that geometry and works out a single altitude per
+    vertical bin, so the result can be drawn directly with `pcolormesh`.
+
+    Which of the two dimensions is vertical is detected from the `z` coordinate
+    rather than assumed, since the dimension order is instrument-defined.
+
+    Args:
+        df: Observations from a single source file and quantity, with the columns
+            `reconstruct_array` needs.
+        value_columns: Columns to grid, e.g. ``["value", "model_forecast"]``.
+
+    Returns:
+        Tuple of (fields, altitude, along_track_dim, vertical_dim). Each field is
+        shaped (n_along_track, n_vertical) and rows of `altitude` increase, in the
+        `z` column's units. Vertical bins with no finite altitude are dropped.
+
+    Raises:
+        ValueError: If the observations do not have exactly two native dimensions.
+    """
+
+    names = list(df["orig_coords"].iloc[0]["names"])
+    if len(names) != 2:
+        raise ValueError(
+            "Curtain reconstruction needs exactly two native dimensions, but "
+            f"orig_coords has {len(names)}: {names}. This instrument is not "
+            "curtain-shaped."
+        )
+
+    # Trimming here would use only the first value column as the reference and so
+    # trim each field differently; the caller crops all fields together instead.
+    ds = reconstruct_array(df, value_columns=value_columns, trim_all_nan_slices=False)
+
+    z = ds["z"].values
+
+    # Bins with no observation at all are entirely NaN, which numpy warns about.
+    # That is expected here - such bins are dropped further down.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "Mean of empty slice", RuntimeWarning)
+        warnings.filterwarnings(
+            "ignore", "Degrees of freedom <= 0", RuntimeWarning
+        )
+
+        # The vertical dimension is the one altitude actually varies along.
+        # Average over each axis in turn and compare how much the result spreads.
+        spread_axis0 = np.nanstd(np.nanmean(z, axis=1))  # varies along names[0]
+        spread_axis1 = np.nanstd(np.nanmean(z, axis=0))  # varies along names[1]
+
+    if not np.isfinite(spread_axis0) and not np.isfinite(spread_axis1):
+        vertical_axis = 1
+    elif not np.isfinite(spread_axis0):
+        vertical_axis = 1
+    elif not np.isfinite(spread_axis1):
+        vertical_axis = 0
+    else:
+        vertical_axis = 1 if spread_axis1 >= spread_axis0 else 0
+
+    along_axis = 1 - vertical_axis
+    vertical_dim, along_track_dim = names[vertical_axis], names[along_axis]
+
+    # Orient everything as (along_track, vertical)
+    def _oriented(arr: np.ndarray) -> np.ndarray:
+        return arr if along_axis == 0 else arr.T
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", "Mean of empty slice", RuntimeWarning)
+        altitude = np.nanmean(_oriented(z), axis=0)
+
+    order = np.argsort(altitude)
+    altitude = altitude[order]
+    keep = np.isfinite(altitude)
+
+    fields = {
+        col: _oriented(ds[col].values)[:, order][:, keep] for col in value_columns
+    }
+
+    return fields, altitude[keep], along_track_dim, vertical_dim

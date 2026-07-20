@@ -17,12 +17,17 @@ source .venv/bin/activate
 ### Testing
 There are limited tests in the codebase. You can't rely on them for making sure things work.
 
+Tests live in `tests/` at the repo root, one file per module under test. They are
+deliberately kept out of `wrf_ensembly/` so they are not shipped in the built wheel.
+`testpaths` in `pyproject.toml` restricts collection to `tests/`, so files named
+`test_*` elsewhere (e.g. the exploration scripts in `scripts/`) are ignored.
+
 ```bash
 # Run all tests
 pytest
 
 # Run a specific test
-pytest wrf_ensembly/test_utils.py::test_int_to_letter_numeral
+pytest tests/test_utils.py::test_int_to_letter_numeral
 ```
 
 ### Package Management

@@ -711,6 +711,109 @@ class ExperimentObservations:
 
         return result
 
+    def get_reconstructable_for_pair(
+        self,
+        instrument: str,
+        quantity: str,
+        orig_filename: str | None = None,
+        qc_flags: list[int] | None = None,
+        require_model_forecast: bool = True,
+        require_model_analysis: bool = False,
+    ) -> pd.DataFrame | None:
+        """
+        Retrieves observations with every column `observations.utils.reconstruct_array` needs.
+
+        Unlike `get_model_interpolated_for_pair`, this includes orig_coords and the
+        coordinate fields, so the result can be gridded back onto the instrument's
+        native geometry. Pass `orig_filename` to get a single source file, which
+        `reconstruct_array` requires (all rows must share one orig_coords shape).
+
+        Args:
+            instrument: Instrument name to filter by.
+            quantity: Quantity name to filter by.
+            orig_filename: If set, only return observations from this source file.
+            qc_flags: If set, only return observations with qc_flag in this list.
+            require_model_forecast: Only return rows with model_forecast set.
+            require_model_analysis: Only return rows with model_analysis set.
+
+        Returns:
+            DataFrame of observations, or None if none exist.
+        """
+        query = """
+            SELECT
+                instrument, quantity,
+                time AT TIME ZONE 'UTC' AS time,
+                latitude, longitude, z, z_type,
+                value, value_uncertainty,
+                model_forecast, model_analysis,
+                model_forecast_spread, model_analysis_spread,
+                qc_flag, orig_coords, orig_filename
+            FROM observations
+            WHERE instrument = ?
+              AND quantity = ?
+        """
+        params: list = [instrument, quantity]
+
+        if require_model_forecast:
+            query += " AND model_forecast IS NOT NULL"
+        if require_model_analysis:
+            query += " AND model_analysis IS NOT NULL"
+        if orig_filename is not None:
+            query += " AND orig_filename = ?"
+            params.append(orig_filename)
+        if qc_flags is not None:
+            placeholders = ", ".join("?" * len(qc_flags))
+            query += f" AND qc_flag IN ({placeholders})"
+            params.extend(qc_flags)
+
+        with self._get_duckdb(read_only=True) as con:
+            result = con.execute(query, params).fetchdf()
+
+        if result.empty:
+            return None
+
+        if result["time"].dt.tz is None:
+            result["time"] = result["time"].dt.tz_localize("UTC")
+
+        return result
+
+    def get_reconstructable_filenames(
+        self,
+        instrument: str,
+        quantity: str,
+        require_model_analysis: bool = False,
+    ) -> list[str]:
+        """
+        Distinct source filenames for a pair, ordered by first observation time.
+
+        Used to enumerate the source files that can each be drawn as one curtain.
+
+        Args:
+            instrument: Instrument name to filter by.
+            quantity: Quantity name to filter by.
+            require_model_analysis: Only count files that have model_analysis set.
+
+        Returns:
+            List of orig_filename values, oldest first.
+        """
+        query = """
+            SELECT orig_filename, min(time) AS first_time
+            FROM observations
+            WHERE instrument = ?
+              AND quantity = ?
+              AND model_forecast IS NOT NULL
+        """
+        params: list = [instrument, quantity]
+
+        if require_model_analysis:
+            query += " AND model_analysis IS NOT NULL"
+        query += " GROUP BY orig_filename ORDER BY first_time"
+
+        with self._get_duckdb(read_only=True) as con:
+            result = con.execute(query, params).fetchdf()
+
+        return result["orig_filename"].tolist()
+
     def get_cycle_summary(self, cycles: list[CycleInformation]) -> pd.DataFrame:
         """
         Returns a summary of observations per cycle: total count and how many are to be assimilated.

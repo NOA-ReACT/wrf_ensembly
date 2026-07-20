@@ -43,6 +43,7 @@ from wrf_ensembly.observations.operations import (
     plot_file,
     to_obs_seq,
 )
+from wrf_ensembly.observations.window_counts import window_counts
 
 
 @click.group()
@@ -91,6 +92,7 @@ operations_group.add_command(dump_info)
 operations_group.add_command(filter_obs)
 operations_group.add_command(to_obs_seq)
 operations_group.add_command(plot_file)
+operations_group.add_command(window_counts)
 
 if __name__ == "__main__":
     cli()

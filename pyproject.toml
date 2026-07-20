@@ -52,6 +52,11 @@ docs = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.pytest.ini_options]
+# Only collect from tests/; scripts/ holds ad-hoc exploration files, some of which
+# are named test_* but contain no tests and import optional extras.
+testpaths = ["tests"]
+
 [tool.isort]
 profile = "black"
 src_paths = ["wrf_ensembly"]

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import click
@@ -6,13 +7,19 @@ import xarray as xr
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.config import PlotVariableConfig
 from wrf_ensembly.console import logger
-from wrf_ensembly.diagnostics import read_obs_seq_nc
+from wrf_ensembly.diagnostics import (
+    compute_cycle_consistency,
+    consistency_metrics_to_dataframe,
+    read_obs_seq_nc,
+)
 from wrf_ensembly.experiment import experiment
 from wrf_ensembly.plotting import (
     generate_filter_stats_plots,
+    plot_cycle_consistency_timeseries,
     plot_forecast,
     plot_forecast_vs_analysis,
 )
+from wrf_ensembly.validation import EnsembleSpreadAnalysis
 from wrf_ensembly.wrf import get_wrf_cartopy_crs
 
 
@@ -255,6 +262,14 @@ def cycle_filter_stats(experiment_path: Path, cycle: int):
     df = read_obs_seq_nc(diag_file)
     logger.info(f"Loaded {len(df)} observations")
 
+    try:
+        proj = get_wrf_cartopy_crs(exp.cfg.domain_control)
+    except NotImplementedError:
+        logger.warning(
+            "Could not create cartopy projection for this domain, falling back to PlateCarree"
+        )
+        proj = None
+
     base_output_dir = exp.paths.plots / "cycle_filter_stats" / f"cycle_{cycle:03d}"
 
     # Generate plots for all observations combined
@@ -264,6 +279,7 @@ def cycle_filter_stats(experiment_path: Path, cycle: int):
         base_output_dir / "all",
         "All Types",
         logger=logger,
+        proj=proj,
     )
 
     # Generate plots per observation type
@@ -277,9 +293,157 @@ def cycle_filter_stats(experiment_path: Path, cycle: int):
                 base_output_dir / obs_type,
                 obs_type,
                 logger=logger,
+                proj=proj,
             )
 
     logger.info(f"All plots saved to {base_output_dir}")
+
+
+@plots_cli.command()
+@click.option(
+    "--cycle",
+    "cycles",
+    multiple=True,
+    type=int,
+    help="Cycle to include. Can be specified multiple times. "
+    "Defaults to every cycle that has a diagnostics file.",
+)
+@click.option(
+    "--per-obs-type/--no-per-obs-type",
+    default=True,
+    help="Also emit one row per observation type, alongside the combined row.",
+)
+@pass_experiment_path
+def cycle_consistency(
+    experiment_path: Path, cycles: tuple[int, ...], per_obs_type: bool
+):
+    """
+    Compute data assimilation consistency metrics from the DART filter output.
+
+    Reads the obs_seq.final diagnostics of each cycle and reports what the filter
+    actually did: the innovation before (O-B) and after (O-A) the analysis, the
+    resulting RMS reduction, and two checks on whether the assigned observation
+    error is consistent with the observed innovations.
+
+    The spread-skill ratio is var(O-B) / (sigma_o^2 + prior_spread^2), which is
+    about 1 when the observation error and the ensemble spread together explain the
+    innovations. Below 1 the observation error is over-specified, so observations
+    are under-weighted and increments are conservative; above 1 it is
+    under-specified, risking over-fitting. The Desroziers estimate is an independent
+    read on the same question - a large gap from the assigned error suggests moving
+    the assigned value toward it.
+
+    Writes a per-cycle CSV table and across-cycle summary plots to
+    plots/cycle_consistency/. Requires that `ensemble filter` has run.
+    """
+
+    logger.setup("plots-cycle-consistency", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    # Diagnostics files use an unpadded cycle index, unlike the padded cycle_NNN
+    # directories used elsewhere.
+    if cycles:
+        cycle_indices = sorted(cycles)
+    else:
+        cycle_indices = sorted(
+            int(m.group(1))
+            for path in exp.paths.data_diag.glob("cycle_*.nc")
+            if (m := re.fullmatch(r"cycle_(\d+)\.nc", path.name)) is not None
+        )
+        if not cycle_indices:
+            logger.error(f"No diagnostics files found in {exp.paths.data_diag}")
+            logger.error("Ensure `ensemble filter` has been run.")
+            return
+
+    rows = []
+    for cycle in cycle_indices:
+        diag_file = exp.paths.data_diag / f"cycle_{cycle}.nc"
+        if not diag_file.exists():
+            logger.warning(f"Diagnostics file not found, skipping: {diag_file}")
+            continue
+
+        df = read_obs_seq_nc(diag_file)
+        logger.info(f"Cycle {cycle}: loaded {len(df)} observations")
+
+        rows.append(compute_cycle_consistency(df, cycle, "ALL"))
+        if per_obs_type:
+            for obs_type in sorted(df["obs_type"].unique()):
+                rows.append(
+                    compute_cycle_consistency(
+                        df[df["obs_type"] == obs_type], cycle, obs_type
+                    )
+                )
+
+    if not rows:
+        logger.error("No cycles could be read, nothing to report")
+        return
+
+    output_dir = exp.paths.plots / "cycle_consistency"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    table = consistency_metrics_to_dataframe(rows)
+    csv_path = output_dir / "consistency.csv"
+    table.to_csv(csv_path, index=False)
+    logger.info(f"Saved {csv_path}")
+
+    fig = plot_cycle_consistency_timeseries(
+        table, title_suffix=exp.cfg.metadata.name
+    )
+    plot_path = output_dir / "consistency_timeseries.png"
+    fig.savefig(plot_path, dpi=150, bbox_inches="tight")
+    logger.info(f"Saved {plot_path}")
+
+    import matplotlib.pyplot as plt
+
+    plt.close(fig)
+
+    summary = table[table["obs_type"] == "ALL"][
+        [
+            "cycle",
+            "n_assim",
+            "omb_rms",
+            "oma_rms",
+            "rms_reduction_pct",
+            "spread_skill_ratio",
+            "mean_sigma_o",
+            "sigma_o_desroziers",
+        ]
+    ]
+    for line in summary.to_string(
+        index=False, float_format=lambda x: f"{x:.4g}"
+    ).splitlines():
+        logger.info(line)
+
+
+@plots_cli.command()
+@click.option(
+    "--variables",
+    "-v",
+    multiple=True,
+    required=True,
+    help="Variable to track. Can be specified multiple times.",
+)
+@pass_experiment_path
+def ensemble_spread(experiment_path: Path, variables: tuple[str, ...]):
+    """
+    Plot the domain-mean ensemble mean and spread across all cycles.
+
+    Concatenates the per-cycle forecast mean and spread files into one continuous
+    time series, showing whether the ensemble sustains its spread over the run or
+    collapses. Requires that `postprocess run` has been completed.
+
+    The spread shown is the domain mean of the pointwise ensemble standard
+    deviation, i.e. how much the members disagree locally. Three-dimensional
+    variables are also averaged vertically.
+    """
+
+    logger.setup("plots-ensemble-spread", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    analysis = EnsembleSpreadAnalysis(exp, list(variables))
+    results = analysis.run()
+
+    logger.info(f"Output directory: {results['output_dir']}")
 
 
 @plots_cli.command()

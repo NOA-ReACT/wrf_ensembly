@@ -54,7 +54,7 @@ class PerMemberModelInterpolation:
         for combo in needed_combos:
             needed_vars.update(combo["wrf_vars"])
 
-        output_dir = self.exp.paths.data / "validation"
+        output_dir = self.exp.paths.data_validation
         output_dir.mkdir(parents=True, exist_ok=True)
 
         total_rows = 0

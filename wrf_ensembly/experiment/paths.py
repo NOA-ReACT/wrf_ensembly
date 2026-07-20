@@ -22,6 +22,8 @@ class ExperimentPaths:
         self.data_analysis = self.data / "analysis"
         self.data_diag = self.data / "diagnostics"
         self.data_inflation = self.data / "inflation"
+        # Created lazily by the validation analyses, not by `create_directories`
+        self.data_validation = self.data / "validation"
 
         self.obs = experiment_path / "obs"
         self.obs_temp = self.obs / "temp"  # Temporary files during processing

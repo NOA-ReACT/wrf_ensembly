@@ -60,11 +60,7 @@ class FirstDeparturesAnalysis:
         self.instrument = instrument
         self.quantity = quantity
         self.output_dir = (
-            experiment.paths.data
-            / "validation"
-            / "first_departures"
-            / instrument
-            / quantity
+            experiment.paths.data_validation / "first_departures" / instrument / quantity
         )
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
