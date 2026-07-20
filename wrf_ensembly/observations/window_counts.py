@@ -69,10 +69,8 @@ def superob_files(
     """
     Read observation files and superob them the way the ingest pipeline does.
 
-    `grid_bin` groups purely on the binned native indices, with no source file in
-    the group key, so it must be called once per file. Concatenating first would
-    merge observations from different overpasses that happen to land on the same
-    native grid indices, undercounting the result.
+    Files are binned one at a time, matching how `add_observation_file` calls
+    `grid_bin`, so the counts reflect what ingest would produce.
 
     Args:
         files: Observation files to read.
@@ -100,18 +98,14 @@ def superob_files(
         if df.empty:
             continue
 
-        # grid_bin cannot be applied twice: it suffixes the dimension names and
-        # writes into the metadata, which is already a serialised string by then.
-        names = list(df["orig_coords"].iloc[0]["names"])
-        if any(str(name).endswith("_bin") for name in names):
+        try:
+            superobs = grid_bin(df, hoz_bins, vert_bins, reduce_instrument_error)
+        except ValueError as e:
             raise click.ClickException(
-                f"{path.name} appears to be superobbed already (dimensions "
-                f"{names}). Point this command at the raw observation files, or "
-                "omit --hoz-bin/--vert-bin to count them as they are."
+                f"{path.name}: {e} Omit --hoz-bin/--vert-bin to count the "
+                "observations as they are."
             )
 
-        # One call per file - see the note in this function's docstring
-        superobs = grid_bin(df, hoz_bins, vert_bins, reduce_instrument_error)
         superobs["source_file"] = path.name
         binned.append(superobs)
 

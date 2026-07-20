@@ -40,14 +40,10 @@ def _raw_obs(orig_filename: str, n_along: int = 4, n_height: int = 4):
     return pd.DataFrame(rows)
 
 
-def test_grid_bin_merges_across_source_files():
+def test_grid_bin_does_not_merge_across_source_files():
     """
-    grid_bin groups only on binned indices, with no source file in the key.
-
-    Two overpasses covering the same native grid indices therefore collapse into
-    each other if they are binned in one call. This is why `superob_files` calls
-    grid_bin once per file, and is a hazard for any other caller that concatenates
-    first.
+    Native grid indices restart at zero in every file, so two overpasses cover the
+    same indices. Binning them in one call must still keep them apart.
     """
     a = _raw_obs("overpass_a.h5")
     b = _raw_obs("overpass_b.h5")
@@ -55,28 +51,95 @@ def test_grid_bin_merges_across_source_files():
 
     bins_h, bins_v = {"along_track": 2}, {"height": 2}
 
-    merged = grid_bin(both, bins_h, bins_v)
+    together = grid_bin(both, bins_h, bins_v)
     per_file = pd.concat(
         [grid_bin(a, bins_h, bins_v), grid_bin(b, bins_h, bins_v)], ignore_index=True
     )
 
-    # Binning each file gives 2x2 superobs per file, so 8 in total
+    # 2x2 superobs per file, so 8 in total either way round
     assert len(per_file) == 8
-    # Binning them together collapses the two overpasses onto one grid
-    assert len(merged) == 4
-    assert len(merged) < len(per_file)
+    assert len(together) == 8
 
 
-def test_grid_bin_merge_loses_source_provenance():
-    """A merged superob silently inherits whichever file happened to sort first."""
+def test_grid_bin_preserves_source_provenance():
+    """Every superob is attributed to the file its observations came from."""
     both = pd.concat(
         [_raw_obs("overpass_a.h5"), _raw_obs("overpass_b.h5")], ignore_index=True
     )
 
-    merged = grid_bin(both, {"along_track": 2}, {"height": 2})
+    together = grid_bin(both, {"along_track": 2}, {"height": 2})
 
-    # Both overpasses contributed, but only one filename survives
-    assert set(merged["orig_filename"]) == {"overpass_a.h5"}
+    assert set(together["orig_filename"]) == {"overpass_a.h5", "overpass_b.h5"}
+    # Each file contributed the same number of superobs
+    assert together["orig_filename"].value_counts().to_dict() == {
+        "overpass_a.h5": 4,
+        "overpass_b.h5": 4,
+    }
+
+
+def test_grid_bin_shape_is_per_source_file():
+    """A file's recorded grid extent describes that file, not the whole frame."""
+    small = _raw_obs("small.h5", n_along=4, n_height=4)
+    large = _raw_obs("large.h5", n_along=8, n_height=4)
+
+    together = grid_bin(
+        pd.concat([small, large], ignore_index=True),
+        {"along_track": 2},
+        {"height": 2},
+    )
+
+    shapes = {
+        row["orig_filename"]: tuple(row["orig_coords"]["shape"])
+        for _, row in together.iterrows()
+    }
+    assert shapes["small.h5"] == (2, 2)
+    assert shapes["large.h5"] == (4, 2)
+
+
+def test_grid_bin_does_not_mutate_input_metadata():
+    """The superob record must not be written back into the caller's frame."""
+    df = _raw_obs("overpass_a.h5")
+    df["metadata"] = [{"existing": "value"} for _ in range(len(df))]
+
+    grid_bin(df, {"along_track": 2}, {"height": 2})
+
+    assert all(m == {"existing": "value"} for m in df["metadata"])
+
+
+def test_grid_bin_accepts_raw_metadata():
+    """
+    Converters that populate metadata emit dicts, and dicts survive the parquet
+    round-trip, so a raw file with metadata must bin normally. Only the serialised
+    form produced by the experiment database is rejected.
+    """
+    df = _raw_obs("overpass_a.h5")
+    df["metadata"] = [{"is_over_land": 1} for _ in range(len(df))]
+
+    result = grid_bin(df, {"along_track": 2}, {"height": 2})
+
+    assert len(result) == 4
+    # The original metadata is carried through alongside the superob record
+    assert result["metadata"].iloc[0]["is_over_land"] == 1
+    assert "superob" in result["metadata"].iloc[0]
+
+
+def test_grid_bin_accepts_null_metadata():
+    """Most converters set metadata to NA; that must bin normally too."""
+    df = _raw_obs("overpass_a.h5")  # _raw_obs already sets metadata to None
+
+    result = grid_bin(df, {"along_track": 2}, {"height": 2})
+
+    assert len(result) == 4
+    assert "superob" in result["metadata"].iloc[0]
+
+
+def test_grid_bin_rejects_serialised_metadata():
+    """Observations read back from an experiment database cannot be re-binned."""
+    df = _raw_obs("overpass_a.h5")
+    df["metadata"] = ['{"superob": {"n_contributing": 4}}' for _ in range(len(df))]
+
+    with pytest.raises(ValueError, match="serialised metadata"):
+        grid_bin(df, {"along_track": 2}, {"height": 2})
 
 
 def test_count_by_window_counts_within_half_open_window():

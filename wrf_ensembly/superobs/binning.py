@@ -1,7 +1,5 @@
 """Functions related to the binning of observations stored in DataFrames"""
 
-import json
-
 import numpy as np
 import pandas as pd
 
@@ -106,9 +104,11 @@ def _aggregate_group(
         "names": np.array([name + "_bin" for name in dim_names], dtype=object),
     }
 
-    # Metadata: Keep existing from the first observation, add superob information
+    # Metadata: Keep existing from the first observation, add superob information.
+    # Copy before writing, otherwise the superob record is written back into the
+    # caller's dataframe (the row's dict is shared, not owned by this function).
     existing_meta = first["metadata"]
-    meta = existing_meta if existing_meta else {}
+    meta = dict(existing_meta) if existing_meta else {}
     meta["superob"] = {
         "n_contributing": n,
         "repr_error": repr_err,
@@ -145,6 +145,14 @@ def grid_bin(
     """
     Bin a dataframe along its native instrument grid dimensions.
 
+    Native grid indices are only meaningful within one source file, since every
+    file numbers its own grid from zero. Observations are therefore grouped by
+    `orig_filename` as well as by bin, and a frame spanning several files is safe
+    to pass in: each file is binned onto its own grid.
+
+    Cannot be applied to observations that have already been binned - see
+    `time_bin` for the same restriction.
+
     Parameters:
         df: Observations for a single (instrument, quantity) pair.
         hoz_bins: Bin size per horizontal dimension, in native grid steps.
@@ -155,10 +163,27 @@ def grid_bin(
 
     Returns:
         pd.DataFrame with the same schema as the input, one row per superob.
+
+    Raises:
+        ValueError: If the observations have already been binned.
     """
 
     if df.empty:
         return df.copy()
+
+    # Raw converter output carries metadata as dicts, which survive the parquet
+    # round-trip. Observations read back out of an experiment database instead
+    # carry it as a serialised JSON string, because the column is typed JSON, and
+    # the superob record cannot be written into a string. Fail with an explanation
+    # rather than a TypeError from deep inside the aggregation.
+    metadata = df["metadata"].dropna()
+    if metadata.map(lambda m: isinstance(m, str)).any():
+        raise ValueError(
+            "These observations carry serialised metadata, so they came from an "
+            "experiment database rather than from raw converter output. Binning is "
+            "applied once, when observations are added to an experiment - bin the "
+            "raw observation files instead."
+        )
 
     df = parse_orig_coords(df.copy())
 
@@ -179,18 +204,35 @@ def grid_bin(
         df[label] = df[f"_coord_{dim}"] // bin_size
         group_cols.append(label)
 
-    new_shape = tuple(int(df[col].max()) + 1 for col in group_cols)
     dim_names = tuple(hoz_dim_names + vert_dim_names)
 
-    def _agg(group):
-        bin_indices = tuple(int(group[col].iloc[0]) for col in group_cols)
-        return _aggregate_group(
-            group, new_shape, bin_indices, dim_names, reduce_instrument_error
+    # Each source file describes its own grid, so the binned extent is per file.
+    new_shapes = {
+        filename: tuple(int(group[col].max()) + 1 for col in group_cols)
+        for filename, group in df.groupby("orig_filename", sort=False)
+    }
+
+    # `orig_filename` leads the key so observations from different files never
+    # land in the same bin: their indices coincide by construction, and merging
+    # them would both undercount the superobs and stamp the result with whichever
+    # filename happened to come first.
+    rows = []
+    for key, group in df.groupby(["orig_filename"] + group_cols, sort=True):
+        filename, bin_indices = key[0], tuple(int(i) for i in key[1:])
+        superob = _aggregate_group(
+            group,
+            new_shapes[filename],
+            bin_indices,
+            dim_names,
+            reduce_instrument_error,
         )
+        if superob is not None:
+            rows.append(superob)
 
-    result = df.groupby(group_cols, group_keys=False).apply(_agg).reset_index(drop=True)
+    if not rows:
+        return df.iloc[:0].copy()
 
-    return result
+    return pd.DataFrame(rows).reset_index(drop=True)
 
 
 def time_bin(
