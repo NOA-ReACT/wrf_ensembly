@@ -169,6 +169,12 @@ INSTRUMENT_REGISTRY: dict[str, InstrumentSpec] = {
         x=AxisSpec(dim="x", label="X", coord="x"),
         y=AxisSpec(dim="y", label="Y", coord="y"),
     ),
+    "GRASP_SYNERGY": InstrumentSpec(
+        label="GRASP Synergy (OLCI+TROPOMI)",
+        geometry=Geometry.MAP_SWATH,
+        x=AxisSpec(dim="x", label="X", coord="x"),
+        y=AxisSpec(dim="y", label="Y", coord="y"),
+    ),
 }
 
 
@@ -278,6 +284,22 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         vmin=0,
         vmax=2,
         model_equivalent="AOD_500",
+    ),
+    "AOD_Fine_500nm": QuantitySpec(
+        label="Fine mode Aerosol Optical Depth @ 500nm",
+        units="",
+        cmap="Oranges",
+        vmin=0,
+        vmax=2,
+        model_equivalent="AOD_DUST_FINE_500",
+    ),
+    "AOD_Coarse_500nm": QuantitySpec(
+        label="Coarse mode Aerosol Optical Depth @ 500nm",
+        units="",
+        cmap="Oranges",
+        vmin=0,
+        vmax=2,
+        model_equivalent="AOD_DUST_COARSE_500",
     ),
     "AOD_550nm": QuantitySpec(
         label="Aerosol Optical Depth @ 550nm",

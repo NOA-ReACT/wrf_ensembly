@@ -95,6 +95,8 @@ The `wrf_ensembly/observations/definitions.py` module is the central registry fo
 | `AEOLUS_L2B_RAYLEIGH` | AEOLUS L2B HLOS Wind (Rayleigh channel) | Wind results curtain |
 | `AEOLUS_L2B_MIE` | AEOLUS L2B HLOS Wind (Mie channel) | Wind results curtain |
 | `MSG_SEVIRI` | Meteosat SEVIRI brightness temperatures | 2D map swath |
+| `GRASP_HARP2` | GRASP AOD retrieval from PACE HARP2 | 2D map swath |
+| `GRASP_SYNERGY` | GRASP AOD retrieval from OLCI-A + OLCI-B + TROPOMI | 2D map swath |
 
 Additional instruments used by converters but not yet in `INSTRUMENT_REGISTRY` (plotting/operator support is limited): `AERONET`, `MODIS`, `VIIRS`, `EarthCARE_ATLID_EBD`, `REMOTAP_SPEXONE`.
 
@@ -110,9 +112,26 @@ Additional instruments used by converters but not yet in `INSTRUMENT_REGISTRY` (
 | `BT_IR108` | Brightness Temp IR 10.8 µm | K | `IR108` | — |
 | `BT_IR120` | Brightness Temp IR 12.0 µm | K | `IR120` | — |
 | `AOD_355nm` | AOD @ 355nm | — | `AOD_355` | — |
+| `AOD_440nm` | AOD @ 440nm | — | `AOD_440` | — |
+| `AOD_Fine_440nm` | Fine mode AOD @ 440nm | — | `AOD_DUST_FINE_440` | — |
+| `AOD_Coarse_440nm` | Coarse mode AOD @ 440nm | — | `AOD_DUST_COARSE_440` | — |
 | `AOD_500nm` | AOD @ 500nm | — | `AOD_500` | `AIRSENSE_AOD` |
+| `AOD_Fine_500nm` | Fine mode AOD @ 500nm | — | `AOD_DUST_FINE_500` | — |
+| `AOD_Coarse_500nm` | Coarse mode AOD @ 500nm | — | `AOD_DUST_COARSE_500` | — |
 | `AOD_550nm` | AOD @ 550nm | — | `AOD_550` | `AIRSENSE_AOD` |
+| `AOD_Fine_550nm` | Fine mode AOD @ 550nm | — | `AOD_DUST_FINE_550` | `AIRSENSE_AOD_FINE` |
+| `AOD_Coarse_550nm` | Coarse mode AOD @ 550nm | — | `AOD_DUST_COARSE_550` | `AIRSENSE_AOD_COARSE` |
+| `AOD_665nm` | AOD @ 665nm | — | `AOD_665` | — |
+| `AOD_Fine_665nm` | Fine mode AOD @ 665nm | — | `AOD_DUST_FINE_665` | — |
+| `AOD_Coarse_665nm` | Coarse mode AOD @ 665nm | — | `AOD_DUST_COARSE_665` | — |
+| `AOD_870nm` | AOD @ 870nm | — | `AOD_870` | — |
+| `AOD_Fine_870nm` | Fine mode AOD @ 870nm | — | `AOD_DUST_FINE_870` | — |
+| `AOD_Coarse_870nm` | Coarse mode AOD @ 870nm | — | `AOD_DUST_COARSE_870` | — |
 | `AOD_1064nm` | AOD @ 1064nm | — | `AOD_1064` | — |
+
+The DART Quantity column reflects `dart.py`'s `OBS_TYPE_TABLE`, which is what
+`to-obs-seq` actually uses. Quantities marked — are passed to DART under their own name,
+so they can only be assimilated if DART knows that observation type.
 
 ### Observation Operators
 
@@ -164,6 +183,8 @@ Converters are accessed through the `wrf-ensembly-obs convert` subcommand. This 
 | `modis` | `MODIS` | `AOD_550nm` | MODIS AOD HDF4 files |
 | `viirs` | `VIIRS` | `AOD_550nm` | VIIRS AOD NetCDF files |
 | `msg-seviri` | `MSG_SEVIRI` | `BT_WV62`, `BT_WV73`, `BT_IR87`, `BT_IR108`, `BT_IR120` | SEVIRI native format (via satpy) |
+| `grasp-harp2` | `GRASP_HARP2` | total/fine/coarse AOD @ 440, 550, 665, 870nm | GRASP HARP2 NetCDF files |
+| `grasp-synergy` | `GRASP_SYNERGY` | total/fine/coarse AOD @ 440, 500, 550, 665, 870nm | GRASP OLCI+TROPOMI synergy NetCDF files |
 
 ### Using Converters
 
@@ -444,6 +465,8 @@ spatial_resolution = 1.0
 | `modis INPUT OUTPUT` | Convert MODIS AOD HDF4 files |
 | `viirs INPUT OUTPUT` | Convert VIIRS AOD NetCDF files |
 | `msg-seviri INPUT WRFINPUT OUTPUT` | Convert MSG SEVIRI native files (requires WRF input for grid) |
+| `grasp-harp2 INPUT OUTPUT [--disable-band B] [--imerg-land-sea PATH] [--disable-fine-mode] [--disable-coarse-mode]` | Convert GRASP HARP2 NetCDF files |
+| `grasp-synergy INPUT OUTPUT [--disable-band B] [--disable-fine-mode] [--disable-coarse-mode] [--keep-invalid-pixels]` | Convert GRASP OLCI+TROPOMI synergy NetCDF files |
 
 ## Adding a New Observation Kind
 

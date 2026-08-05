@@ -31,6 +31,7 @@ from wrf_ensembly.observations.converters import (
     aeronet_cli,
     earthcare_ebd_cli,
     grasp_harp2_cli,
+    grasp_synergy_cli,
     modis_cli,
     msg_seviri_cli,
     remotap_spexone_cli,
@@ -70,6 +71,7 @@ convert_group.add_command(aeronet_cli)
 convert_group.add_command(remotap_spexone_cli)
 convert_group.add_command(earthcare_ebd_cli)
 convert_group.add_command(grasp_harp2_cli)
+convert_group.add_command(grasp_synergy_cli)
 convert_group.add_command(viirs_cli)
 convert_group.add_command(modis_cli)
 convert_group.add_command(msg_seviri_cli)
