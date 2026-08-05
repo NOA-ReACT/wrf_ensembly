@@ -129,6 +129,25 @@ def _plot_geom_aeolus_windresults(
     return fig
 
 
+def _fill_grid_gaps(coord: xr.DataArray) -> np.ndarray:
+    """Fill NaN gaps in a 2D geolocation array by interpolating over the native grid.
+
+    Interpolates along each dimension in turn and then extends the edges, so the result
+    is finite as long as the array is not entirely NaN.
+    """
+
+    filled = coord
+    for dim in coord.dims:
+        filled = filled.interpolate_na(
+            dim=str(dim),
+            method="linear",
+            use_coordinate=False,
+            fill_value="extrapolate",
+        )
+
+    return filled.to_numpy()
+
+
 def _plot_geom_map_swath(
     ds: xr.Dataset,
     inst_spec: InstrumentSpec,
@@ -145,9 +164,15 @@ def _plot_geom_map_swath(
     Pass `proj` via `plot_kwargs` to use the model's native projection; defaults
     to PlateCarree.
     """
-    lon = ds["longitude"].to_numpy()
-    lat = ds["latitude"].to_numpy()
     values = ds[target_variable].to_numpy()
+
+    # Sparsely sampled swaths (most GRASP granules are mostly empty) reconstruct with
+    # NaN latitude/longitude wherever no observation landed, and pcolormesh rejects
+    # non-finite cell centres outright. Geolocation varies smoothly across the native
+    # grid, so the gaps can be filled by interpolating over it; the values themselves
+    # stay NaN, so nothing is drawn where there is no observation.
+    lon = _fill_grid_gaps(ds["longitude"])
+    lat = _fill_grid_gaps(ds["latitude"])
 
     lon_min, lon_max = float(np.nanmin(lon)), float(np.nanmax(lon))
     lat_min, lat_max = float(np.nanmin(lat)), float(np.nanmax(lat))
