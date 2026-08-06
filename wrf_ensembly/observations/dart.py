@@ -9,6 +9,8 @@ from wrf_ensembly.external import ExternalProcess
 
 OBS_TYPE_TABLE = {
     "AOD_500nm": "AIRSENSE_AOD",
+    "AOD_Fine_500nm": "AIRSENSE_AOD_FINE",
+    "AOD_Coarse_500nm": "AIRSENSE_AOD_COARSE",
     "AOD_550nm": "AIRSENSE_AOD",
     "AOD_Fine_550nm": "AIRSENSE_AOD_FINE",
     "AOD_Coarse_550nm": "AIRSENSE_AOD_COARSE",

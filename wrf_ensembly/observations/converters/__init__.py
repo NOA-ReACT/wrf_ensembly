@@ -3,6 +3,7 @@
 from .aeolus_l2a import aeolus_l2a as aeolus_l2a_cli
 from .aeolus_l2b import aeolus_l2b as aeolus_l2b_cli
 from .aeronet import aeronet as aeronet_cli
+from .aeronet_sda import aeronet_sda as aeronet_sda_cli
 from .earthcare_ebd import earthcare_atl_ebd as earthcare_ebd_cli
 from .grasp_harp2 import grasp_harp2 as grasp_harp2_cli
 from .grasp_synergy import grasp_synergy as grasp_synergy_cli
@@ -13,6 +14,7 @@ from .viirs import viirs as viirs_cli
 
 __all__ = [
     "aeronet_cli",
+    "aeronet_sda_cli",
     "remotap_spexone_cli",
     "earthcare_ebd_cli",
     "grasp_harp2_cli",

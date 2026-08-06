@@ -176,6 +176,7 @@ Converters are accessed through the `wrf-ensembly-obs convert` subcommand. This 
 | Converter | Instrument | Quantity | Input Format |
 |-----------|------------|----------|--------------|
 | `aeronet` | `AERONET` | `AOD_{wavelength}nm` | `.lev20` tabular files |
+| `aeronet-sda` | `AERONET_SDA` | `AOD_500nm`, `AOD_Fine_500nm`, `AOD_Coarse_500nm` | `.ONEILL_lev20` tabular files |
 | `remotap-spexone` | `REMOTAP_SPEXONE` | AOD | NetCDF files |
 | `aeolus-l2a` | `AEOLUS_L2A_MLE`, `AEOLUS_L2A_SCA`, `AEOLUS_L2A_AEL_PRO` | `LIDAR_EXTINCTION_355nm` | AEOLUS DBL L2A files |
 | `aeolus-l2b` | `AEOLUS_L2B_MIE`, `AEOLUS_L2B_RAYLEIGH` | `HLOS_WIND` | AEOLUS DBL L2B files |
@@ -186,12 +187,53 @@ Converters are accessed through the `wrf-ensembly-obs convert` subcommand. This 
 | `grasp-harp2` | `GRASP_HARP2` | total/fine/coarse AOD @ 440, 550, 665, 870nm | GRASP HARP2 NetCDF files |
 | `grasp-synergy` | `GRASP_SYNERGY` | total/fine/coarse AOD @ 440, 500, 550, 665, 870nm | GRASP OLCI+TROPOMI synergy NetCDF files |
 
+#### AERONET
+
+The converter reads the "all points" AOD downloads (`Date,Time,AOD_...` tables with six
+preamble lines). Per observation it records:
+
+- `value_uncertainty`: `sqrt(0.01² + triplet_variability²)`, i.e. the nominal AERONET AOD
+  uncertainty added in quadrature with the triplet variability of the matching
+  wavelength. A missing triplet leaves just the 0.01 floor.
+- `metadata`: `site_name`, `instrument_number`, `data_quality_level`,
+  `last_date_processed`, `solar_zenith_angle`, `optical_air_mass`, `triplet_variability`,
+  `angstrom_440_870`, `angstrom_500_870`, `exact_wavelength_um`, `n_wavelengths`. Fields
+  flagged as missing (`-999`) in the source file become nulls.
+
+The triplet variability and exact wavelength are per-quantity, so the same file row
+yields different values for `AOD_380nm` and `AOD_500nm`.
+
+#### AERONET SDA
+
+The SDA (Spectral Deconvolution Algorithm) product splits the 500nm total AOD into fine
+and coarse mode contributions. The files look like the direct-sun downloads (six preamble
+lines, then a header row) but share none of their column names, hence the separate
+converter. It is registered under a distinct instrument, `AERONET_SDA`, so that its
+`AOD_500nm` stays separable from the direct-sun one when files are joined.
+
+- Quantities: `AOD_500nm` (`tau_a`), `AOD_Fine_500nm` (`tau_f`), `AOD_Coarse_500nm`
+  (`tau_c`), all three by default. Rows where the retrieval is missing (`-999`) are
+  dropped per quantity, so a file may yield more total than fine/coarse observations.
+- `value_uncertainty`: `sqrt(0.01² + reported_error²)`, where the reported error is the
+  2nd order regression fit error for the total AOD and the RMSE for the fine/coarse
+  modes. Those go down to 1e-6 on their own, so the 0.01 nominal AERONET uncertainty acts
+  as a floor. A missing error leaves just the floor.
+- `metadata`: `site_name`, `instrument_number`, `data_quality_level`,
+  `last_date_processed`, `solar_zenith_angle`, `air_mass`, `site_elevation_m`,
+  `measurement_type`, `angstrom_total_500`, `angstrom_fine_500`, `fine_mode_fraction`,
+  `fine_mode_fraction_rmse`, `n_wavelengths`, `exact_wavelength_um`, and the per-quantity
+  `reported_error`. Fields flagged as missing (`-999`) become nulls.
+
 ### Using Converters
 
 ```bash
-# Convert AERONET data (specify quantities with --quantity)
-wrf-ensembly-obs convert aeronet input_files/*.lev20 output.parquet \
-  --quantity AOD_500nm --quantity AOD_550nm
+# Convert AERONET data (specify quantities with --quantities)
+wrf-ensembly-obs convert aeronet input_file.lev20 output.parquet \
+  --quantities AOD_500nm --quantities AOD_550nm
+
+# Convert AERONET SDA data (all three modes by default)
+wrf-ensembly-obs convert aeronet-sda input_file.ONEILL_lev20 output.parquet \
+  --quantities AOD_Fine_500nm --quantities AOD_Coarse_500nm
 
 # Convert AEOLUS L2A data
 wrf-ensembly-obs convert aeolus-l2a input.DBL output.parquet
@@ -457,7 +499,8 @@ spatial_resolution = 1.0
 
 | Command | Description |
 |---------|-------------|
-| `aeronet INPUT OUTPUT [--quantity Q]` | Convert AERONET `.lev20` files |
+| `aeronet INPUT OUTPUT [--quantities Q]` | Convert AERONET `.lev20` files |
+| `aeronet-sda INPUT OUTPUT [--quantities Q]` | Convert AERONET SDA `.ONEILL_lev20` files |
 | `remotap-spexone INPUT OUTPUT` | Convert REMOTAP SPEXONE NetCDF files |
 | `aeolus-l2a INPUT OUTPUT [--mle/--no-mle] [--sca/--no-sca] [--ael-pro/--no-ael-pro]` | Convert AEOLUS L2A files |
 | `aeolus-l2b INPUT OUTPUT` | Convert AEOLUS L2B HLOS wind files |
