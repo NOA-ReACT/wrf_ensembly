@@ -326,6 +326,24 @@ def get_wrf_cartopy_crs(domain: DomainControlConfig):
         standard_parallels=(domain.truelat1, domain.truelat2),
     )
 
+def get_wrf_cartopy_crs_from_ds_attrs(ds: xr.Dataset):
+    """
+    Same as `get_wrf_cartopy_crs` but reads the required values from the attributes
+    of a dataset. Useful if you have opened an output file with xarray and just want to
+    get the right projection.
+    """
+
+    required_attrs = ["STAND_LON", "CEN_LAT", "TRUELAT1", "TRUELAT2"]
+    for attr in required_attrs:
+        if attr not in ds.attrs:
+            raise ValueError(f"{attr} must be set in the dataset attributes")
+
+    return ccrs.LambertConformal(
+        central_longitude=ds.attrs["STAND_LON"],
+        central_latitude=ds.attrs["CEN_LAT"],
+        standard_parallels=(ds.attrs["TRUELAT1"], ds.attrs["TRUELAT2"]),
+    )
+
 
 def get_spatial_domain_bounds(wrfinput_path: Path) -> tuple[float, float, float, float]:
     """
