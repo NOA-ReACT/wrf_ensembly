@@ -197,11 +197,46 @@ preamble lines). Per observation it records:
   wavelength. A missing triplet leaves just the 0.01 floor.
 - `metadata`: `site_name`, `instrument_number`, `data_quality_level`,
   `last_date_processed`, `solar_zenith_angle`, `optical_air_mass`, `triplet_variability`,
-  `angstrom_440_870`, `angstrom_500_870`, `exact_wavelength_um`, `n_wavelengths`. Fields
-  flagged as missing (`-999`) in the source file become nulls.
+  `angstrom_440_870`, `angstrom_500_870`, `exact_wavelength_um`, `n_wavelengths`,
+  `derived`. Fields flagged as missing (`-999`) in the source file become nulls.
 
 The triplet variability and exact wavelength are per-quantity, so the same file row
 yields different values for `AOD_380nm` and `AOD_500nm`.
+
+##### Derived 500nm observations
+
+Plenty of sites carry 490nm and 510nm channels instead of a 500nm one. Since 500nm is the
+wavelength wired into DART, those rows would otherwise be lost, so the converter fills
+them in: whenever a row has no measured `AOD_500nm` but both neighbours are present, it
+interpolates onto 500nm with an Ångström exponent fitted to the pair. The 20nm lever means
+this is interpolation throughout, never extrapolation. Pass `--no-derive-500nm` to turn it
+off; requesting quantities that don't include `AOD_500nm` disables it implicitly.
+
+With `l` the per-row wavelengths (the exact ones the file reports, or the nominal channel
+values where it doesn't) and `t` the AODs:
+
+```
+alpha     = -ln(t510 / t490) / ln(l510 / l490)
+lever_arm = ln(l500 / l490)
+weight    = lever_arm / ln(l510 / l490)
+value     = t490 * exp(-alpha * lever_arm)
+```
+
+AERONET's channel errors share a calibration, so the two source uncertainties add linearly
+rather than in quadrature: `(1 - weight) * sigma490 + weight * sigma510`. The weights sum
+to one, which keeps the result between the two channel errors and never below the 0.01
+floor. Rows where either source is non-positive are skipped, as the log-space fit can't
+take them.
+
+A measured channel always wins — derivation only ever fills gaps. Derived observations are
+marked two ways:
+
+- `metadata.derived`, a boolean present on *every* AERONET observation. This is the one to
+  filter on: nested metadata is dropped on the way into DART (see `format_obs_meta`) and
+  the DuckDB metadata filters only see top-level keys.
+- `metadata.derivation`, a nested block recording `method`, the two `sources` with their
+  values and uncertainties, the fitted `angstrom` exponent and the `lever_arm`. It survives
+  into the parquet/DuckDB layer for provenance but does not reach the obs_seq file.
 
 #### AERONET SDA
 
