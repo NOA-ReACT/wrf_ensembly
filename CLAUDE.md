@@ -60,7 +60,7 @@ wrf-ensembly $EXPERIMENT_PATH group command
 3. Combine analysis with next cycle's IC/BC
 4. Repeat
 
-**State Tracking**: Experiment progress is tracked in a SQLite database (`status.db`) via the `ExperimentDatabase` class, recording which members have advanced and filter completion status.
+**State Tracking**: Experiment progress is tracked in the `status/` directory via the `ExperimentState` class (`experiment/state_store.py`), recording which members have advanced and filter completion status. It is one small file per fact, each with a single writer, written atomically with no locking — members advance as separate jobs on separate nodes, so any lock-based store is unreliable on the shared filesystems these experiments run on. Cycle state is derived from these files rather than stored, so it cannot go stale (see `experiment/state_machine.py`).
 
 ### Key Modules
 
@@ -101,7 +101,9 @@ Plugin system for postprocessing data. Base class is `DataProcessor` with abstra
 ```
 experiment_dir/
 ├── config.toml              # Single config file
-├── status.db                # SQLite status tracking
+├── status/                  # Status tracking, one file per fact
+│   ├── experiment.json      # Current cycle
+│   └── cycles/cycle_NNN/    # Member advancement + completion markers
 ├── data/                    # Final outputs
 │   ├── analysis/
 │   ├── forecasts/

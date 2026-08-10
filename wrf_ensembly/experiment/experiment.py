@@ -1,11 +1,13 @@
 import datetime as dt
 import json
 import os
+from collections.abc import Iterable, Iterator
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 import netCDF4
-import numpy as np
 import xarray as xr
 
 from wrf_ensembly import (
@@ -21,8 +23,7 @@ from wrf_ensembly import (
 from wrf_ensembly.console import logger
 from wrf_ensembly.fortran_namelists import write_namelist
 
-from .database import ExperimentDatabase
-from .dataclasses import MemberStatus, RuntimeStatistics
+from .dataclasses import MemberStatus
 from .inflation import InflationConfig
 from .observations import ExperimentObservations
 from .paths import ExperimentPaths
@@ -32,138 +33,28 @@ from .state_machine import (
     ExperimentStateMachine,
     StateTransition,
 )
+from .state_store import ExperimentState
 
 
-def _generate_perturbations_for_cycle(
-    cycle_i: int,
-    perturbations_cfg: config.PerturbationsConfig,
-    n_members: int,
-    experiment_name: str,
-    ic_path: Path,
-    diag_dir: Path,
-):
+MEMBER_VISIBILITY_TIMEOUT_S = 60.0
+"""
+How long to keep re-reading the status directory when members appear to be missing.
+
+On NFS a directory listing can be served from the attribute cache for up to `acdirmax`
+(30s by default), so a member that has just finished may not be visible to the process
+that runs the filter yet. Harmless on filesystems with coherent metadata.
+"""
+
+
+def _member_visibility_timeout() -> float:
     """
-    Generates perturbations for a given cycle and stores them in the diag directory.
-    This is a standalone function (no Experiment instance) so it can be safely pickled
-    for multiprocessing.
-
-    For cycles > 0 where all reused variables have `different_field_every_cycle=False`
-    and no new fields need generating, a symlink to cycle 0's file is created instead.
-    The midcycle taper is applied at perturbation application time rather than here.
+    Only wait for missing members inside a batch job, where the filter starts right after
+    the member jobs and can genuinely be looking at a stale directory listing. Run by
+    hand, it is much more useful to say "3/20 advanced" immediately than to hang for a
+    minute first.
     """
 
-    if len(perturbations_cfg.variables) == 0:
-        logger.warning("No perturbations defined in config, skipping")
-        return
-
-    if perturbations_cfg.seed is not None:
-        logger.warning(f"Setting random seed to {perturbations_cfg.seed}")
-        np.random.seed(perturbations_cfg.seed)
-
-    pert_dir = diag_dir / "perturbations"
-    pert_dir.mkdir(parents=True, exist_ok=True)
-    pert_file = pert_dir / f"perts_cycle_{cycle_i}.nc"
-    pert_file.unlink(missing_ok=True)
-
-    if cycle_i > 0:
-        # Check which variables need new fields vs reusing cycle 0
-        needs_new_field = any(
-            pert_config.perturb_every_cycle and pert_config.different_field_every_cycle
-            for pert_config in perturbations_cfg.variables.values()
-        )
-        needs_reuse = any(
-            pert_config.perturb_every_cycle
-            and not pert_config.different_field_every_cycle
-            for pert_config in perturbations_cfg.variables.values()
-        )
-
-        if needs_reuse and not needs_new_field:
-            # All reused variables come from cycle 0 — symlink instead of copying
-            first_cycle_pert_file = pert_dir / "perts_cycle_0.nc"
-            if not first_cycle_pert_file.exists():
-                raise FileNotFoundError(
-                    f"Perturbation file for first cycle not found at {first_cycle_pert_file}"
-                )
-            pert_file.symlink_to(first_cycle_pert_file.name)
-            logger.info(
-                f"Symlinked perturbations for cycle {cycle_i} to cycle 0 (same fields)"
-            )
-            return
-
-    # Open the first wrfinput file to get the shape of each variable
-    wrfinput = xr.open_dataset(ic_path)
-
-    # Generate the perturbation fields
-    perts = xr.Dataset()
-    for var, pert_config in perturbations_cfg.variables.items():
-        if cycle_i > 0 and (
-            not pert_config.perturb_every_cycle
-            or not pert_config.different_field_every_cycle
-        ):
-            continue
-
-        logger.debug(f"\tVariable: {var}, config: {pert_config}")
-        arr = perturbations.generate_perturbation_ensemble(
-            n_members=n_members,
-            shape=wrfinput[var].shape,
-            mean=pert_config.mean,
-            sd=pert_config.sd,
-            sigma=pert_config.gaussian_sigma,
-            boundary=pert_config.boundary,
-            min_value=pert_config.min_value,
-            max_value=pert_config.max_value,
-        )
-        perts[var] = xr.DataArray(
-            arr,
-            dims=("member", *wrfinput[var].dims),
-            coords={"member": range(n_members)},
-            attrs={"cfg": json.dumps(pert_config.__dict__)},
-        )
-
-    # For cycles > 0, also include reused variables from cycle 0
-    if cycle_i > 0:
-        first_cycle_pert_file = pert_dir / "perts_cycle_0.nc"
-        if not first_cycle_pert_file.exists():
-            raise FileNotFoundError(
-                f"Perturbation file for first cycle not found at {first_cycle_pert_file}"
-            )
-        first_cycle_perts = xr.open_dataset(first_cycle_pert_file)
-        for var, pert_config in perturbations_cfg.variables.items():
-            if (
-                not pert_config.perturb_every_cycle
-                or pert_config.different_field_every_cycle
-            ):
-                continue
-
-            logger.info(f"Reusing perturbation field from first cycle for {var}")
-            if var not in first_cycle_perts:
-                raise ValueError(
-                    f"Variable {var} not found in perturbation file for first cycle"
-                )
-            perts[var] = first_cycle_perts[var]
-            perts[var].attrs = first_cycle_perts[var].attrs
-
-    # Write the dataset to a netCDF file
-    encoding = {
-        var: {
-            "zlib": True,
-            "complevel": 5,
-            "dtype": "float32",
-            "least_significant_digit": 3,
-        }
-        for var in perts.data_vars
-    }
-    # Set chunksize for all variables: 1 on member and time, full size on rest
-    for var in perts.data_vars:
-        chunks = [1, 1] + [s for s in perts[var].shape[2:]]
-        encoding[var]["chunksizes"] = chunks
-    perts.attrs["experiment_name"] = experiment_name
-    perts.attrs["cycle"] = cycle_i
-
-    logger.info(f"Writing perturbations for {cycle_i} to {pert_file}")
-    perts.to_netcdf(pert_file, encoding=encoding)
-
-    wrfinput.close()
+    return MEMBER_VISIBILITY_TIMEOUT_S if "SLURM_JOB_ID" in os.environ else 0.0
 
 
 class Experiment:
@@ -173,11 +64,10 @@ class Experiment:
 
     cfg: config.Config
     cycles: list[cycling.CycleInformation]
-    current_cycle_i: int
     paths: ExperimentPaths
     members: list[MemberStatus] = []
 
-    db: ExperimentDatabase
+    state: ExperimentState
     obs: ExperimentObservations
     inflation: InflationConfig
     state_machine: ExperimentStateMachine
@@ -186,68 +76,48 @@ class Experiment:
         self.cfg = config.read_config(experiment_path / "config.toml")
         self.cycles = cycling.get_cycle_information(self.cfg)
 
-        # Initialize database
-        db_path = experiment_path / "status.db"
-        self.db = ExperimentDatabase(db_path)
-
-        # Initialize members in database and load status
-        with self.db as db_conn:
-            db_conn.initialize_members(self.cfg.assimilation.n_members)
-
-        # Read experiment status from database
-        self.load_status_from_db()
-
         self.paths = ExperimentPaths(experiment_path, self.cfg)
+        self.state = ExperimentState(self.paths, self.cfg.assimilation.n_members)
+
+        # Read the experiment status. Nothing is written here.
+        self.load_status()
+
         self.obs = ExperimentObservations(self.cfg, self.cycles, self.paths)
         self.inflation = InflationConfig.from_config(
             self.cfg, self.paths.data_inflation, self.paths.dart_work_dir
         )
 
-    def load_status_from_db(self):
-        """Load the status of the experiment from the database"""
+    def load_status(self):
+        """Load the status of the experiment from the status files"""
 
-        with self.db as db_conn:
-            # Get experiment state (ignore legacy filter_run/analysis_run)
-            self.current_cycle_i, _, _, cycle_state_str = db_conn.get_experiment_state()
-
-            # Get member status
-            members_data = db_conn.get_all_members_status()
-            self.members = []
-
-            for member_i, advanced in members_data:
-                # Get runtime statistics for this member
-                runtime_stats = db_conn.get_member_runtime_statistics(member_i)
-
-                self.members.append(
-                    MemberStatus(
-                        i=member_i, advanced=advanced, runtime_statistics=runtime_stats
-                    )
-                )
-
-        # Ensure we have the right number of members
-        while len(self.members) < self.cfg.assimilation.n_members:
-            member_i = len(self.members)
-            self.members.append(
-                MemberStatus(i=member_i, advanced=False, runtime_statistics=[])
-            )
-
-        self.members.sort(key=lambda m: m.i)
-
-        # Initialize state machine
         self.state_machine = ExperimentStateMachine(
-            n_cycles=len(self.cycles), current_cycle_idx=self.current_cycle_i
+            state=self.state,
+            n_cycles=len(self.cycles),
+            n_members=self.cfg.assimilation.n_members,
+            current_cycle_idx=self.state.get_current_cycle(),
         )
 
-        # Load the current cycle state
-        try:
-            cycle_state = CycleState(cycle_state_str)
-        except ValueError:
-            logger.warning(
-                f"Invalid cycle state '{cycle_state_str}' in database, using INITIALIZED"
-            )
-            cycle_state = CycleState.INITIALIZED
+        advanced = self.state.get_advanced_members(self.current_cycle_i)
+        self.members = [
+            MemberStatus(i=i, advanced=i in advanced)
+            for i in range(self.cfg.assimilation.n_members)
+        ]
 
-        self.state_machine.current_cycle.current_state = cycle_state
+    @property
+    def current_cycle_i(self) -> int:
+        """Which cycle the experiment is currently on"""
+
+        return self.state_machine.current_cycle_idx
+
+    @current_cycle_i.setter
+    def current_cycle_i(self, cycle: int):
+        """
+        Move the experiment to a cycle, in memory and on disk. The state machine reads
+        this too, so the two can never drift apart.
+        """
+
+        self.state_machine.current_cycle_idx = cycle
+        self.state.set_current_cycle(cycle)
 
     @property
     def filter_run(self) -> bool:
@@ -265,50 +135,20 @@ class Experiment:
         state = self.state_machine.current_cycle.current_state
         return state in (CycleState.ANALYSIS_COMPLETE, CycleState.CYCLE_COMPLETE)
 
-    def save_status_to_db(self):
-        """Save the current status of the experiment to the database"""
-
-        with self.db as db_conn:
-            # Get current cycle state from state machine
-            cycle_state_str = self.state_machine.current_cycle.current_state.value
-
-            # Save experiment state (filter_run/analysis_run derived from state machine)
-            db_conn.set_experiment_state(
-                self.current_cycle_i,
-                self.filter_run,  # Property, derived from state
-                self.analysis_run,  # Property, derived from state
-                cycle_state_str,
-            )
-
-            # Save member status in batch
-            member_statuses = [(member.i, member.advanced) for member in self.members]
-            db_conn.set_members_advanced_batch(member_statuses)
-
     def set_next_cycle(self):
         """
         Update status to the next cycle
         """
 
-        self.current_cycle_i += 1
-        if self.current_cycle_i >= len(self.cycles):
+        next_cycle_i = self.current_cycle_i + 1
+        if next_cycle_i >= len(self.cycles):
             raise ValueError("No more cycles to run")
 
-        # Advance state machine to next cycle and reset to INITIALIZED
-        self.state_machine.advance_to_next_cycle()
-        self.state_machine.current_cycle.current_state = CycleState.INITIALIZED
-
-        with self.db as db_conn:
-            # Reset all members' advanced status in database
-            db_conn.reset_members_advanced()
-
-            # Update local member status
-            for member in self.members:
-                member.advanced = False
-
-            # Save experiment state to database (filter_run/analysis_run derived from state)
-            db_conn.set_experiment_state(
-                self.current_cycle_i, False, False, "initialized"
-            )
+        # No member status to reset: the next cycle has its own directory, which is
+        # empty until its members start advancing.
+        self.current_cycle_i = next_cycle_i
+        for member in self.members:
+            member.advanced = False
 
     def setup_dart(self):
         """Prepare DART working directory by writing namelist and linking files"""
@@ -338,18 +178,56 @@ class Experiment:
             utils.copy(source_path, target_path)
             logger.info(f"Copied extra DART file from {source_path} to {target_path}")
 
+    def _perturbation_worker_args(self) -> dict[str, Any]:
+        """
+        The arguments `perturbations.generate_perturbations_for_cycle` needs, pulled out
+        of the experiment. Kept in one place because the same set has to be handed to
+        worker processes, which cannot be given `self`.
+        """
+
+        return {
+            "perturbations_cfg": self.cfg.perturbations,
+            "n_members": self.cfg.assimilation.n_members,
+            "experiment_name": self.cfg.metadata.name,
+            "ic_path": self.paths.ic_path(0, 0),
+            "diag_dir": self.paths.data_diag,
+        }
+
     def generate_perturbations(self, cycle_i: int):
         """
         Generates perturbations for a given cycle and stores them in `data/diag/perturbations`.
         """
-        _generate_perturbations_for_cycle(
-            cycle_i=cycle_i,
-            perturbations_cfg=self.cfg.perturbations,
-            n_members=self.cfg.assimilation.n_members,
-            experiment_name=self.cfg.metadata.name,
-            ic_path=self.paths.ic_path(0, 0),
-            diag_dir=self.paths.data_diag,
+
+        perturbations.generate_perturbations_for_cycle(
+            cycle_i=cycle_i, **self._perturbation_worker_args()
         )
+
+    def generate_perturbations_for_cycles(
+        self, cycle_indices: Iterable[int], jobs: int
+    ) -> Iterator[int]:
+        """
+        Generates perturbations for several cycles in parallel, yielding each cycle index
+        as it finishes so the caller can record progress one cycle at a time.
+
+        Args:
+            cycle_indices: Which cycles to generate perturbations for
+            jobs: How many cycles to process in parallel
+
+        Yields:
+            Each cycle index, once its perturbations have been written
+        """
+
+        cycle_indices = list(cycle_indices)
+        worker = partial(
+            perturbations.generate_perturbations_for_cycle,
+            **self._perturbation_worker_args(),
+        )
+
+        with ProcessPoolExecutor(max_workers=jobs, max_tasks_per_child=1) as executor:
+            results = executor.map(worker, cycle_indices)
+            for cycle_i in cycle_indices:
+                next(results)  # Raises here if the worker failed
+                yield cycle_i
 
     def apply_perturbations(self, member_i: int):
         """
@@ -550,31 +428,14 @@ class Experiment:
             logger.info(f"Removing first output file {first_output}")
             first_output.unlink()
 
-        # Update member status using database context manager
-        # The database handles concurrency internally
-        self.members[member_idx].advanced = True
-
-        # Add runtime statistics and update member status in single transaction
-        with self.db as db_conn:
-            db_conn.add_runtime_statistics(
-                member_idx,
-                self.current_cycle_i,
-                start_time,
-                end_time,
-                int((end_time - start_time).total_seconds()),
-            )
-
-            db_conn.set_member_advanced(member_idx, True)
-
-        # Update local runtime statistics
-        self.members[member_idx].runtime_statistics.append(
-            RuntimeStatistics(
-                cycle=self.current_cycle_i,
-                start=start_time,
-                end=end_time,
-                duration_s=int((end_time - start_time).total_seconds()),
-            )
+        self.state.set_member_advanced(
+            self.current_cycle_i,
+            member_idx,
+            start=start_time,
+            end=end_time,
+            duration_s=int((end_time - start_time).total_seconds()),
         )
+        self.members[member_idx].advanced = True
 
         return True
 
@@ -589,35 +450,16 @@ class Experiment:
             True if the filter was run successfully
         """
 
-        n_advanced = sum(1 for m in self.members if m.advanced)
-
-        # Auto-recover: if in ADVANCING_MEMBERS and all members done, transition
-        if (
-            self.state_machine.current_cycle.current_state
-            == CycleState.ADVANCING_MEMBERS
-        ):
-            if n_advanced == self.cfg.assimilation.n_members:
-                self.state_machine.current_cycle.transition(
-                    StateTransition.ALL_MEMBERS_ADVANCED,
-                    n_advanced,
-                    self.cfg.assimilation.n_members,
-                )
-                self.save_status_to_db()
-                logger.info("All members advanced - starting filter")
-            else:
-                raise ExperimentStateError(
-                    f"Only {n_advanced}/{self.cfg.assimilation.n_members} members advanced"
-                )
+        # Each member advanced in its own job, and on NFS the status files of the last
+        # ones to finish may not be visible here yet. Let the listing settle before the
+        # check below decides the ensemble is incomplete. Returns immediately unless we
+        # are in a batch job and members are actually missing.
+        self.wait_for_all_members()
 
         # Validate state
-        can_run, error = self.state_machine.can_run_filter(
-            self.current_cycle_i, n_advanced, self.cfg.assimilation.n_members
-        )
+        can_run, error = self.state_machine.can_run_filter(self.current_cycle_i)
         if not can_run:
-            req_actions = self.state_machine.current_cycle.get_required_actions()
-            raise ExperimentStateError(
-                f"Cannot run filter: {error}\nNext required action: {req_actions}"
-            )
+            raise ExperimentStateError(error)
 
         # Skip filter if no observation file and no inflation enabled
         obs_file = self.paths.obs / f"cycle_{self.current_cycle_i:03}.obs_seq"
@@ -700,7 +542,6 @@ class Experiment:
 
         # Transition state
         self.state_machine.current_cycle.transition(StateTransition.FILTER_COMPLETE)
-        self.save_status_to_db()
 
         return True
 
@@ -801,7 +642,33 @@ class Experiment:
     @property
     def all_members_advanced(self) -> bool:
         """
-        Check if all ensemble members have been advanced
+        Check if all ensemble members have been advanced.
+
+        Read from disk rather than from `self.members`, since members advance in other
+        processes and the copy loaded at startup goes stale as soon as they do.
+
+        Returns immediately; use `wait_for_all_members()` before gating real work on the
+        result.
         """
 
-        return all(m.advanced for m in self.members)
+        return (
+            self.state.count_advanced(self.current_cycle_i)
+            >= self.cfg.assimilation.n_members
+        )
+
+    def wait_for_all_members(self) -> bool:
+        """
+        Like `all_members_advanced`, but gives a filesystem that is serving a stale
+        directory listing a chance to catch up first (see MEMBER_VISIBILITY_TIMEOUT_S).
+
+        Use this in commands that refuse to run unless the ensemble is complete.
+        """
+
+        return (
+            self.state.count_advanced(
+                self.current_cycle_i,
+                expect=self.cfg.assimilation.n_members,
+                timeout=_member_visibility_timeout(),
+            )
+            >= self.cfg.assimilation.n_members
+        )

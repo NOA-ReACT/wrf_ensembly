@@ -249,6 +249,12 @@ All commands will take the path to the experiment directory as the first argumen
     :prog_name: wrf-ensembly EXPERIMENT_PATH status set-experiment
     :depth: 2
 
+::: mkdocs-click
+    :module: wrf_ensembly.commands.status
+    :command: reconcile
+    :prog_name: wrf-ensembly EXPERIMENT_PATH status reconcile
+    :depth: 2
+
 ## SLURM
 
 ::: mkdocs-click

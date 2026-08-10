@@ -57,7 +57,7 @@ def create(experiment_path: Path, template: str):
 
     exp = experiment.Experiment(experiment_path)
     exp.paths.create_directories()
-    exp.save_status_to_db()
+    exp.state.initialize()
 
     logger.info("Experiment created successfully!")
 

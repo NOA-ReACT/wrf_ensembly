@@ -1,7 +1,6 @@
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
-from functools import partial
 from pathlib import Path
 from typing import Optional
 
@@ -11,8 +10,7 @@ import netCDF4
 from wrf_ensembly import experiment, utils
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
-from wrf_ensembly.experiment import CycleState, ExperimentStateError, StateTransition
-from wrf_ensembly.experiment.experiment import _generate_perturbations_for_cycle
+from wrf_ensembly.experiment import ExperimentStateError, StateTransition
 
 
 @click.group(name="ensemble", cls=GroupWithStartEndPrint)
@@ -131,10 +129,10 @@ def setup_from_other_experiment(
 
         # Set member as advanced
         exp.members[i].advanced = True
+        exp.state.set_member_advanced(cycle, i)
 
     # Update experiment status & metadata
     exp.current_cycle_i = cycle
-    exp.save_status_to_db()
 
     logger.info(f"Linked to {other_exp}, cycle = {cycle}.")
     logger.info("Use the `cycle` command to advance this experiment to the next cycle")
@@ -169,8 +167,7 @@ def generate_perturbations(experiment_path: Path, jobs: Optional[int], force: bo
     logger.info(f"Using {jobs} jobs")
 
     # Check if perturbations for cycle 0 have already been generated
-    with exp.db as db_conn:
-        cycle_0_done = db_conn.is_optional_operation_complete(0, operation_name)
+    cycle_0_done = exp.state.is_optional_operation_complete(0, operation_name)
 
     if cycle_0_done and not force:
         logger.warning("Perturbations already generated for all cycles")
@@ -187,28 +184,17 @@ def generate_perturbations(experiment_path: Path, jobs: Optional[int], force: bo
     exp.generate_perturbations(0)
 
     # Mark cycle 0 as done
-    with exp.db as db_conn:
-        db_conn.mark_optional_operation_complete(0, operation_name)
+    exp.state.mark_optional_operation_complete(0, operation_name)
 
     # Now, if required, generate perturbations for all cycles
     if len(exp.cycles) > 1 and any(
         [var.perturb_every_cycle for var in exp.cfg.perturbations.variables.values()]
     ):
         logger.info("Generating perturbations for all cycles...")
-        worker = partial(
-            _generate_perturbations_for_cycle,
-            perturbations_cfg=exp.cfg.perturbations,
-            n_members=exp.cfg.assimilation.n_members,
-            experiment_name=exp.cfg.metadata.name,
-            ic_path=exp.paths.ic_path(0, 0),
-            diag_dir=exp.paths.data_diag,
-        )
-        with ProcessPoolExecutor(max_workers=jobs, max_tasks_per_child=1) as executor:
-            res = executor.map(worker, range(1, len(exp.cycles)))
-            for cycle_i in range(1, len(exp.cycles)):
-                next(res)  # Process one at a time to mark them
-                with exp.db as db_conn:
-                    db_conn.mark_optional_operation_complete(cycle_i, operation_name)
+        for cycle_i in exp.generate_perturbations_for_cycles(
+            range(1, len(exp.cycles)), jobs
+        ):
+            exp.state.mark_optional_operation_complete(cycle_i, operation_name)
 
     logger.info("Perturbation generation complete")
 
@@ -239,10 +225,9 @@ def apply_perturbations(experiment_path: Path, jobs: Optional[int], force: bool)
 
     # Check if perturbations have already been applied for this cycle
     operation_name = "apply_perturbations"
-    with exp.db as db_conn:
-        already_done = db_conn.is_optional_operation_complete(
-            exp.current_cycle_i, operation_name
-        )
+    already_done = exp.state.is_optional_operation_complete(
+        exp.current_cycle_i, operation_name
+    )
 
     if already_done and not force:
         logger.warning(f"Perturbations already applied for cycle {exp.current_cycle_i}")
@@ -265,8 +250,7 @@ def apply_perturbations(experiment_path: Path, jobs: Optional[int], force: bool)
             pass
 
     # Mark as completed
-    with exp.db as db_conn:
-        db_conn.mark_optional_operation_complete(exp.current_cycle_i, operation_name)
+    exp.state.mark_optional_operation_complete(exp.current_cycle_i, operation_name)
 
     logger.info(f"Perturbations applied for cycle {exp.current_cycle_i}")
 
@@ -338,11 +322,6 @@ def advance_member(
         )
         sys.exit(1)
 
-    if exp.state_machine.current_cycle.current_state == CycleState.INITIALIZED:
-        exp.state_machine.current_cycle.transition(StateTransition.START_ADVANCING)
-        exp.save_status_to_db()
-        logger.info("Started advancing members")
-
     # Determine number of cores
     if cores is None:
         if "SLURM_NTASKS" in os.environ:
@@ -354,24 +333,15 @@ def advance_member(
 
     # Run WRF!
     success = exp.advance_member(member, cores=cores)
-
-    if success:
-        # Check if all members are now advanced
-        n_advanced = sum(1 for m in exp.members if m.advanced)
-        if n_advanced == exp.cfg.assimilation.n_members:
-            # Transition to MEMBERS_ADVANCED
-            try:
-                exp.state_machine.current_cycle.transition(
-                    StateTransition.ALL_MEMBERS_ADVANCED,
-                    n_advanced,
-                    exp.cfg.assimilation.n_members,
-                )
-                exp.save_status_to_db()
-                logger.info("All members advanced - ready for filter")
-            except ValueError as e:
-                logger.warning(f"Could not transition to MEMBERS_ADVANCED: {e}")
-    else:
+    if not success:
         sys.exit(1)
+
+    # Nothing to transition: the cycle state is derived from the member files, so it
+    # becomes MEMBERS_ADVANCED on its own once the last member writes its own file.
+    n_advanced = exp.state.count_advanced(exp.current_cycle_i)
+    logger.info(f"{n_advanced}/{exp.cfg.assimilation.n_members} members advanced")
+    if n_advanced >= exp.cfg.assimilation.n_members:
+        logger.info("All members advanced - ready for filter")
 
 
 @ensemble_cli.command()
@@ -405,14 +375,9 @@ def analysis(experiment_path: Path):
     logger.setup("ensemble-analysis", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    from wrf_ensembly.experiment import StateTransition
-
     can_run, error = exp.state_machine.can_run_analysis(exp.current_cycle_i)
     if not can_run:
-        logger.error(f"Cannot run analysis: {error}")
-        logger.info(
-            f"Next required action: {exp.state_machine.current_cycle.get_required_actions()}"
-        )
+        logger.error(error)
         sys.exit(1)
 
     cycle_i = exp.current_cycle_i
@@ -456,7 +421,6 @@ def analysis(experiment_path: Path):
             nc_analysis.cycle_end = cycle.end.strftime("%Y-%m-%d_%H:%M:%S")
 
     exp.state_machine.current_cycle.transition(StateTransition.ANALYSIS_COMPLETE)
-    exp.save_status_to_db()
     logger.info("Analysis complete - ready to cycle")
 
 
@@ -476,30 +440,19 @@ def cycle(experiment_path: Path, jobs: int | None):
     logger.setup("cycle", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    if not exp.all_members_advanced:
-        logger.error("Not all members have advanced to the next cycle, cannot cycle!")
-        sys.exit(1)
-
-    # If all members are advanced but state machine is still in ADVANCING_MEMBERS
-    # (race condition when last two members finish simultaneously), recover here.
-    if exp.state_machine.current_cycle.current_state == CycleState.ADVANCING_MEMBERS:
-        n_advanced = sum(1 for m in exp.members if m.advanced)
-        exp.state_machine.current_cycle.transition(
-            StateTransition.ALL_MEMBERS_ADVANCED,
-            n_advanced,
-            exp.cfg.assimilation.n_members,
+    if not exp.wait_for_all_members():
+        n_advanced = exp.state.count_advanced(exp.current_cycle_i)
+        logger.error(
+            f"Only {n_advanced}/{exp.cfg.assimilation.n_members} members have advanced, "
+            "cannot cycle!"
         )
-        exp.save_status_to_db()
-        logger.info("All members were advanced, transitioning to MEMBERS_ADVANCED")
+        sys.exit(1)
 
     can_cycle, use_forecast, error = exp.state_machine.can_cycle_to_next(
         exp.current_cycle_i
     )
     if not can_cycle:
-        logger.error(f"Cannot cycle: {error}")
-        logger.info(
-            f"Next required action: {exp.state_machine.current_cycle.get_required_actions()}"
-        )
+        logger.error(error)
         sys.exit(1)
 
     if use_forecast:
@@ -528,11 +481,9 @@ def cycle(experiment_path: Path, jobs: int | None):
             pass
 
     exp.state_machine.current_cycle.transition(StateTransition.CYCLE_COMPLETE)
-    exp.save_status_to_db()
 
-    # Update experiment status - set_next_cycle will handle state machine reset
+    # Move the experiment pointer to the next cycle, which starts out empty
     exp.set_next_cycle()
-    exp.save_status_to_db()
     logger.info(f"Cycled to cycle {next_cycle_i}")
 
 
@@ -559,27 +510,19 @@ def reset_cycle(experiment_path: Path, cycle: Optional[int]):
     logger.setup("ensemble-reset-cycle", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    from wrf_ensembly.experiment import CycleState
-
     cycle_idx = cycle if cycle is not None else exp.current_cycle_i
 
     if cycle_idx < 0 or cycle_idx >= len(exp.cycles):
         logger.error(f"Invalid cycle index {cycle_idx}")
         sys.exit(1)
 
-    current_state = exp.state_machine.get_cycle(cycle_idx).current_state
-
+    cycle_machine = exp.state_machine.get_cycle(cycle_idx)
     logger.warning(
-        f"Resetting cycle {cycle_idx} from state {current_state.value} to INITIALIZED"
+        f"Resetting cycle {cycle_idx} from state {cycle_machine.current_state.value} to INITIALIZED"
     )
 
-    # Force reset to INITIALIZED
-    exp.state_machine.get_cycle(cycle_idx).current_state = CycleState.INITIALIZED
+    # Removes the cycle's markers and member files, affecting only this cycle
+    cycle_machine.reset()
 
-    # Reset member advancement tracking
-    with exp.db as db_conn:
-        db_conn.reset_members_advanced()
-
-    exp.save_status_to_db()
     logger.info(f"Cycle {cycle_idx} reset to INITIALIZED state")
     logger.info("You may need to manually clean up files before re-running this cycle")

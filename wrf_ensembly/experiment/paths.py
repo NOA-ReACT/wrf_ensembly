@@ -29,6 +29,11 @@ class ExperimentPaths:
         self.obs_temp = self.obs / "temp"  # Temporary files during processing
         self.obs_db = experiment_path / "observations.duckdb"
 
+        # Experiment status, stored as a tree of small files (see state_store.py)
+        self.status = experiment_path / "status"
+        self.status_experiment_file = self.status / "experiment.json"
+        self.status_cycles = self.status / "cycles"
+
         self.plots = experiment_path / "plots"
 
         # Work directories
@@ -82,6 +87,32 @@ class ExperimentPaths:
 
         self.logs.mkdir(exist_ok=True)
         self.logs_slurm.mkdir()
+
+        self.status.mkdir(exist_ok=True)
+        self.status_cycles.mkdir(exist_ok=True)
+
+    def cycle_status_path(self, cycle: int) -> Path:
+        """Directory holding all status files for a given cycle"""
+        return self.status_cycles / f"cycle_{cycle:03d}"
+
+    def cycle_members_path(self, cycle: int) -> Path:
+        """Directory holding the per-member status files for a given cycle"""
+        return self.cycle_status_path(cycle) / "members"
+
+    def member_status_path(self, cycle: int, member: int) -> Path:
+        """Status file for one member of one cycle. Written only by that member's job."""
+        return self.cycle_members_path(cycle) / f"member_{member:02d}.json"
+
+    def cycle_marker_path(self, cycle: int, name: str) -> Path:
+        """
+        Marker file for a completed step of a cycle (e.g. `filter_complete`). The file
+        existing means the step is done.
+        """
+        return self.cycle_status_path(cycle) / name
+
+    def cycle_op_path(self, cycle: int, name: str) -> Path:
+        """Marker file for a completed optional operation (e.g. `apply_perturbations`)"""
+        return self.cycle_status_path(cycle) / "ops" / name
 
     def member_path(self, i: int) -> Path:
         """

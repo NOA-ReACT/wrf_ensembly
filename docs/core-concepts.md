@@ -159,7 +159,36 @@ If for any reason the experiment is interrupted, it can be resumed without re-ru
 
 ## Experiment status tracking
 
-The status of the experiment is tracked through a `status.db` file, which stores the current cycle, which members have been advanced (i.e. WRF successfully completed) and whether assimilation filter has been completed. It also stores some statistics about how long it took to advance each member to the next cycle. The file is an sqlite database which can be inspected with any sqlite client, but you also have a set of commands available (`wrf-ensembly status`). More info in the [Status](./status.md) section.
+The status of the experiment is tracked through the `status/` directory, which stores the current cycle, which members have been advanced (i.e. WRF successfully completed), whether the assimilation filter has been completed, and some statistics about how long it took to advance each member. There is a set of commands available for working with it (`wrf-ensembly status`), described in the [Status](./usage.md#status) section.
+
+The layout is one small file per fact:
+
+```
+status/
+  experiment.json                       # {"version": 1, "current_cycle": 5}
+  cycles/cycle_000/
+    members/member_00.json              # advancement and runtime of one member
+    filter_complete                     # marker files; existence means done
+    analysis_complete
+    cycle_complete
+    ops/apply_perturbations             # optional operation markers
+```
+
+Every file has exactly one writer and is written atomically, so no locking is involved anywhere. This matters because ensemble members advance as separate jobs on separate nodes, often on a shared filesystem where the locking that a database needs is unreliable or slow. Members writing their own files in parallel cannot collide, and everything else is written by a single serial command.
+
+The state of a cycle is not stored directly, it is worked out from these files: a cycle with no member files is `initialized`, one with some is `advancing_members`, one where every member has a file is `members_advanced`, and beyond that the marker files take over. This means the status can never disagree with itself, and a member finishing in another process is picked up immediately.
+
+Everything is plain text, so you can inspect an experiment with `ls` and fix one by hand:
+
+```bash
+# How far along is cycle 12?
+ls $EXPERIMENT/status/cycles/cycle_012/members | wc -l
+
+# Re-run member 7 of the current cycle
+rm $EXPERIMENT/status/cycles/cycle_012/members/member_07.json
+```
+
+If the status and the actual model output have drifted apart (for example a job was killed between WRF finishing and the result being recorded), `wrf-ensembly $EXPERIMENT status reconcile` rebuilds the member advancement of a cycle from the forecast files on disk. Pass `--dry-run` first to see what it would change.
 
 
 # What to read next

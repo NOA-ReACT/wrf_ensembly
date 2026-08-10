@@ -28,5 +28,3 @@ class MemberStatus:
 
     advanced: bool
     """Has WRF been run for the current cycle?"""
-
-    runtime_statistics: list[RuntimeStatistics]

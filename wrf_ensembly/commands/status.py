@@ -9,6 +9,7 @@ from rich.table import Table
 from wrf_ensembly import experiment
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
+from wrf_ensembly.experiment import CycleState, ExperimentStateError
 
 
 @click.group(name="status", cls=GroupWithStartEndPrint)
@@ -57,12 +58,15 @@ def show(experiment_path: Path):
     member_table.add_column("Advanced", justify="center")
     member_table.add_column("Runtime Stats", justify="center")
 
-    for member in exp.members:
-        # Count runtime statistics for this member
-        stats_count = len(member.runtime_statistics)
+    stats_count = defaultdict(int)
+    for _, member_i in exp.state.get_all_runtime_statistics():
+        stats_count[member_i] += 1
 
+    for member in exp.members:
         member_table.add_row(
-            str(member.i), "✓" if member.advanced else "✗", str(stats_count) + " cycles"
+            str(member.i),
+            "✓" if member.advanced else "✗",
+            f"{stats_count[member.i]} cycles",
         )
 
     console = Console()
@@ -88,16 +92,14 @@ def runtime_stats(experiment_path: Path, show_all: bool):
     console = Console()
 
     # Collect all runtime statistics
-    all_stats: list[tuple] = []
+    all_stats = exp.state.get_all_runtime_statistics()
     by_cycle: dict[int, list] = defaultdict(list)
     by_member: dict[int, list[int]] = defaultdict(list)
     all_durations: list[int] = []
-    for member in exp.members:
-        for stat in member.runtime_statistics:
-            all_stats.append((stat, member.i))
-            by_cycle[stat.cycle].append((stat, member.i))
-            by_member[member.i].append(stat.duration_s)
-            all_durations.append(stat.duration_s)
+    for stat, member_i in all_stats:
+        by_cycle[stat.cycle].append((stat, member_i))
+        by_member[member_i].append(stat.duration_s)
+        all_durations.append(stat.duration_s)
 
     if not all_stats:
         console.print("[yellow]No runtime statistics available[/yellow]")
@@ -266,13 +268,12 @@ def runtime_stats(experiment_path: Path, show_all: bool):
 @status_cli.command()
 @pass_experiment_path
 def clear_runtime_stats(experiment_path: Path):
-    """Clears all runtime statistics from the database"""
+    """Clears all runtime statistics, keeping member advancement intact"""
 
     logger.setup("status-clear-runtime-stats", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    with exp.db as db_conn:
-        db_conn.clear_runtime_statistics()
+    exp.state.clear_runtime_statistics()
 
     logger.info("Cleared all runtime statistics")
 
@@ -293,23 +294,11 @@ def reset(experiment_path: Path, confirm: bool):
         logger.warning("Add --confirm flag to proceed.")
         return
 
-    # Reset experiment state
-    exp.current_cycle_i = 0
-
-    # Reset state machine to initial state
-    from wrf_ensembly.experiment import CycleState
-
+    # Drops every per-cycle status file and returns the pointer to cycle 0
+    exp.state.reset()
     exp.state_machine.current_cycle_idx = 0
-    exp.state_machine.current_cycle.current_state = CycleState.INITIALIZED
-
-    # Reset all members
     for member in exp.members:
         member.advanced = False
-        member.runtime_statistics.clear()
-
-    # Clear database
-    with exp.db as db_conn:
-        db_conn.reset_experiment()
 
     logger.info("Reset experiment state to cycle 0")
 
@@ -330,15 +319,16 @@ def set_member(experiment_path: Path, member_index: int, advanced: bool):
         )
         return
 
-    # Update in database
-    with exp.db as db_conn:
-        db_conn.set_member_advanced(member_index, advanced)
-
-    # Update local object
+    if advanced:
+        exp.state.set_member_advanced(exp.current_cycle_i, member_index)
+    else:
+        exp.state.clear_member(exp.current_cycle_i, member_index)
     exp.members[member_index].advanced = advanced
 
     status_str = "advanced" if advanced else "not advanced"
-    logger.info(f"Set member {member_index} status to: {status_str}")
+    logger.info(
+        f"Set member {member_index} status for cycle {exp.current_cycle_i} to: {status_str}"
+    )
 
 
 @status_cli.command()
@@ -350,14 +340,17 @@ def set_all_members(experiment_path: Path, advanced: bool):
     logger.setup("status-set-all-members", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    # Update all members in database
-    with exp.db as db_conn:
-        for member in exp.members:
-            db_conn.set_member_advanced(member.i, advanced)
-            member.advanced = advanced
+    for member in exp.members:
+        if advanced:
+            exp.state.set_member_advanced(exp.current_cycle_i, member.i)
+        else:
+            exp.state.clear_member(exp.current_cycle_i, member.i)
+        member.advanced = advanced
 
     status_str = "advanced" if advanced else "not advanced"
-    logger.info(f"Set all {len(exp.members)} members to: {status_str}")
+    logger.info(
+        f"Set all {len(exp.members)} members for cycle {exp.current_cycle_i} to: {status_str}"
+    )
 
 
 @status_cli.command()
@@ -367,7 +360,6 @@ def set_all_members(experiment_path: Path, advanced: bool):
     type=click.Choice(
         [
             "initialized",
-            "advancing_members",
             "members_advanced",
             "filter_complete",
             "analysis_complete",
@@ -378,12 +370,17 @@ def set_all_members(experiment_path: Path, advanced: bool):
 )
 @pass_experiment_path
 def set_experiment(experiment_path: Path, cycle: int, state: str):
-    """Set the experiment state (cycle number and/or cycle state)"""
+    """
+    Set the experiment state (cycle number and/or cycle state)
+
+    Setting a state writes whatever the state implies: `members_advanced` and above mark
+    every member as advanced, `initialized` clears them. There is no `advancing_members`
+    here, since a partly advanced ensemble is described by which members have advanced -
+    use `set-member` for that.
+    """
 
     logger.setup("status-set-experiment", experiment_path)
     exp = experiment.Experiment(experiment_path)
-
-    from wrf_ensembly.experiment import CycleState
 
     # Validate cycle number
     if cycle is not None and (cycle < 0 or cycle >= len(exp.cycles)):
@@ -396,17 +393,105 @@ def set_experiment(experiment_path: Path, cycle: int, state: str):
     # Update cycle if changed
     if cycle is not None:
         exp.current_cycle_i = current_cycle
-        exp.state_machine.current_cycle_idx = current_cycle
 
     # Update state if specified
     if state is not None:
-        cycle_state = CycleState(state)
-        exp.state_machine.current_cycle.current_state = cycle_state
+        try:
+            exp.state_machine.get_cycle(current_cycle).force_state(CycleState(state))
+        except ExperimentStateError as e:
+            logger.error(str(e))
+            return
         logger.info(f"Set cycle {current_cycle} state to: {state}")
 
-    # Save to database
-    exp.save_status_to_db()
+    logger.info(
+        f"Set experiment state - Cycle: {current_cycle}, "
+        f"State: {exp.state_machine.current_cycle.current_state.value}"
+    )
+
+
+@status_cli.command()
+@click.option(
+    "--cycle",
+    type=int,
+    help="Which cycle to reconcile (defaults to the current cycle)",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Only report what would change, without writing anything",
+)
+@pass_experiment_path
+def reconcile(experiment_path: Path, cycle: int | None, dry_run: bool):
+    """
+    Rebuild member advancement for a cycle from the model output on disk.
+
+    A member counts as advanced if the forecast for the end of the cycle exists in
+    scratch, which is the same file the `analysis` command requires. Use this when the
+    status files and the actual output have drifted apart, for example after a job was
+    killed between finishing WRF and recording it.
+
+    Runtime statistics cannot be recovered this way, so members restored here will show
+    no timings.
+    """
+
+    logger.setup("status-reconcile", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    cycle_i = cycle if cycle is not None else exp.current_cycle_i
+    if cycle_i < 0 or cycle_i >= len(exp.cycles):
+        logger.error(f"Cycle {cycle_i} out of range (0-{len(exp.cycles) - 1})")
+        return
+
+    cycle_info = exp.cycles[cycle_i]
+    wrfout_name = "wrfout_d01_" + cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
+    recorded = exp.state.get_advanced_members(cycle_i)
+
+    table = Table(title=f"Reconcile cycle {cycle_i}")
+    table.add_column("Member", justify="center", style="bold cyan")
+    table.add_column("Recorded", justify="center")
+    table.add_column("On disk", justify="center")
+    table.add_column("Action", justify="left")
+
+    to_add: list[int] = []
+    to_remove: list[int] = []
+    for i in range(exp.cfg.assimilation.n_members):
+        on_disk = (exp.paths.scratch_forecasts_path(cycle_i, i) / wrfout_name).exists()
+        is_recorded = i in recorded
+
+        if on_disk and not is_recorded:
+            action = "[green]mark as advanced[/green]"
+            to_add.append(i)
+        elif not on_disk and is_recorded:
+            action = "[red]forget advancement[/red]"
+            to_remove.append(i)
+        else:
+            action = "-"
+
+        table.add_row(
+            str(i),
+            "✓" if is_recorded else "✗",
+            "✓" if on_disk else "✗",
+            action,
+        )
+
+    Console().print(table)
+
+    if not to_add and not to_remove:
+        logger.info(f"Cycle {cycle_i} status already matches the files on disk")
+        return
+
+    if dry_run:
+        logger.warning("Dry run, no changes written. Re-run without --dry-run to apply.")
+        return
+
+    for i in to_add:
+        exp.state.set_member_advanced(cycle_i, i)
+    for i in to_remove:
+        exp.state.clear_member(cycle_i, i)
 
     logger.info(
-        f"Set experiment state - Cycle: {current_cycle}, State: {exp.state_machine.current_cycle.current_state.value}"
+        f"Reconciled cycle {cycle_i}: marked {len(to_add)} member(s) as advanced, "
+        f"cleared {len(to_remove)}"
     )
+    if to_add:
+        logger.warning("Restored members have no runtime statistics")

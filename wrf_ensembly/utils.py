@@ -1,5 +1,6 @@
 import itertools
 import os
+import secrets
 import shutil
 import string
 import time
@@ -101,6 +102,35 @@ def atomic_binary_open(path: Path, mode="wb"):
 
     # Move the temp file to the target location
     tmp_file.rename(path)
+
+
+def atomic_write_text(path: Path, content: str):
+    """
+    Writes text to a file atomically: readers always see either the old file or the new
+    one, never a partial write. Works without any locking, which makes it safe on network
+    filesystems where fcntl-based locking is unreliable (NFS) or slow.
+
+    The temporary file is created in the same directory as the target (rename is only
+    atomic within a filesystem) with a name unique to this process, so several processes
+    can write different files in the same directory concurrently.
+
+    Args:
+        path: Path to the file
+        content: Text to write
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_file = path.parent / f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+    try:
+        with open(tmp_file, "w") as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, path)
+    except BaseException:
+        tmp_file.unlink(missing_ok=True)
+        raise
 
 
 def filter_none_from_dict(dict: dict) -> dict:
