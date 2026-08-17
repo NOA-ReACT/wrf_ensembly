@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 import netCDF4
 
+from wrf_ensembly.console import logger
+
 if TYPE_CHECKING:
     from wrf_ensembly.config import PostprocessConfig
 
@@ -106,6 +108,16 @@ def validate_compression_config(cfg: "PostprocessConfig") -> None:
             f"Available filters: {', '.join(sorted(available_list))}.\n"
             f"To enable {cfg.compression}, rebuild netCDF4-python with a "
             f"{cfg.compression}-enabled HDF5 library."
+        )
+
+    # netCDF4 only wires the shuffle filter through the zlib path, so requesting it
+    # alongside any other compressor silently does nothing.
+    if cfg.shuffle and cfg.compression not in ("zlib", "none"):
+        logger.warning(
+            f"`shuffle` is enabled but has no effect with compression='{cfg.compression}': "
+            "the netCDF4 library only applies the shuffle filter together with zlib. "
+            "Use compression='zlib' to benefit from it (typically 15-20% smaller files "
+            "for float data), or set `shuffle = false` to silence this warning."
         )
 
     # Check compression level

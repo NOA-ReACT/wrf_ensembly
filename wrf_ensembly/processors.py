@@ -87,14 +87,14 @@ class XWRFPostProcessor(DataProcessor):
     Processor that applies xWRF postprocessing operations as well as some other minor
     niceties. Specifically:
 
-    - Computes air density
+    - Computes air density and model level thickness (both subject to
+      postprocess.variables_to_keep, like every other variable)
     - Applies XWRF postprocessing operations (destagger, diagnostics, etc)
     - Renames the time dimension to 't'
     - Renames the coordinates to standard names (longitude, latitude)
     - Fixes `coordianates` attributes for de-staggered variables
     - Removes unused variables like CLAT
-    - Filters variables based on a configurable pattern (postprocess.variables_to_keep
-      and variables_to_keep_per_member)
+    - Filters variables based on a configurable pattern (postprocess.variables_to_keep)
     """
 
     def __init__(self, **kwargs):
@@ -104,24 +104,38 @@ class XWRFPostProcessor(DataProcessor):
         """Apply xWRF postprocessing operations."""
         logger.debug(f"Applying xWRF postprocessing with {self.name}")
 
-        # Get model level thickness before destaggering
-        geopotential = ds["PH"] + ds["PHB"]
-        height = geopotential / 9.81
-        model_level_thickness = np.diff(height, axis=1)  # This is a numpy array
+        variables_to_keep = context.config.postprocess.variables_to_keep
+        patterns = (
+            [re.compile(v) for v in variables_to_keep] if variables_to_keep else None
+        )
+
+        def keep(name: str) -> bool:
+            """Whether `name` survives the `variables_to_keep` filter."""
+            return patterns is None or any(p.match(name) for p in patterns)
+
+        # level_thickness and air_density are computed here rather than by xwrf, but
+        # they honour `variables_to_keep` like every other variable.
+        want_level_thickness = keep("level_thickness")
+        want_air_density = keep("air_density")
+
+        # Get model level thickness before destaggering. It is also the denominator of
+        # air_density, so it is computed (though not necessarily kept) for either one.
+        model_level_thickness = None
+        if want_level_thickness or want_air_density:
+            geopotential = ds["PH"] + ds["PHB"]
+            height = geopotential / 9.81
+            model_level_thickness = np.diff(height, axis=1)  # This is a numpy array
 
         # Compute more diagnostics and destagger (kept lazy at this point)
         ds = ds.xwrf.postprocess().xwrf.destagger()
 
         # Filter the lazy dataset before .compute() so that dask never
         # materializes variables we don't need.
-        variables_to_keep = context.config.postprocess.variables_to_keep
-        if variables_to_keep:
-            patterns = [re.compile(v) for v in variables_to_keep]
+        if patterns is not None:
+            # MU/MUB/DNW only need to survive if air_density is actually computed
+            deps = _XWRF_COMPUTATION_DEPS if want_air_density else set()
             vars_to_drop = [
-                v
-                for v in ds.data_vars
-                if not any(p.match(str(v)) for p in patterns)
-                and str(v) not in _XWRF_COMPUTATION_DEPS
+                v for v in ds.data_vars if not keep(str(v)) and str(v) not in deps
             ]
             ds = ds.drop_vars(vars_to_drop)
 
@@ -136,26 +150,26 @@ class XWRFPostProcessor(DataProcessor):
         ds.t.attrs["axis"] = "T"
 
         # Store level thickness
-        ds["level_thickness"] = (("t", "z", "y", "x"), model_level_thickness)
+        if want_level_thickness:
+            ds["level_thickness"] = (("t", "z", "y", "x"), model_level_thickness)
 
         # Compute air density
-        column_mass_per_area = (ds["MU"] + ds["MUB"]) / 9.81
-        layer_mass_per_area = np.stack(
-            [column_mass_per_area.values] * ds.sizes["z"], axis=1
-        ) * (-ds["DNW"].values.reshape(-1, 1, 1))
-        air_density = layer_mass_per_area / model_level_thickness
-        ds["air_density"] = (("t", "z", "y", "x"), air_density)
-        ds["air_density"].attrs = {
-            "units": "kg m-3",
-            "standard_name": "air_density",
-        }
+        if want_air_density:
+            column_mass_per_area = (ds["MU"] + ds["MUB"]) / 9.81
+            layer_mass_per_area = np.stack(
+                [column_mass_per_area.values] * ds.sizes["z"], axis=1
+            ) * (-ds["DNW"].values.reshape(-1, 1, 1))
+            air_density = layer_mass_per_area / model_level_thickness
+            ds["air_density"] = (("t", "z", "y", "x"), air_density)
+            ds["air_density"].attrs = {
+                "units": "kg m-3",
+                "standard_name": "air_density",
+            }
 
         # Drop computation-only variables that the user doesn't want in output
-        if variables_to_keep:
+        if patterns is not None:
             comp_to_drop = [
-                v
-                for v in _XWRF_COMPUTATION_DEPS
-                if v in ds.data_vars and not any(p.match(v) for p in patterns)
+                v for v in _XWRF_COMPUTATION_DEPS if v in ds.data_vars and not keep(v)
             ]
             if comp_to_drop:
                 ds = ds.drop_vars(comp_to_drop)
@@ -168,8 +182,9 @@ class XWRFPostProcessor(DataProcessor):
             ds.longitude.attrs["axis"] = "X"
             ds.latitude.attrs["axis"] = "Y"
 
-        # Since the projection object is not serialisable, we need to drop it before saving
-        ds = ds.drop_vars("wrf_projection")
+        # Since the projection object is not serialisable, we need to drop it before
+        # saving. It may already be gone if `variables_to_keep` filtered it out.
+        ds = ds.drop_vars("wrf_projection", errors="ignore")
 
         # Fix some attributes:
         # 1) remove grid_mapping because we drop `wrf_projection`
