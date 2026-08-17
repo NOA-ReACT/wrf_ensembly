@@ -142,9 +142,16 @@ ntasks = 20
 
 [postprocess]
 # Shuffle + deflate
-compression_filters = "shf|dfl"
+compression = "zlib"
+compression_level = 4
+shuffle = true
 # GBR w/ 3 significant digits, 6 for coordinates
-ppc_filter = "default=3#Z.*=6#X.*=6"
+significant_digits = 3
+significant_digits_overrides = {"Z.*" = 6, "X.*" = 6}
+quantize_mode = "GranularBitRound"
+keep_per_member = false
+compute_ensemble_mean = true
+compute_ensemble_sd = true
 
 # -- WRF NAMELIST OPTIONS --
 [wrf_namelist]

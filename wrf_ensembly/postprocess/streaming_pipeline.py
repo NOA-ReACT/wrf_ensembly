@@ -105,7 +105,9 @@ def process_members_for_timestep(
     config: Config,
     ensemble_writer: StreamingEnsembleWriter | None = None,
     precomputed_first_member: xr.Dataset | None = None,
-) -> tuple[dict[str, WelfordState], np.ndarray]:
+    compute_mean: bool = True,
+    compute_sd: bool = True,
+) -> tuple[dict[str, WelfordState] | None, np.ndarray]:
     """
     Process all ensemble members for a single output timestep.
 
@@ -121,10 +123,16 @@ def process_members_for_timestep(
             each member's processed data is written as a slice before finalizing.
         precomputed_first_member: If provided, used directly for member 0 instead of
             re-opening and re-processing its wrfout file.
+        compute_mean: Whether the ensemble mean is needed.
+        compute_sd: Whether the ensemble standard deviation is needed. When False, the
+            variance accumulator is not allocated or updated.
 
     Returns:
-        Tuple of (accumulators, time_value).
+        Tuple of (accumulators, time_value). `accumulators` is None when neither the
+        mean nor the standard deviation is needed.
     """
+    accumulate = compute_mean or compute_sd
+
     accumulators: dict[str, WelfordState] | None = None
     time_val: np.ndarray | None = None
 
@@ -160,8 +168,10 @@ def process_members_for_timestep(
         # constants (e.g. latitude/longitude). Squeezing first would strip 't'
         # from every variable, leaving the accumulators empty and the mean/sd
         # output files with no data.
-        if accumulators is None:
-            accumulators = create_welford_accumulators(processed)
+        if accumulate and accumulators is None:
+            accumulators = create_welford_accumulators(
+                processed, track_variance=compute_sd
+            )
 
         # Squeeze the time dimension — each wrfout file is a single
         # timestep so the leading t-dim is always size 1.  Removing it
@@ -170,7 +180,8 @@ def process_members_for_timestep(
         processed = processed.squeeze("t", drop=False)
 
         # Update running statistics
-        update_accumulators_from_dataset(accumulators, processed)
+        if accumulators is not None:
+            update_accumulators_from_dataset(accumulators, processed)
 
         # Write per-member slice if ensemble writer is active
         if ensemble_writer is not None:
@@ -181,7 +192,7 @@ def process_members_for_timestep(
 
         del processed
 
-    if accumulators is None or time_val is None:
+    if time_val is None or (accumulate and accumulators is None):
         raise ValueError("No member files were successfully processed")
 
     if ensemble_writer is not None:
@@ -230,7 +241,7 @@ def process_cycle_streaming(
     pipeline: ProcessorPipeline,
     source: Literal["forecast", "analysis"],
     only_last_timestep: bool = False,
-) -> tuple[Path, Path, Path | None] | None:
+) -> tuple[Path | None, Path | None, Path | None] | None:
     """
     Process an entire cycle in streaming fashion.
 
@@ -239,8 +250,10 @@ def process_cycle_streaming(
     2. Accumulate statistics using Welford's algorithm
     3. Append results directly to output files
 
-    If ``keep_per_member`` is enabled in the config, also writes a per-member
-    ensemble file with shape ``(t, member, ...)`` for all data variables.
+    Which outputs are written is controlled by the ``compute_ensemble_mean``,
+    ``compute_ensemble_sd`` and ``keep_per_member`` config options. Statistics that are
+    not requested are never computed, not just skipped when writing. The per-member
+    ensemble file has shape ``(t, member, ...)`` for all data variables.
 
     Args:
         exp: Experiment object with configuration and paths.
@@ -251,7 +264,7 @@ def process_cycle_streaming(
 
     Returns:
         Tuple of (mean_path, sd_path, ensemble_path) or None if no files to process.
-        ensemble_path is None when keep_per_member is False.
+        Each element is None when the corresponding output is disabled.
     """
     n_members = exp.cfg.assimilation.n_members
 
@@ -305,13 +318,19 @@ def process_cycle_streaming(
     # Use cycle start time as reference for time coordinate
     reference_time = np.datetime64(exp.cycles[cycle].start.replace(tzinfo=None))
 
-    # Create output files
-    mean_path = output_dir / f"{source}_mean_cycle_{cycle:03d}.nc"
-    sd_path = output_dir / f"{source}_sd_cycle_{cycle:03d}.nc"
-
+    # Decide which outputs to produce
+    compute_mean = exp.cfg.postprocess.compute_ensemble_mean
+    compute_sd = exp.cfg.postprocess.compute_ensemble_sd
     keep_per_member = exp.cfg.postprocess.keep_per_member
+
+    mean_path: Path | None = None
+    sd_path: Path | None = None
     ensemble_path: Path | None = None
 
+    if compute_mean:
+        mean_path = output_dir / f"{source}_mean_cycle_{cycle:03d}.nc"
+    if compute_sd:
+        sd_path = output_dir / f"{source}_sd_cycle_{cycle:03d}.nc"
     if keep_per_member:
         ensemble_path = output_dir / f"{source}_ensemble_cycle_{cycle:03d}.nc"
 
@@ -330,9 +349,9 @@ def process_cycle_streaming(
 
     template = get_structure_from_xarray(template_ds, reference_time=reference_time)
 
-    log_files = f"{mean_path.name}, {sd_path.name}"
-    if ensemble_path:
-        log_files += f", {ensemble_path.name}"
+    log_files = ", ".join(
+        p.name for p in (mean_path, sd_path, ensemble_path) if p is not None
+    )
     logger.info(f"Creating output files: {log_files}")
 
     # Build ensemble context manager
@@ -347,9 +366,35 @@ def process_cycle_streaming(
     else:
         ensemble_ctx = nullcontext()
 
+    mean_ctx = (
+        _create_writer(mean_path, template, exp.cfg.postprocess)
+        if mean_path is not None
+        else nullcontext()
+    )
+    sd_ctx = (
+        _create_writer(sd_path, template, exp.cfg.postprocess)
+        if sd_path is not None
+        else nullcontext()
+    )
+
+    def write_statistics(
+        accumulators: dict[str, WelfordState] | None,
+        time_val: np.ndarray,
+    ) -> None:
+        """Finalize the accumulators and append whichever statistics are enabled."""
+
+        if accumulators is None:
+            return
+
+        means, stddevs = finalize_accumulators(accumulators)
+        if mean_writer is not None:
+            mean_writer.append_timestep(means, time_val)
+        if sd_writer is not None:
+            sd_writer.append_timestep(stddevs, time_val)
+
     with (
-        _create_writer(mean_path, template, exp.cfg.postprocess) as mean_writer,
-        _create_writer(sd_path, template, exp.cfg.postprocess) as sd_writer,
+        mean_ctx as mean_writer,
+        sd_ctx as sd_writer,
         ensemble_ctx as ensemble_writer,
     ):
         # Process first timestep, reusing the template result for member_00
@@ -360,12 +405,12 @@ def process_cycle_streaming(
             exp.cfg,
             ensemble_writer=ensemble_writer,
             precomputed_first_member=template_ds,
+            compute_mean=compute_mean,
+            compute_sd=compute_sd,
         )
         del template_ds
-        means, stddevs = finalize_accumulators(first_accumulators)
-        mean_writer.append_timestep(means, time_val)
-        sd_writer.append_timestep(stddevs, time_val)
-        del first_accumulators, means, stddevs
+        write_statistics(first_accumulators, time_val)
+        del first_accumulators
 
         # Process remaining timesteps
         for wrfout_file in member_00_files[1:]:
@@ -384,13 +429,13 @@ def process_cycle_streaming(
                 cycle,
                 exp.cfg,
                 ensemble_writer=ensemble_writer,
+                compute_mean=compute_mean,
+                compute_sd=compute_sd,
             )
 
             # Finalize and write this timestep
-            means, stddevs = finalize_accumulators(accumulators)
-            mean_writer.append_timestep(means, time_val)
-            sd_writer.append_timestep(stddevs, time_val)
-            del accumulators, means, stddevs
+            write_statistics(accumulators, time_val)
+            del accumulators
 
     logger.info(f"Completed {source} processing for cycle {cycle}")
     return mean_path, sd_path, ensemble_path
@@ -409,6 +454,9 @@ def process_cycle_single_member(
     When n_members=1, we skip statistics computation and just write
     the processed data directly as the "mean" (no standard deviation).
 
+    Respects `compute_ensemble_mean`, which is the only output this path can produce —
+    `compute_ensemble_sd` and `keep_per_member` are meaningless for a single member.
+
     Args:
         exp: Experiment object with configuration and paths.
         cycle: Cycle number to process.
@@ -419,6 +467,13 @@ def process_cycle_single_member(
     Returns:
         Path to output file, or None if no files to process.
     """
+    if not exp.cfg.postprocess.compute_ensemble_mean:
+        logger.warning(
+            "compute_ensemble_mean is false and the ensemble has a single member, "
+            f"so there is nothing to write for {source}"
+        )
+        return None
+
     # Determine paths
     if source == "forecast":
         scratch_dir = exp.paths.scratch_forecasts_path(cycle)

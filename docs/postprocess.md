@@ -50,11 +50,13 @@ EXPERIMENT_PATH/scratch/
 ```
 EXPERIMENT_PATH/data/
 ├── analysis/cycle_XXX/
-│   ├── analysis_mean_cycle_XXX.nc   # Analysis ensemble mean (all timesteps)
-│   └── analysis_sd_cycle_XXX.nc     # Analysis ensemble std dev (all timesteps)
+│   ├── analysis_mean_cycle_XXX.nc      # Analysis ensemble mean (all timesteps)
+│   ├── analysis_sd_cycle_XXX.nc        # Analysis ensemble std dev (all timesteps)
+│   └── analysis_ensemble_cycle_XXX.nc  # Per-member (keep_per_member only)
 └── forecasts/cycle_XXX/
-    ├── forecast_mean_cycle_XXX.nc   # Forecast ensemble mean (all timesteps)
-    └── forecast_sd_cycle_XXX.nc     # Forecast ensemble std dev (all timesteps)
+    ├── forecast_mean_cycle_XXX.nc      # Forecast ensemble mean (all timesteps)
+    ├── forecast_sd_cycle_XXX.nc        # Forecast ensemble std dev (all timesteps)
+    └── forecast_ensemble_cycle_XXX.nc  # Per-member (keep_per_member only)
 ```
 
 The output files in the `data/` directory are the primary analysis products. Each file contains all timesteps for a cycle in CF-compliant NetCDF file.
@@ -64,8 +66,9 @@ The output files in the `data/` directory are the primary analysis products. Eac
 Key configuration options for controlling the transformations:
 
 - **`variables_to_keep`**: Regular expressions to filter which variables are retained
-- **`compression_filters`**: Control lossless compression algorithms (e.g., `"shf|zst,3"`)
-- **`ppc_filter`**: Precision control for lossy quantization (e.g., `"default=3#Z.*=6"`)
+- **`compression`** / **`compression_level`** / **`shuffle`**: Lossless compression settings
+- **`significant_digits`** / **`significant_digits_overrides`** / **`quantize_mode`**: Precision control for lossy quantization
+- **`compute_ensemble_mean`** / **`compute_ensemble_sd`**: Whether to produce the `_mean` and `_sd` files at all
 - **`keep_per_member`**: Whether to save individual member files alongside ensemble statistics
 - **`processors`**: Custom data processors for specialized transformations
 
@@ -114,8 +117,23 @@ Runs the complete postprocessing pipeline for a single cycle using a streaming a
 - `forecast_sd_cycle_XXX.nc` - Forecast ensemble standard deviation (all timesteps)
 - `analysis_mean_cycle_XXX.nc` - Analysis ensemble mean (all timesteps)
 - `analysis_sd_cycle_XXX.nc` - Analysis ensemble standard deviation (all timesteps)
+- `{forecast,analysis}_ensemble_cycle_XXX.nc` - Per-member data, only with `keep_per_member = true`
 
 For single-member experiments (n_members=1), only the mean files are created (no standard deviation). If no analysis is done for a cycle (no DA), no analysis files are generated.
+
+**Disabling the statistics:**
+
+Set `compute_ensemble_mean = false` and/or `compute_ensemble_sd = false` in the `[postprocess]`
+config section to skip the corresponding files. This is intended for sensitivity studies, where
+each member runs with different parameters and the across-member mean and spread are not
+meaningful. The statistics that are turned off are never computed, so this also saves memory and
+CPU — not just disk.
+
+The command exits with an error if `compute_ensemble_mean`, `compute_ensemble_sd` and
+`keep_per_member` are all false, since it would produce no output at all. Note that the `plots`
+commands and `validation interpolate-model` read the `_mean` files, and the spread plots and
+validation spread columns read the `_sd` files; `validation interpolate-model-per-member` is the
+only path that works with both disabled, and it needs `keep_per_member = true`.
 
 **Parallel Execution:**
 

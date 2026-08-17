@@ -145,7 +145,8 @@ shuffle = true
 significant_digits = 3
 significant_digits_overrides = {"Z.*" = 6, "X.*" = 6}
 quantize_mode = "GranularBitRound"
-compute_ensemble_statistics_in_job = true
+compute_ensemble_mean = true
+compute_ensemble_sd = true
 keep_per_member = false
 processors = []
 

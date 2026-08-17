@@ -104,9 +104,11 @@ def run(
     """
     Run the complete postprocessing pipeline for a single cycle.
 
-    Processes all ensemble members through the configured processor pipeline,
-    computes ensemble statistics (mean and standard deviation), and writes
-    final output files directly without intermediate files.
+    Processes all ensemble members through the configured processor pipeline and writes
+    the final output files directly, without intermediate files. Which files are produced
+    depends on the `compute_ensemble_mean`, `compute_ensemble_sd` and `keep_per_member`
+    options of the `[postprocess]` config section; statistics that are turned off are
+    never computed.
 
     This command processes ONE cycle at a time with no side effects, making it
     safe to run multiple instances in parallel for different cycles:
@@ -145,6 +147,16 @@ def run(
         logger.error(f"Compression configuration error: {e}")
         sys.exit(1)
 
+    # Bail out before touching any wrfout file if nothing would be written
+    pp = exp.cfg.postprocess
+    if not (pp.compute_ensemble_mean or pp.compute_ensemble_sd or pp.keep_per_member):
+        logger.error(
+            "Postprocessing would produce no output: compute_ensemble_mean, "
+            "compute_ensemble_sd and keep_per_member are all false. Enable at least "
+            "one of them in the [postprocess] section of the config."
+        )
+        sys.exit(1)
+
     # Create processor pipeline
     try:
         pipeline = processors.create_pipeline_from_config(
@@ -163,43 +175,58 @@ def run(
     # Choose processing function based on ensemble size
     if n_members == 1:
         logger.info("Single member ensemble - skipping statistics computation")
+        # The single-member path can only ever write the "mean" file, which holds the
+        # member's own data, so a disabled mean leaves it with nothing to do.
+        if not pp.compute_ensemble_mean:
+            logger.error(
+                "compute_ensemble_mean is false but the ensemble has a single member, "
+                "so no output can be produced."
+            )
+            sys.exit(1)
         process_func = process_cycle_single_member
     else:
+        logger.info(
+            f"Outputs: mean={pp.compute_ensemble_mean}, sd={pp.compute_ensemble_sd}, "
+            f"per-member={pp.keep_per_member}"
+        )
         process_func = process_cycle_streaming
+
+    def log_result(source: str, result) -> None:
+        """Report which output files a source produced, if any."""
+
+        if result is None:
+            logger.warning(f"No {source} files found to process")
+            return
+
+        paths = result if isinstance(result, tuple) else (result,)
+        names = ", ".join(p.name for p in paths if p is not None)
+        logger.info(f"{source.capitalize()} output: {names}")
 
     # Process forecast files
     logger.info("Processing forecast files...")
-    forecast_result = process_func(
-        exp, cycle, pipeline, source="forecast", only_last_timestep=only_last_timestep
+    log_result(
+        "forecast",
+        process_func(
+            exp,
+            cycle,
+            pipeline,
+            source="forecast",
+            only_last_timestep=only_last_timestep,
+        ),
     )
-    if forecast_result is None:
-        logger.warning("No forecast files found to process")
-    else:
-        if isinstance(forecast_result, tuple):
-            mean_p, sd_p, *rest = forecast_result
-            msg = f"Forecast output: {mean_p.name}, {sd_p.name}"
-            if rest and rest[0] is not None:
-                msg += f", {rest[0].name}"
-            logger.info(msg)
-        else:
-            logger.info(f"Forecast output: {forecast_result.name}")
 
     # Process analysis files
     logger.info("Processing analysis files...")
-    analysis_result = process_func(
-        exp, cycle, pipeline, source="analysis", only_last_timestep=only_last_timestep
+    log_result(
+        "analysis",
+        process_func(
+            exp,
+            cycle,
+            pipeline,
+            source="analysis",
+            only_last_timestep=only_last_timestep,
+        ),
     )
-    if analysis_result is None:
-        logger.warning("No analysis files found to process")
-    else:
-        if isinstance(analysis_result, tuple):
-            mean_p, sd_p, *rest = analysis_result
-            msg = f"Analysis output: {mean_p.name}, {sd_p.name}"
-            if rest and rest[0] is not None:
-                msg += f", {rest[0].name}"
-            logger.info(msg)
-        else:
-            logger.info(f"Analysis output: {analysis_result.name}")
 
     logger.info(f"Cycle {cycle} postprocessing complete")
 

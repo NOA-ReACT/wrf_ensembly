@@ -448,8 +448,9 @@ shuffle = true
 significant_digits = 3
 significant_digits_overrides = { "Z.*" = 6, "X.*" = 6 }
 quantize_mode = "GranularBitRound"
+compute_ensemble_mean = true
+compute_ensemble_sd = true
 keep_per_member = false
-compute_ensemble_statistics_in_job = true
 
 [[postprocess.processors]]
 processor = "my_package.processors:CustomProcessor"
@@ -470,9 +471,20 @@ params = { custom_param = "value" }
 | `significant_digits` | int | Number of significant digits for quantization (lossy compression). 0 disables quantization. Requires netcdf-c >= 4.9.0. *Default: 3* |
 | `significant_digits_overrides` | dict | Per-variable regex overrides for `significant_digits`. *Default: `{"Z.*": 6, "X.*": 6}`* |
 | `quantize_mode` | string | Quantization algorithm: `"BitGroom"`, `"BitRound"`, or `"GranularBitRound"`. *Default: `"GranularBitRound"`* |
-| `keep_per_member` | bool | Whether to also produce concatenated per-member files. *Default: false* |
-| `compute_ensemble_statistics_in_job` | bool | Whether to compute ensemble mean/spread in SLURM jobs. Disable for single-member experiments. *Default: true* |
+| `compute_ensemble_mean` | bool | Whether to write the `{forecast,analysis}_mean_cycle_XXX.nc` files. *Default: true* |
+| `compute_ensemble_sd` | bool | Whether to write the `{forecast,analysis}_sd_cycle_XXX.nc` files. Disabling also skips the variance accumulation. No effect when `n_members = 1`. *Default: true* |
+| `keep_per_member` | bool | Whether to also write a per-member `{forecast,analysis}_ensemble_cycle_XXX.nc` file. *Default: false* |
 | `processors` | [ProcessorConfig] | List of custom data processors to apply |
+
+At least one of `compute_ensemble_mean`, `compute_ensemble_sd` or `keep_per_member` must be
+enabled — `postprocess run` exits with an error otherwise, since it would produce no output.
+
+Turning off the statistics is meant for sensitivity studies, where each member runs with
+different parameters and the across-member mean and spread are not meaningful. Be aware of
+what still needs them: the `plots` commands and `validation interpolate-model` read the mean
+files, `plots --include-spread`, `plots ensemble-spread` and the spread columns of the
+validation output read the sd files. Only `validation interpolate-model-per-member` works
+without either, and it requires `keep_per_member = true`.
 
 ### Data Processors
 
@@ -723,7 +735,8 @@ variables_to_keep = ["DUST_\\d", "U", "V", "wind_.*"]
 compression = "zlib"
 compression_level = 4
 significant_digits = 3
-compute_ensemble_statistics_in_job = true
+compute_ensemble_mean = true
+compute_ensemble_sd = true
 
 [wrf_namelist.domains]
 time_step = 180

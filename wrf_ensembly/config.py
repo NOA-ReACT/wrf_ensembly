@@ -614,7 +614,7 @@ class PostprocessConfig:
     variables_to_keep: list[str] | None = None
     """
     Optionally, filter the variables in a file by a list of regular expressions. If None, all variables are kept.
-    This filtering is applied during the `postprocess process-pipeline` step.
+    This filtering is applied during the `postprocess run` step.
     """
 
     variables_to_keep_ensemble: list[str] | None = None
@@ -684,19 +684,31 @@ class PostprocessConfig:
     ]
     """
 
-    compute_ensemble_statistics_in_job: bool = True
+    compute_ensemble_mean: bool = True
     """
-    Set this to false to disable the computation of mean/spread for each cycle when
-    using slurm jobs.
+    Whether to write the `{forecast,analysis}_mean_cycle_XXX.nc` files. Set to false for
+    sensitivity studies where the across-member mean is meaningless.
 
-    Useful when running 1-member experiments or sensitivity studies with different parameters
-    per member.
+    Note that the `plots` commands and the default `validation interpolate-model` path read
+    the mean files, so only disable this if you rely on the per-member validation path
+    (`validation interpolate-model-per-member`), which needs `keep_per_member = true`.
+    """
+
+    compute_ensemble_sd: bool = True
+    """
+    Whether to write the `{forecast,analysis}_sd_cycle_XXX.nc` files. Disabling this also
+    skips the variance accumulation entirely, roughly halving the memory used by the
+    statistics. `plots --include-spread` and the spread columns of the validation output
+    require these files.
+
+    Has no effect when `assimilation.n_members == 1`, since no spread exists.
     """
 
     keep_per_member: bool = False
     """
-    Set to true to also concatenate per_member files when running the `concatenate` command.
-    If enabled, you will get a `forecast_mean`, `forecast_sd` and `forecast_member_{d}` file for each cycle.
+    Set to true to also write a per-member file, `{forecast,analysis}_ensemble_cycle_XXX.nc`,
+    holding every member along a `member` dimension. Use `variables_to_keep_ensemble` to
+    limit its size. Ignored for single-member experiments.
     """
 
 

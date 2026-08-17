@@ -216,33 +216,46 @@ def create_file(
 
 @dataclass
 class WelfordState:
-    """Represents the state of Welford's algorithm for variance calculation."""
+    """
+    Represents the state of Welford's algorithm for variance calculation.
+
+    When `m2` is None the variance is not tracked: only the running mean is updated and
+    the second accumulator array is never allocated. See `create_welford_accumulators`.
+    """
 
     count: int
     mean: np.ndarray
-    m2: np.ndarray
+    m2: np.ndarray | None = None
 
 
 def welford_update(state: WelfordState, new_value: np.ndarray) -> None:
     """
     Welford's algorithm for updating mean and variance incrementally.
     The `state` argument is updated in place with the new values.
+
+    If the state does not track variance (`m2 is None`), only the mean is updated.
     """
 
     state.count += 1
     new_value = new_value.astype(state.mean.dtype, copy=False)
     delta = new_value - state.mean
     state.mean += delta / state.count
-    delta2 = new_value - state.mean
-    state.m2 += delta * delta2
+    if state.m2 is not None:
+        delta2 = new_value - state.mean
+        state.m2 += delta * delta2
 
 
 def welford_finalise(
     state: WelfordState,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray | None]:
     """
     Finalise the Welford's algorithm to get variance and standard deviation.
+
+    Returns `(mean, None)` if the state does not track variance.
     """
+
+    if state.m2 is None:
+        return state.mean, None
 
     if state.count < 2:
         return state.mean, np.full_like(state.mean, np.nan)
@@ -333,7 +346,9 @@ def get_structure_from_xarray(
     return NetCDFFile(dims, variables, attrs)
 
 
-def create_welford_accumulators(template_ds: xr.Dataset) -> dict[str, WelfordState]:
+def create_welford_accumulators(
+    template_ds: xr.Dataset, track_variance: bool = True
+) -> dict[str, WelfordState]:
     """
     Initialize Welford accumulators from a template xarray Dataset.
 
@@ -341,6 +356,8 @@ def create_welford_accumulators(template_ds: xr.Dataset) -> dict[str, WelfordSta
 
     Args:
         template_ds: xarray Dataset to use as a template for variable shapes.
+        track_variance: If False, the `m2` accumulator array is not allocated and the
+            standard deviation cannot be computed. Halves the memory used per variable.
 
     Returns:
         Dictionary mapping variable names to their WelfordState accumulators.
@@ -368,7 +385,7 @@ def create_welford_accumulators(template_ds: xr.Dataset) -> dict[str, WelfordSta
         accumulators[var_name] = WelfordState(
             count=0,
             mean=np.zeros(shape, dtype=np.float32),
-            m2=np.zeros(shape, dtype=np.float32),
+            m2=np.zeros(shape, dtype=np.float32) if track_variance else None,
         )
 
     return accumulators
@@ -401,6 +418,7 @@ def finalize_accumulators(
 
     Returns:
         Tuple of (means, stddevs) dictionaries mapping variable names to arrays.
+        `stddevs` is empty if the accumulators do not track variance.
     """
     means = {}
     stddevs = {}
@@ -408,6 +426,7 @@ def finalize_accumulators(
     for var_name, state in accumulators.items():
         mean, sd = welford_finalise(state)
         means[var_name] = mean
-        stddevs[var_name] = sd
+        if sd is not None:
+            stddevs[var_name] = sd
 
     return means, stddevs

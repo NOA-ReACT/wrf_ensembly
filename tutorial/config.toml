@@ -156,16 +156,17 @@ variables_to_keep = [
   'X.*',
   'Z.*',
 ]
-# Standard shuffle + deflate filters
-compression_filters = "shf|dfl"
+# Standard shuffle + deflate
+compression = "zlib"
+compression_level = 4
+shuffle = true
 # GBR w/ 3 significant digits, 6 for coordinates
-ppc_filter = "default=3#Z.*=6#X.*=6"
+significant_digits = 3
+significant_digits_overrides = {"Z.*" = 6, "X.*" = 6}
+quantize_mode = "GranularBitRound"
 keep_per_member = false
-compute_ensemble_statistics_in_job = true
-
-processor_cores = 1
-statistics_cores = 24
-concatenate_cores = 24
+compute_ensemble_mean = true
+compute_ensemble_sd = true
 
 [[postprocess.processors]]
 processor = "/home/thgeorgiou/work/AIRSENSE/aod_python_operator/postproc_wrfout.py:ExtinctionOperatorProcessor"
