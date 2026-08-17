@@ -14,6 +14,15 @@ import numpy as np
 import xarray as xr
 
 
+QUANTIZATION_DISABLED = -1
+"""
+Value in `significant_digits_overrides` that turns quantization off for the matching
+variables, keeping them bit-exact. Useful for accumulated fields (deposition fluxes,
+emissions, precipitation), where the quantity of interest is the difference between
+consecutive timesteps and is much smaller than the accumulated total.
+"""
+
+
 def _get_variable_significant_digits(
     var_name: str,
     default_digits: int | None,
@@ -22,10 +31,14 @@ def _get_variable_significant_digits(
     """
     Get the significant_digits value for a variable based on regex pattern matching.
 
+    Patterns are tried in the order they appear in `overrides` and the first match wins.
+
     Args:
         var_name: Name of the variable.
         default_digits: Default significant digits to use if no pattern matches.
         overrides: Dictionary mapping regex patterns to significant digits values.
+            A value of `QUANTIZATION_DISABLED` (-1) disables quantization for the
+            matching variables.
 
     Returns:
         The significant_digits value to use, or None if quantization is disabled.
@@ -36,7 +49,7 @@ def _get_variable_significant_digits(
     if overrides:
         for pattern, digits in overrides.items():
             if re.match(pattern, var_name):
-                return digits
+                return None if digits == QUANTIZATION_DISABLED else digits
 
     return default_digits
 

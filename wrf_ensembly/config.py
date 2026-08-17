@@ -656,8 +656,19 @@ class PostprocessConfig:
     """
     Per-variable overrides for significant_digits. Keys are regex patterns that match
     variable names, values are the number of significant digits to use.
-    Variables matching a pattern use that value instead of the default.
+    Variables matching a pattern use that value instead of the default. Patterns are
+    tried in order and the first match wins.
     Example: {"Z.*": 6, "X.*": 6} gives 6 digits to variables starting with Z or X.
+
+    A value of -1 disables quantization for the matching variables, storing them
+    bit-exact. Use this for accumulated fields (deposition fluxes, emissions,
+    precipitation): quantization preserves a fixed fraction of the accumulated total,
+    but the quantity of interest is the difference between consecutive timesteps, which
+    is far smaller and can be destroyed entirely.
+    Example: {".*FLUX": -1, "EDUST\\d": -1}
+
+    Ignored entirely when `significant_digits` is zero, since quantization is then off
+    for every variable.
     """
 
     quantize_mode: str = "GranularBitRound"

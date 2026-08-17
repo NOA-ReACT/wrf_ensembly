@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import netCDF4
 
 from wrf_ensembly.console import logger
+from wrf_ensembly.statistics import QUANTIZATION_DISABLED
 
 if TYPE_CHECKING:
     from wrf_ensembly.config import PostprocessConfig
@@ -158,8 +159,9 @@ def validate_compression_config(cfg: "PostprocessConfig") -> None:
                     )
 
                 # Check digits value
-                if digits < 1:
+                if digits < 1 and digits != QUANTIZATION_DISABLED:
                     raise CompressionConfigError(
-                        f"significant_digits_overrides values must be >= 1, "
-                        f"got {digits} for pattern '{pattern}'"
+                        f"significant_digits_overrides values must be >= 1, or "
+                        f"{QUANTIZATION_DISABLED} to disable quantization for the "
+                        f"matching variables; got {digits} for pattern '{pattern}'"
                     )
