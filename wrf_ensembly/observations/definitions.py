@@ -267,7 +267,7 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         cmap="Oranges",
         vmin=0,
         vmax=2,
-        model_equivalent="AOD_DUST_FINE_440",
+        model_equivalent="AOD_FINE_440",
     ),
     "AOD_Coarse_440nm": QuantitySpec(
         label="Coarse mode Aerosol Optical Depth @ 440nm",
@@ -275,7 +275,7 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         cmap="Oranges",
         vmin=0,
         vmax=2,
-        model_equivalent="AOD_DUST_COARSE_440",
+        model_equivalent="AOD_COARSE_440",
     ),
     "AOD_500nm": QuantitySpec(
         label="Aerosol Optical Depth @ 500nm",
@@ -291,7 +291,7 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         cmap="Oranges",
         vmin=0,
         vmax=2,
-        model_equivalent="AOD_DUST_FINE_500",
+        model_equivalent="AOD_FINE_500",
     ),
     "AOD_Coarse_500nm": QuantitySpec(
         label="Coarse mode Aerosol Optical Depth @ 500nm",
@@ -299,7 +299,7 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         cmap="Oranges",
         vmin=0,
         vmax=2,
-        model_equivalent="AOD_DUST_COARSE_500",
+        model_equivalent="AOD_COARSE_500",
     ),
     "AOD_550nm": QuantitySpec(
         label="Aerosol Optical Depth @ 550nm",
@@ -315,7 +315,7 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         cmap="Oranges",
         vmin=0,
         vmax=2,
-        model_equivalent="AOD_DUST_FINE_550",
+        model_equivalent="AOD_FINE_550",
     ),
     "AOD_Coarse_550nm": QuantitySpec(
         label="Coarse mode Aerosol Optical Depth @ 550nm",
@@ -323,7 +323,7 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         cmap="Oranges",
         vmin=0,
         vmax=2,
-        model_equivalent="AOD_DUST_COARSE_550",
+        model_equivalent="AOD_COARSE_550",
     ),
     "AOD_665nm": QuantitySpec(
         label="Aerosol Optical Depth @ 665nm",
@@ -339,7 +339,7 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         cmap="Oranges",
         vmin=0,
         vmax=2,
-        model_equivalent="AOD_DUST_FINE_665",
+        model_equivalent="AOD_FINE_665",
     ),
     "AOD_Coarse_665nm": QuantitySpec(
         label="Coarse mode Aerosol Optical Depth @ 665nm",
@@ -347,7 +347,7 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         cmap="Oranges",
         vmin=0,
         vmax=2,
-        model_equivalent="AOD_DUST_COARSE_665",
+        model_equivalent="AOD_COARSE_665",
     ),
     "AOD_870nm": QuantitySpec(
         label="Aerosol Optical Depth @ 870nm",
@@ -363,7 +363,7 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         cmap="Oranges",
         vmin=0,
         vmax=2,
-        model_equivalent="AOD_DUST_FINE_870",
+        model_equivalent="AOD_FINE_870",
     ),
     "AOD_Coarse_870nm": QuantitySpec(
         label="Coarse mode Aerosol Optical Depth @ 870nm",
@@ -371,7 +371,7 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         cmap="Oranges",
         vmin=0,
         vmax=2,
-        model_equivalent="AOD_DUST_COARSE_870",
+        model_equivalent="AOD_COARSE_870",
     ),
     "AOD_1064nm": QuantitySpec(
         label="Aerosol Optical Depth @ 1064nm",
