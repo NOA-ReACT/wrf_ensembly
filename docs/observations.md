@@ -97,6 +97,7 @@ The `wrf_ensembly/observations/definitions.py` module is the central registry fo
 | `MSG_SEVIRI` | Meteosat SEVIRI brightness temperatures | 2D map swath |
 | `GRASP_HARP2` | GRASP AOD retrieval from PACE HARP2 | 2D map swath |
 | `GRASP_SYNERGY` | GRASP AOD retrieval from OLCI-A + OLCI-B + TROPOMI | 2D map swath |
+| `MTG_REACT` | MTG-REACT XGBoost dust retrieval from MTG FCI | 2D map swath |
 
 Additional instruments used by converters but not yet in `INSTRUMENT_REGISTRY` (plotting/operator support is limited): `AERONET`, `MODIS`, `VIIRS`, `EarthCARE_ATLID_EBD`, `REMOTAP_SPEXONE`.
 
@@ -111,22 +112,25 @@ Additional instruments used by converters but not yet in `INSTRUMENT_REGISTRY` (
 | `BT_IR87` | Brightness Temp IR 8.7 µm | K | `IR87` | — |
 | `BT_IR108` | Brightness Temp IR 10.8 µm | K | `IR108` | — |
 | `BT_IR120` | Brightness Temp IR 12.0 µm | K | `IR120` | — |
-| `AOD_355nm` | AOD @ 355nm | — | `AOD_355` | — |
+| `AOD_355nm` | AOD @ 355nm | — | `AOD_355` | `AIRSENSE_AOD` |
+| `AOD_Fine_355nm` | Fine mode AOD @ 355nm | — | `AOD_FINE_355` | `AIRSENSE_AOD_FINE` |
+| `AOD_Coarse_355nm` | Coarse mode AOD @ 355nm | — | `AOD_COARSE_355` | `AIRSENSE_AOD_COARSE` |
+| `DOD_355nm` | Dust Optical Depth @ 355nm | — | `DOD_355` | — |
 | `AOD_440nm` | AOD @ 440nm | — | `AOD_440` | — |
-| `AOD_Fine_440nm` | Fine mode AOD @ 440nm | — | `AOD_DUST_FINE_440` | — |
-| `AOD_Coarse_440nm` | Coarse mode AOD @ 440nm | — | `AOD_DUST_COARSE_440` | — |
+| `AOD_Fine_440nm` | Fine mode AOD @ 440nm | — | `AOD_FINE_440` | — |
+| `AOD_Coarse_440nm` | Coarse mode AOD @ 440nm | — | `AOD_COARSE_440` | — |
 | `AOD_500nm` | AOD @ 500nm | — | `AOD_500` | `AIRSENSE_AOD` |
-| `AOD_Fine_500nm` | Fine mode AOD @ 500nm | — | `AOD_DUST_FINE_500` | — |
-| `AOD_Coarse_500nm` | Coarse mode AOD @ 500nm | — | `AOD_DUST_COARSE_500` | — |
+| `AOD_Fine_500nm` | Fine mode AOD @ 500nm | — | `AOD_FINE_500` | `AIRSENSE_AOD_FINE` |
+| `AOD_Coarse_500nm` | Coarse mode AOD @ 500nm | — | `AOD_COARSE_500` | `AIRSENSE_AOD_COARSE` |
 | `AOD_550nm` | AOD @ 550nm | — | `AOD_550` | `AIRSENSE_AOD` |
-| `AOD_Fine_550nm` | Fine mode AOD @ 550nm | — | `AOD_DUST_FINE_550` | `AIRSENSE_AOD_FINE` |
-| `AOD_Coarse_550nm` | Coarse mode AOD @ 550nm | — | `AOD_DUST_COARSE_550` | `AIRSENSE_AOD_COARSE` |
+| `AOD_Fine_550nm` | Fine mode AOD @ 550nm | — | `AOD_FINE_550` | `AIRSENSE_AOD_FINE` |
+| `AOD_Coarse_550nm` | Coarse mode AOD @ 550nm | — | `AOD_COARSE_550` | `AIRSENSE_AOD_COARSE` |
 | `AOD_665nm` | AOD @ 665nm | — | `AOD_665` | — |
-| `AOD_Fine_665nm` | Fine mode AOD @ 665nm | — | `AOD_DUST_FINE_665` | — |
-| `AOD_Coarse_665nm` | Coarse mode AOD @ 665nm | — | `AOD_DUST_COARSE_665` | — |
+| `AOD_Fine_665nm` | Fine mode AOD @ 665nm | — | `AOD_FINE_665` | — |
+| `AOD_Coarse_665nm` | Coarse mode AOD @ 665nm | — | `AOD_COARSE_665` | — |
 | `AOD_870nm` | AOD @ 870nm | — | `AOD_870` | — |
-| `AOD_Fine_870nm` | Fine mode AOD @ 870nm | — | `AOD_DUST_FINE_870` | — |
-| `AOD_Coarse_870nm` | Coarse mode AOD @ 870nm | — | `AOD_DUST_COARSE_870` | — |
+| `AOD_Fine_870nm` | Fine mode AOD @ 870nm | — | `AOD_FINE_870` | — |
+| `AOD_Coarse_870nm` | Coarse mode AOD @ 870nm | — | `AOD_COARSE_870` | — |
 | `AOD_1064nm` | AOD @ 1064nm | — | `AOD_1064` | — |
 
 The DART Quantity column reflects `dart.py`'s `OBS_TYPE_TABLE`, which is what
@@ -186,6 +190,7 @@ Converters are accessed through the `wrf-ensembly-obs convert` subcommand. This 
 | `msg-seviri` | `MSG_SEVIRI` | `BT_WV62`, `BT_WV73`, `BT_IR87`, `BT_IR108`, `BT_IR120` | SEVIRI native format (via satpy) |
 | `grasp-harp2` | `GRASP_HARP2` | total/fine/coarse AOD @ 440, 550, 665, 870nm | GRASP HARP2 NetCDF files |
 | `grasp-synergy` | `GRASP_SYNERGY` | total/fine/coarse AOD @ 440, 500, 550, 665, 870nm | GRASP OLCI+TROPOMI synergy NetCDF files |
+| `mtg-react` | `MTG_REACT` | `DOD_355nm` | MTG-REACT `DOD_a355_prediction_*.parquet` files |
 
 #### AERONET
 
@@ -406,10 +411,23 @@ Most WRF-Ensembly quantities map directly to DART by their quantity name (e.g., 
 
 ```python
 OBS_TYPE_TABLE = {
+    "AOD_355nm": "AIRSENSE_AOD",
+    "AOD_Fine_355nm": "AIRSENSE_AOD_FINE",
+    "AOD_Coarse_355nm": "AIRSENSE_AOD_COARSE",
     "AOD_500nm": "AIRSENSE_AOD",
+    "AOD_Fine_500nm": "AIRSENSE_AOD_FINE",
+    "AOD_Coarse_500nm": "AIRSENSE_AOD_COARSE",
     "AOD_550nm": "AIRSENSE_AOD",
+    "AOD_Fine_550nm": "AIRSENSE_AOD_FINE",
+    "AOD_Coarse_550nm": "AIRSENSE_AOD_COARSE",
 }
 ```
+
+The `AIRSENSE_AOD*` types carry no wavelength: DART's GOCART AOD forward operator computes
+AOD at the single wavelength set by `obs_def_GOCART_AOD_nml: wavelength` (default 532nm),
+which must also be present in its optical properties table. Set it to match the
+observations being assimilated; AODs at different wavelengths cannot be assimilated in the
+same experiment.
 
 ### Building the DART Converter
 
