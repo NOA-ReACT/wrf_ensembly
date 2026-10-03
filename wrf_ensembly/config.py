@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
@@ -885,6 +886,36 @@ class Config(DataClassTOMLMixin):
 
     plots: PlotsConfig = field(default_factory=PlotsConfig)
     """Configuration for diagnostic plots"""
+
+    def wrf_namelist_overrides_for_member(
+        self, member: int
+    ) -> dict[str, dict[str, Any]]:
+        """
+        Returns the `wrf_namelist_per_member` overrides for the given (zero-based) member.
+
+        Keys may be the bare member index (`"3"`) or the member directory name with any zero
+        padding (`"member_03"`, `"member_003"`). A key that matches neither form, or names a
+        member outside the ensemble, raises a ValueError instead of being silently ignored.
+        """
+        overrides: dict[str, dict[str, Any]] = {}
+        for key, groups in self.wrf_namelist_per_member.items():
+            match = re.fullmatch(r"(?:member_)?(\d+)", key)
+            if match is None:
+                raise ValueError(
+                    f"Invalid key '{key}' in [wrf_namelist_per_member], "
+                    "expected a member index like '3' or 'member_03'"
+                )
+            key_member = int(match.group(1))
+            if key_member >= self.assimilation.n_members:
+                raise ValueError(
+                    f"Key '{key}' in [wrf_namelist_per_member] refers to member {key_member}, "
+                    f"but the ensemble has {self.assimilation.n_members} members (0-"
+                    f"{self.assimilation.n_members - 1})"
+                )
+            if key_member == member:
+                for name, group in groups.items():
+                    overrides[name] = overrides.get(name, {}) | group
+        return overrides
 
 
 def _convert_datetimes_to_iso(obj: Any) -> Any:

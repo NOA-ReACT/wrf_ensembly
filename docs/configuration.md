@@ -607,16 +607,16 @@ mp_physics = 10
 ra_lw_physics = 4
 
 # Per-member namelist overrides
-[wrf_namelist_per_member.member_001.physics]
+[wrf_namelist_per_member.member_00.physics]
 mp_physics = 8
 
-[wrf_namelist_per_member.member_002.physics]
+[wrf_namelist_per_member.member_01.physics]
 mp_physics = 6
 ```
 
 You can override any WRF namelist variable by specifying it in the appropriate section. The structure follows the WRF namelist format with sections like `time_control`, `domains`, `physics`, etc.
 
-For per-member customizations, use the `wrf_namelist_per_member` section with the member name (e.g., `member_001`) as the key.
+For per-member customizations, use the `wrf_namelist_per_member` section keyed by member. Members are numbered from 0, and the key can be either the member index (`"3"`) or the member directory name (`member_03`; any zero padding is accepted). Per-member overrides are applied on top of `[wrf_namelist]`. A key that isn't a valid member, or names a member outside `assimilation.n_members`, is an error.
 
 ## DART Namelist
 

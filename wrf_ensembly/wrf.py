@@ -222,15 +222,19 @@ def generate_wrf_namelist(
                 f.write(f"{var}\n")
         logger.info(f"Wrote iofields to {iofields_path}")
 
-    # Add overrides
+    # Add overrides. Groups are copied so the per-member overrides and chem_in_opt below
+    # don't modify `cfg.wrf_namelist` when several namelists are built in one process.
     for name, group in cfg.wrf_namelist.items():
         if name in wrf_namelist:
             wrf_namelist[name] |= group
         else:
-            wrf_namelist[name] = group
-    if str(member) in cfg.wrf_namelist_per_member:
-        member_group = cfg.wrf_namelist_per_member[str(member)]
-        for name, group in member_group.items():
+            wrf_namelist[name] = dict(group)
+    # Always resolve, even without a member, so invalid keys fail early (e.g. at `preprocess`)
+    member_overrides = cfg.wrf_namelist_overrides_for_member(
+        member if member is not None else -1
+    )
+    if member is not None:
+        for name, group in member_overrides.items():
             if name in wrf_namelist:
                 wrf_namelist[name] |= group
             else:
