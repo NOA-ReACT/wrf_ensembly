@@ -57,6 +57,11 @@ def _member_visibility_timeout() -> float:
     return MEMBER_VISIBILITY_TIMEOUT_S if "SLURM_JOB_ID" in os.environ else 0.0
 
 
+# Groups that filter cannot run without. `[dart_namelist]` is the complete input.nml, so
+# these are only a sanity check; DART reports any other missing group itself.
+REQUIRED_DART_NAMELIST_GROUPS = ("filter_nml", "model_nml", "obs_kind_nml")
+
+
 class Experiment:
     """
     An ensemble assimilation experiment
@@ -154,6 +159,20 @@ class Experiment:
         """Prepare DART working directory by writing namelist and linking files"""
 
         dart_dir = self.paths.dart_work_dir
+
+        # input.nml is written from [dart_namelist] alone, so it must hold the whole namelist.
+        # Catch the obvious cases here instead of letting filter fail on a partial file.
+        missing = [
+            group
+            for group in REQUIRED_DART_NAMELIST_GROUPS
+            if group not in self.cfg.dart_namelist
+        ]
+        if missing:
+            raise ValueError(
+                f"[dart_namelist] is missing the {', '.join(missing)} group(s). "
+                "It must contain the complete DART input.nml, not only overrides: "
+                "setup-dart replaces input.nml with its contents."
+            )
 
         # Prepare inflation: restore restart files and apply namelist overrides
         filter_namelist_path = dart_dir / "input.nml"

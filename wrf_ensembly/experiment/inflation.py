@@ -37,7 +37,12 @@ class InflationConfig:
                 data_inflation_dir=data_inflation_dir,
             )
 
-        inf_flavor = cfg.dart_namelist["filter_nml"]["inf_flavor"]
+        inf_flavor = cfg.dart_namelist.get("filter_nml", {}).get("inf_flavor")
+        if inf_flavor is None:
+            raise ValueError(
+                "use_inflation is True but [dart_namelist.filter_nml] has no inf_flavor. "
+                "[dart_namelist] must contain the complete DART input.nml."
+            )
         if len(inf_flavor) < 2:
             raise ValueError(
                 f"filter_nml.inf_flavor must have at least 2 elements, got {inf_flavor}"

@@ -225,10 +225,16 @@ specified = true
 nio_tasks_per_group = 0
 nio_groups = 1
 
-# -- DART NAMELIST OVERRIDES --
-# [dart_namelist]
+# -- DART NAMELIST --
+# The complete DART input.nml, one table per group. setup-dart replaces input.nml with
+# this, so copy every group from a working input.nml, not only the values you change.
+# filter_nml.ens_size is always set to assimilation.n_members.
 # [dart_namelist.filter_nml]
 # num_output_state_members = 0
+# ...
+# [dart_namelist.model_nml]
+# ...
+# [dart_namelist.obs_kind_nml]
 # ...
 
 # -- EXTRA FILES TO COPY INTO DART DIRECTORY --

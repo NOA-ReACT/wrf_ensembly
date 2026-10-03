@@ -221,9 +221,9 @@ The forecasts are stored inside `scratch/forecasts/cycle_ABC`. Of course, you mu
 
 ## Running the assimilation filter, generating the analysis
 
-Running the assimilation filter involves placing the model state files in the correct place and running `filter.exe` from the DART WRF directory. Currently, WRF-Ensembly does not handle the DART namelist, so you might have to make some changes to `input.nml` in the `models/wrf/work` directory. Namely, you should set the correct number of ensemble members in `filter_nml::ens_size` and the correct observation types in `obs_kind_nml::assimilate_these_obs_types`. The state variables in `model_nml::wrf_state_variables` must also match `config.yml` and what you expect.
+Running the assimilation filter involves placing the model state files in the correct place and running `filter.exe` from the DART WRF directory. The DART namelist (`input.nml` in `models/wrf/work`) is written by WRF-Ensembly from the `[dart_namelist]` section of `config.toml`, which must contain the **complete** namelist (see [DART Namelist](configuration.md#dart-namelist)). Any edits made directly to `input.nml` are overwritten. Pay attention to the observation types in `obs_kind_nml::assimilate_these_obs_types` and the state variables in `model_nml::wrf_state_variables`, which must match what you expect. `filter_nml::ens_size` is set for you from `assimilation.n_members`.
 
-After adjusting `input.nml`, you can run the assimilation filter using the `ensemble filter` command:
+Once `[dart_namelist]` is in place, you can run the assimilation filter using the `ensemble filter` command:
 
 ```bash
 wrf-ensembly /path/to/experiment ensemble filter

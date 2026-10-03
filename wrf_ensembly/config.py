@@ -876,7 +876,8 @@ class Config(DataClassTOMLMixin):
     """Overrides for the WRF namelist per ensemble member"""
 
     dart_namelist: dict[str, dict[str, Any]] = field(default_factory=dict)
-    """Overrides for the DART namelist (input.nml)"""
+    """The complete DART namelist (input.nml). `setup-dart` writes input.nml from this alone,
+    only setting `filter_nml.ens_size` and the inflation restart flags."""
 
     extra_dart_files: list[CopyFileConfig] = field(default_factory=list)
     """List of extra files to copy into the DART directory before running assimilation"""

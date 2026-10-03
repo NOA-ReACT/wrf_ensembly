@@ -56,7 +56,7 @@ The configuration file is organized into the following main sections:
 - **[plots](#plots)** - Diagnostic plot configuration
 - **[environment](#environment)** - Environment variables
 - **[wrf_namelist](#wrf-namelist)** - WRF namelist overrides
-- **[dart_namelist](#dart-namelist)** - DART namelist overrides
+- **[dart_namelist](#dart-namelist)** - The complete DART `input.nml`
 - **[extra_dart_files](#extra-dart-files)** - Extra files to copy into the DART directory
 
 ## Metadata
@@ -620,18 +620,28 @@ For per-member customizations, use the `wrf_namelist_per_member` section keyed b
 
 ## DART Namelist
 
-Overrides for the DART `input.nml` namelist. The structure mirrors the DART namelist sections.
+The complete DART `input.nml`, with one table per namelist group. `setup-dart` (and `ensemble filter`, which runs it every cycle) writes `models/wrf/work/input.nml` from this section **alone**: the existing file in the DART directory is replaced, not merged. So you must include every group DART needs, not only the values you want to change. The usual way to start is to copy each group of your working `input.nml` into the config:
 
 ```toml
-[dart_namelist]
-
 [dart_namelist.filter_nml]
+ens_size = 20                 # always replaced with assimilation.n_members
 num_output_state_members = 0
 inf_flavor = [2, 0]
 inf_initial = [1.0, 1.0]
+# ... every other filter_nml entry
+
+[dart_namelist.model_nml]
+# ...
+
+[dart_namelist.obs_kind_nml]
+# ...
+
+# ... and the remaining groups (assim_tools_nml, location_nml, utilities_nml, ...)
 ```
 
-Any DART namelist variable can be overridden here. The structure follows DART's `input.nml` format.
+WRF-Ensembly only changes two things when writing the file: `filter_nml.ens_size` is set to `assimilation.n_members`, and when `assimilation.use_inflation` is enabled, `filter_nml.inf_initial_from_restart` / `inf_sd_initial_from_restart` are set depending on whether inflation files from a previous cycle exist. `setup-dart` refuses to run if `filter_nml`, `model_nml` or `obs_kind_nml` is missing.
+
+Keeping the whole namelist in the config means the experiment does not depend on what is in the (possibly shared) DART directory. Different experiments can use the same DART build with different settings.
 
 ## Extra DART Files
 
