@@ -136,6 +136,14 @@ def convert_viirs(
     indices = get_index_tuples(ds_binned["aod550"])
     binned_coord_names = ds_binned["aod550"].dims
 
+    # Platform (NOAA-20, Suomi-NPP, ...) and orbit are only stored as global attributes
+    metadata = {
+        "platform": ds.attrs.get("platform"),
+        "orbit_number": int(ds.attrs["OrbitNumber"])
+        if "OrbitNumber" in ds.attrs
+        else None,
+    }
+
     # Create dataframe
     df = pd.DataFrame(
         {
@@ -150,7 +158,7 @@ def convert_viirs(
             "value_uncertainty": aod550_uncertainty,
             "qc_flag": valid_mask.astype(int),
             "orig_filename": original_filename,
-            "metadata": pd.NA,
+            "metadata": [dict(metadata) for _ in range(latitude.size)],
         }
     )
 
