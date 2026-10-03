@@ -270,6 +270,9 @@ def prepare_cycles(
         parquet_path = exp.paths.obs / f"cycle_{c.index:03d}.parquet"
         observations.io.write_obs(cycle_obs, parquet_path)
 
+        if skip_dart:
+            continue
+
         output_path = exp.paths.obs / f"cycle_{c.index:03d}.obs_seq"
         commands.append(
             observations.dart.convert_to_dart_obs_seq(
