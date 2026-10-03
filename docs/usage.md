@@ -10,8 +10,11 @@ Commands are grouped by their functionality in the following sections:
 - [Postprocessing](#postprocessing)
 - [Status](#status)
 - [SLURM](#slurm)
+- [Plots](#plots)
+- [Validation](#validation)
+- [Legacy obs_seq tools](#legacy-obs_seq-tools)
 
-For a new experiment, you will typically start with creating it and copying the model ([experiment management](#experiment-management)), then preprocess the input data ([preprocessing](#preprocessing)), preprocess observations ([observations](#observations)), run the ensemble ([ensemble management](#ensemble-management)), and finally postprocess the results ([postprocessing](#postprocessing)). You can check the experiment status at any time using the [status](#status) commands. If you are using SLURM, you can also find commands for that in the last section (preprocess, run ensemble, postprocess).
+For a new experiment, you will typically start with creating it and copying the model ([experiment management](#experiment-management)), then preprocess the input data ([preprocessing](#preprocessing)), preprocess observations ([observations](#observations)), run the ensemble ([ensemble management](#ensemble-management)), and finally postprocess the results ([postprocessing](#postprocessing)). You can check the experiment status at any time using the [status](#status) commands. If you are using SLURM, you can also find commands for that in the [SLURM](#slurm) section (preprocess, run ensemble, postprocess).
 
 All commands will take the path to the experiment directory as the first argument. This directory will contain the model data, input and output forecasts, configuration and anything else related to the experiment. It must be writable by the current user.
 
@@ -33,6 +36,12 @@ All commands will take the path to the experiment directory as the first argumen
     :module: wrf_ensembly.commands.experiment
     :command: cycle_info
     :prog_name: wrf-ensembly EXPERIMENT_PATH experiment cycle-info
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.experiment
+    :command: setup_dart
+    :prog_name: wrf-ensembly EXPERIMENT_PATH experiment setup-dart
     :depth: 2
 
 ## Preprocessing
@@ -69,6 +78,12 @@ All commands will take the path to the experiment directory as the first argumen
 
 ::: mkdocs-click
     :module: wrf_ensembly.commands.preprocess
+    :command: icbc_status
+    :prog_name: wrf-ensembly EXPERIMENT_PATH preprocess icbc-status
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.preprocess
     :command: interpolate_chem
     :prog_name: wrf-ensembly EXPERIMENT_PATH preprocess interpolate-chem
     :depth: 2
@@ -81,40 +96,60 @@ All commands will take the path to the experiment directory as the first argumen
 
 ## Observations
 
+Observations are first converted to the WRF-Ensembly parquet format with the separate `wrf-ensembly-obs` CLI, then added to the experiment's observation database. See [Observations](observations.md) for the full workflow.
+
 ::: mkdocs-click
     :module: wrf_ensembly.commands.observations
-    :command: convert_obs
-    :prog_name: wrf-ensembly EXPERIMENT_PATH observations convert-obs
+    :command: add
+    :prog_name: wrf-ensembly EXPERIMENT_PATH observations add
     :depth: 2
 
 ::: mkdocs-click
     :module: wrf_ensembly.commands.observations
-    :command: combine_obs
-    :prog_name: wrf-ensembly EXPERIMENT_PATH observations combine-obs
+    :command: show
+    :prog_name: wrf-ensembly EXPERIMENT_PATH observations show
     :depth: 2
 
 ::: mkdocs-click
     :module: wrf_ensembly.commands.observations
-    :command: prepare_custom_window
-    :prog_name: wrf-ensembly EXPERIMENT_PATH observations prepare-custom-window
+    :command: delete
+    :prog_name: wrf-ensembly EXPERIMENT_PATH observations delete
     :depth: 2
 
 ::: mkdocs-click
     :module: wrf_ensembly.commands.observations
-    :command: obs_seq_to_nc
-    :prog_name: wrf-ensembly EXPERIMENT_PATH observations obs-seq-to-nc
+    :command: prepare_cycles
+    :prog_name: wrf-ensembly EXPERIMENT_PATH observations prepare-cycles
     :depth: 2
 
 ::: mkdocs-click
     :module: wrf_ensembly.commands.observations
-    :command: preprocess_for_wrf
-    :prog_name: wrf-ensembly EXPERIMENT_PATH observations preprocess-for-wrf
+    :command: cycle_summary
+    :prog_name: wrf-ensembly EXPERIMENT_PATH observations cycle-summary
     :depth: 2
 
 ::: mkdocs-click
     :module: wrf_ensembly.commands.observations
-    :command: list_files
-    :prog_name: wrf-ensembly EXPERIMENT_PATH observations list-files
+    :command: cycle_info
+    :prog_name: wrf-ensembly EXPERIMENT_PATH observations cycle-info
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.observations
+    :command: plot
+    :prog_name: wrf-ensembly EXPERIMENT_PATH observations plot
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.observations
+    :command: plot_cycle_locations
+    :prog_name: wrf-ensembly EXPERIMENT_PATH observations plot-cycle-locations
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.observations
+    :command: plot_compare_obs_to_grid
+    :prog_name: wrf-ensembly EXPERIMENT_PATH observations plot-compare-obs-to-grid
     :depth: 2
 
 ## Ensemble Management
@@ -173,6 +208,12 @@ All commands will take the path to the experiment directory as the first argumen
     :prog_name: wrf-ensembly EXPERIMENT_PATH ensemble cycle
     :depth: 2
 
+::: mkdocs-click
+    :module: wrf_ensembly.commands.ensemble
+    :command: reset_cycle
+    :prog_name: wrf-ensembly EXPERIMENT_PATH ensemble reset-cycle
+    :depth: 2
+
 ## Postprocessing
 
 ::: mkdocs-click
@@ -183,20 +224,8 @@ All commands will take the path to the experiment directory as the first argumen
 
 ::: mkdocs-click
     :module: wrf_ensembly.commands.postprocess
-    :command: process_pipeline
-    :prog_name: wrf-ensembly EXPERIMENT_PATH postprocess process-pipeline
-    :depth: 2
-
-::: mkdocs-click
-    :module: wrf_ensembly.commands.postprocess
-    :command: statistics
-    :prog_name: wrf-ensembly EXPERIMENT_PATH postprocess statistics
-    :depth: 2
-
-::: mkdocs-click
-    :module: wrf_ensembly.commands.postprocess
-    :command: concatenate
-    :prog_name: wrf-ensembly EXPERIMENT_PATH postprocess concatenate
+    :command: run
+    :prog_name: wrf-ensembly EXPERIMENT_PATH postprocess run
     :depth: 2
 
 ::: mkdocs-click
@@ -293,3 +322,106 @@ All commands will take the path to the experiment directory as the first argumen
     :prog_name: wrf-ensembly EXPERIMENT_PATH slurm run-experiment
     :depth: 2
 
+## Plots
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.plots
+    :command: cycle_consistency
+    :prog_name: wrf-ensembly EXPERIMENT_PATH plots cycle-consistency
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.plots
+    :command: cycle_filter_stats
+    :prog_name: wrf-ensembly EXPERIMENT_PATH plots cycle-filter-stats
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.plots
+    :command: ensemble_spread
+    :prog_name: wrf-ensembly EXPERIMENT_PATH plots ensemble-spread
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.plots
+    :command: forecast
+    :prog_name: wrf-ensembly EXPERIMENT_PATH plots forecast
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.plots
+    :command: forecast_vs_analysis
+    :prog_name: wrf-ensembly EXPERIMENT_PATH plots forecast-vs-analysis
+    :depth: 2
+
+## Validation
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.validation
+    :command: interpolate_model
+    :prog_name: wrf-ensembly EXPERIMENT_PATH validation interpolate-model
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.validation
+    :command: interpolate_model_per_member
+    :prog_name: wrf-ensembly EXPERIMENT_PATH validation interpolate-model-per-member
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.validation
+    :command: analyze_first_departures
+    :prog_name: wrf-ensembly EXPERIMENT_PATH validation analyze-first-departures
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.validation
+    :command: analyze_lead_time_skill
+    :prog_name: wrf-ensembly EXPERIMENT_PATH validation analyze-lead-time-skill
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.validation
+    :command: obs_curtain
+    :prog_name: wrf-ensembly EXPERIMENT_PATH validation obs-curtain
+    :depth: 2
+
+## Legacy obs_seq tools
+
+These commands belong to the older workflow where each observation file was converted to `obs_seq` directly by a DART converter. They are kept for existing experiments; new experiments should use the [observations](#observations) commands instead.
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.obs_sequence
+    :command: convert_obs
+    :prog_name: wrf-ensembly EXPERIMENT_PATH obs-sequence convert-obs
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.obs_sequence
+    :command: combine_obs
+    :prog_name: wrf-ensembly EXPERIMENT_PATH obs-sequence combine-obs
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.obs_sequence
+    :command: preprocess_for_wrf
+    :prog_name: wrf-ensembly EXPERIMENT_PATH obs-sequence preprocess-for-wrf
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.obs_sequence
+    :command: prepare_custom_window
+    :prog_name: wrf-ensembly EXPERIMENT_PATH obs-sequence prepare-custom-window
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.obs_sequence
+    :command: obs_seq_to_nc
+    :prog_name: wrf-ensembly EXPERIMENT_PATH obs-sequence obs-seq-to-nc
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.obs_sequence
+    :command: list_files
+    :prog_name: wrf-ensembly EXPERIMENT_PATH obs-sequence list-files
+    :depth: 2

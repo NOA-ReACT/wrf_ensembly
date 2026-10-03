@@ -75,10 +75,10 @@ wrf-ensembly /path/to/experiment preprocess metgrid
 The namelists for WPS are generated automatically based on the configuration file. All preprocessing takes place inside the `work/preprocess` subdirectory of the experiment.
 The geogrid table is configurable in the `geogrid.table` configuration field, while the ungrib variable table is set in the `data.meteorology_vtable` configuration field.
 
-At this point, you will be able to find the `met_em*` files inside the `work/preprocess/WPS` directory. To run real, you can use the `preprocess real <CYCLE>` command:
+At this point, you will be able to find the `met_em*` files inside the `work/preprocess/WPS` directory. To run real, you can use the `preprocess real --cycle <CYCLE>` command:
 
 ```bash
-wrf-ensembly /path/to/experiment preprocess real 0 # run for cycle 0
+wrf-ensembly /path/to/experiment preprocess real --cycle 0
 ```
 
 The above command will take care to generate the namelist for `real.exe`, run `real.exe`, and copy the final `wrfinput_d01` and `wrfbdy_d01` files to the `data/initial_conditions` directory. You must run real for every cycle in your experiment.
@@ -102,115 +102,48 @@ wrf-ensembly /path/to/experiment preprocess interpolate-chem
 
 ## Observations
 
-Every data assimilation experiment needs observations to assimilate. DART stores observations in the `obs_seq` format and provides routines in FORTRAN to read/write them. WRF-Ensembly mainly contains a bunch of helper commands to make it easier to work with observations.
-
-At the end of each cycle, we can assimilate ONE `obs_seq` file. The workflow to generate this file is shown in the diagram below, for cycle 000. We assume there is one input file per observation type:
+Every data assimilation experiment needs observations to assimilate. DART reads observations in its `obs_seq` format, but WRF-Ensembly keeps its own observation database per experiment, so the same observations can also be used for plotting and validation. The [Observations](observations.md) page covers this in detail. The workflow is:
 
 ```mermaid
 flowchart TD
-%% Input observation files
-A1[EarthCARE EBD<br/>ec_atl_ebd.nc] --> B1[EarthCARE EBD<br/>obs_converter]
-A2[Aeolus L2B Winds<br/>aeolus_l2b.DBL] --> B2[Aeolus L2B Winds<br/>obs_converter]
-A3[MODIS AOD<br/>modis.h4] --> B3[MODIS AOD<br/>obs_converter]
-A4[Radiosonde<br/>obs_radiosonde.csv] --> B4[Radiosonde<br/>obs_converter]
+A1[EarthCARE EBD<br/>ec_atl_ebd.h5] --> B[wrf-ensembly-obs convert]
+A2[AERONET<br/>*.lev20] --> B
+A3[MODIS AOD<br/>modis.hdf] --> B
+B --> C[Standardised .parquet files]
+C --> D[observations add<br/>trimming, superobbing]
+D --> E[(obs/observations.duckdb)]
+E --> F[observations prepare-cycles]
+F --> G[obs/cycle_NNN.obs_seq]
 
-%% Individual obs_seq files
-B1 --> C1[ec_ebd.obs_seq]
-B2 --> C2[aeolus_l2b.obs_seq]
-B3 --> C3[modis_aod.obs_seq]
-B4 --> C4[radiosonde.obs_seq]
-
-%% Combine all obs_seq files
-C1 --> D[obs_sequence_tool]
-C2 --> D
-C3 --> D
-C4 --> D
-
-%% Combined obs_seq file
-D --> E[cycle_000.obs_seq]
-
-%% Domain filtering
-E --> F[wrf_dart_obs_preprocess]
-
-%% Final output
-F --> G[cycle_000.obs_seq<br/>Domain-filtered observations]
-
-%% Styling
 classDef inputFiles fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-classDef converters fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-classDef obsSeq fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
 classDef tools fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
 classDef final fill:#ffebee,stroke:#c62828,stroke-width:2px
 
-class A1,A2,A3,A4,A5,A6 inputFiles
-class B1,B2,B3,B4,B5,B6 converters
-class C1,C2,C3,C4,C5,C6,E obsSeq
-class D,F tools
+class A1,A2,A3 inputFiles
+class B,D,F tools
 class G final
 ```
 
-In wrf-ensembly, we have the concept of the "observation group" file, which is a TOML file that contains the paths to a set of observation files, as well as their start and end dates. For example:
-
-```toml
-kind = "LIDAR_EXTINCTION"
-converter = "/dart/observations/obs_converters/earthcare/work/convert_ec_atl_ebd"
-cwd = "/dart/observations/obs_converters/earthcare/work/"
-
-[[files]]
-path = "/data/ECA_EXAE_ATL_EBD_2A_20250401T000437Z_20250401T180155Z_04777G.ds.h5"
-start_date = "20250401T000430"
-end_date = "20250401T001558"
-
-[[files]]
-path = "/data/ECA_EXAE_ATL_EBD_2A_20250401T001544Z_20250401T180206Z_04777H.ds.h5"
-start_date = "20250401T001537"
-end_date = "20250401T002749"
-
-[[files]]
-path = "/data/ECA_EXAE_ATL_EBD_2A_20250401T002733Z_20250401T180115Z_04778A.ds.h5"
-start_date = "20250401T002726"
-end_date = "20250401T003922"
-
-[[files]]
-path = "/data/ECA_EXAE_ATL_EBD_2A_20250401T003908Z_20250401T194300Z_04778B.ds.h5"
-start_date = "20250401T003901"
-end_date = "20250401T005109"
-
-[[files]]
-path = "/data/ECA_EXAE_ATL_EBD_2A_20250401T005055Z_20250401T194301Z_04778C.ds.h5"
-start_date = "20250401T005048"
-end_date = "20250401T010212"
-
-[[files]]
-path = "/data/ECA_EXAE_ATL_EBD_2A_20250401T010159Z_20250401T194207Z_04778D.ds.h5"
-start_date = "20250401T010152"
-end_date = "20250401T011400"
-
-[[files]]
-path = "/data/ECA_EXAE_ATL_EBD_2A_20250401T011345Z_20250401T194206Z_04778E.ds.h5"
-start_date = "20250401T011338"
-end_date = "20250401T012534"
-```
-
-This way, wrf-ensembly can filter out which files have data during an assimilation window and only convert them.
-These files are created using some helper scripts we provide in the repository, under the [obs_scripts](https://github.com/NOA-ReACT/wrf_ensembly/tree/main/obs_scripts) directory. Since they are specific to one set of observations, you are expected to write your own scripts to generate these files. The scripts should output the TOML file in the `obs_group` format, as shown above.
-
-Assuming you have your `.toml` files inside the `obs/` subdirectory of your experiment, you can use the `observations convert-obs` command to convert the observation files to the `obs_seq` format and the `observations combine-obs:
+First, convert the raw instrument files to the standardised parquet format using the `wrf-ensembly-obs` CLI. It works on files, not on an experiment, so you can convert once and reuse the output across experiments:
 
 ```bash
-# Use --jobs to convert many files in parallel. Watch out for memory usage!
-wrf-ensembly /path/to/experiment observations convert-obs --jobs 32
-# Combine all obs_seq files into one per cycle
-wrf-ensembly /path/to/experiment observations combine-obs --jobs 32
+wrf-ensembly-obs convert aeronet input_file.lev20 aeronet.parquet --quantities AOD_500nm
 ```
 
-Finally, you can (optionally) filter the observations to the domain of the WRF simulation using the `observations preprocess-for-wrf` command using the `wrf_dart_obs_preprocess` tool (read [here](https://docs.dart.ucar.edu/en/latest/models/wrf/WRF_DART_utilities/wrf_dart_obs_preprocess.html)):
+Then add the converted files to the experiment. This trims them to the domain and the experiment's time range, applies any density reduction (superobbing, binning, thinning) configured in `config.toml`, and stores them in `obs/observations.duckdb`:
 
 ```bash
-wrf-ensembly /path/to/experiment observations preprocess-for-wrf
+wrf-ensembly /path/to/experiment observations add /path/to/observations/*.parquet --jobs 4
+wrf-ensembly /path/to/experiment observations show
 ```
 
-Following these steps above will result in the `obs/` directory having a bunch of `cycle_ABC.obs_seq` files, one for each cycle. These files are ready to be assimilated in the next step. If a cycle doesn't have a file, your observations did not cover the assimilation window of that cycle, so no observations will be assimilated for that cycle.
+Finally, extract the observations of each cycle's assimilation window and convert them to `obs_seq`. This requires the `wrf_ensembly` observation converter to be compiled in DART (`DART/observations/obs_converters/wrf_ensembly`):
+
+```bash
+wrf-ensembly /path/to/experiment observations prepare-cycles --jobs 8
+```
+
+This writes one `cycle_NNN.obs_seq` file per cycle (plus a `cycle_NNN.parquet` for inspection) in the `obs/` directory. If a cycle has no file, no observations fall inside its assimilation window, and nothing will be assimilated for it. Use `observations cycle-summary` to see the counts per cycle.
 
 
 ## Preparing the ensemble
@@ -223,9 +156,10 @@ flowchart TD
     genperts --> applyperts[ensemble apply-perturbations]
     applyperts --> updatebc[ensemble update-bc]
     updatebc --> advance[ensemble advance-member]
-    advance --> filter[ensemble assimilation-filter]
-    filter --> cycle[ensemble cycle]
-    cycle --> advance
+    advance --> filter[ensemble filter]
+    filter --> analysis[ensemble analysis]
+    analysis --> cycle[ensemble cycle]
+    cycle --> updatebc
 ```
 
 We begin with the `ensemble setup` command, which prepares the ensemble by copying the initial conditions and setting up the directories for each member. This command should be run only once at the beginning of the experiment.

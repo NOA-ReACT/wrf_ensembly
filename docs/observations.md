@@ -311,10 +311,10 @@ Once observations are converted, add them to the experiment:
 
 ```bash
 # Add individual files or directories
-wrf-ensembly $EXP_PATH obs add /path/to/observations/*.parquet
+wrf-ensembly $EXP_PATH observations add /path/to/observations/*.parquet
 
 # Use parallel processing for large datasets
-wrf-ensembly $EXP_PATH obs add /path/to/observations/*.parquet --jobs 4
+wrf-ensembly $EXP_PATH observations add /path/to/observations/*.parquet --jobs 4
 ```
 
 The `add` command performs:
@@ -329,15 +329,15 @@ Each experiment maintains a DuckDB database. You can interact with it via CLI co
 
 ```bash
 # Show summary of available observations and files
-wrf-ensembly $EXP_PATH obs show
+wrf-ensembly $EXP_PATH observations show
 
 # Remove all observations from a specific file
-wrf-ensembly $EXP_PATH obs delete 'original_file.nc'
+wrf-ensembly $EXP_PATH observations delete 'original_file.nc'
 ```
 
 ## Density Reduction
 
-Observations are often denser than the model grid, so WRF-Ensembly supports three mutually exclusive (per instrument-quantity pair) methods to reduce density. These are configured in `config.toml` and applied during `obs add`.
+Observations are often denser than the model grid, so WRF-Ensembly supports three mutually exclusive (per instrument-quantity pair) methods to reduce density. These are configured in `config.toml` and applied during `observations add`.
 
 ### Spatial Superobbing (`superobs`)
 
@@ -377,16 +377,16 @@ Before data assimilation, observations must be prepared for each cycle:
 
 ```bash
 # Prepare observations for all cycles
-wrf-ensembly $EXP_PATH obs prepare-cycles
+wrf-ensembly $EXP_PATH observations prepare-cycles
 
 # Prepare for a specific cycle
-wrf-ensembly $EXP_PATH obs prepare-cycles --cycle 0
+wrf-ensembly $EXP_PATH observations prepare-cycles --cycle 0
 
 # Use parallel jobs for DART conversion
-wrf-ensembly $EXP_PATH obs prepare-cycles --jobs 4
+wrf-ensembly $EXP_PATH observations prepare-cycles --jobs 4
 
 # Skip DART conversion (write parquet files only, for inspection)
-wrf-ensembly $EXP_PATH obs prepare-cycles --skip-dart
+wrf-ensembly $EXP_PATH observations prepare-cycles --skip-dart
 ```
 
 This process:
@@ -527,7 +527,7 @@ spatial_resolution = 1.0
 
 ## Command Reference
 
-### Experiment-Level Commands (`wrf-ensembly $EXP_PATH obs`)
+### Experiment-Level Commands (`wrf-ensembly $EXP_PATH observations`)
 
 | Command | Description |
 |---------|-------------|
@@ -712,8 +712,8 @@ wrf-ensembly-obs convert my-instrument test_file.nc output.parquet
 wrf-ensembly-obs dump-info output.parquet
 
 # Add to an experiment and verify it appears in the summary
-wrf-ensembly $EXP_PATH obs add output.parquet
-wrf-ensembly $EXP_PATH obs show
+wrf-ensembly $EXP_PATH observations add output.parquet
+wrf-ensembly $EXP_PATH observations show
 ```
 
 ### Step 6 — Enable for Assimilation
@@ -726,8 +726,8 @@ instruments_to_assimilate = ["MY_INSTRUMENT", "AERONET"]
 
 Then prepare cycles and verify the observations appear:
 ```bash
-wrf-ensembly $EXP_PATH obs prepare-cycles --skip-dart --cycle 0
-wrf-ensembly $EXP_PATH obs cycle-info 0
+wrf-ensembly $EXP_PATH observations prepare-cycles --skip-dart --cycle 0
+wrf-ensembly $EXP_PATH observations cycle-info 0
 ```
 
 ### Summary Checklist

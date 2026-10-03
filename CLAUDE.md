@@ -73,16 +73,17 @@ wrf-ensembly $EXPERIMENT_PATH group command
 **Experiment Module (`wrf_ensembly/experiment/`)**
 - `Experiment`: Main class orchestrating experiment operations
 - `ExperimentPaths`: Manages directory structure and paths
-- `ExperimentDatabase`: SQLite interface for status tracking
-- `ExperimentStatus`, `MemberStatus`: Status dataclasses
+- `ExperimentState` (`state_store.py`): file-based status store under `status/`
+- `ExperimentStateMachine` (`state_machine.py`): derives cycle state from the state store
+- `MemberStatus` (`dataclasses.py`): per-member status dataclass
 
 **Commands (`wrf_ensembly/commands/`)**
 Commands are organized by workflow phase:
 - `experiment.py`: Create, setup, cycle info
 - `preprocess.py`: WPS workflow (geogrid, ungrib, metgrid, real)
 - `ensemble.py`: Main cycling operations (advance-member, filter, analysis, cycle)
-- `observations.py`: Observation file management
-- `obs_sequence.py`: DART obs_seq file operations
+- `observations.py`: Observation database management (`add`, `show`, `prepare-cycles`, ...)
+- `obs_sequence.py`: Legacy DART obs_seq file operations (`obs-sequence` group)
 - `postprocess.py`: Processing pipeline for outputs
 - `slurm.py`: HPC job generation and submission
 - `status.py`: Status viewing/management
@@ -188,20 +189,21 @@ wrf-ensembly $EXP_PATH experiment setup-dart
 ```bash
 wrf-ensembly $EXP_PATH preprocess setup
 wrf-ensembly $EXP_PATH preprocess geogrid
-wrf-ensembly $EXP_PATH preprocess ungrib --cycle X
-wrf-ensembly $EXP_PATH preprocess metgrid --cycle X
+wrf-ensembly $EXP_PATH preprocess ungrib
+wrf-ensembly $EXP_PATH preprocess metgrid
 wrf-ensembly $EXP_PATH preprocess real --cycle X
 ```
 
-**Running a cycle:**
+**Running a cycle** (these act on the experiment's current cycle):
 ```bash
-wrf-ensembly $EXP_PATH ensemble advance-member --cycle X --member Y
-wrf-ensembly $EXP_PATH ensemble filter --cycle X
-wrf-ensembly $EXP_PATH ensemble cycle --cycle X
+wrf-ensembly $EXP_PATH ensemble advance-member --member Y
+wrf-ensembly $EXP_PATH ensemble filter
+wrf-ensembly $EXP_PATH ensemble analysis
+wrf-ensembly $EXP_PATH ensemble cycle
 ```
 
 **SLURM mode:**
 ```bash
-wrf-ensembly $EXP_PATH slurm submit-preprocessing --cycles 0-5
-wrf-ensembly $EXP_PATH slurm submit-experiment --start-cycle 0
+wrf-ensembly $EXP_PATH slurm preprocessing
+wrf-ensembly $EXP_PATH slurm run-experiment --all-cycles
 ```

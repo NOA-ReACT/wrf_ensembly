@@ -20,7 +20,7 @@ This project is under active development. It is used at the National Observatory
 
 ## Quick Links
 
-- [Getting Started](getting-started.md)
-- [Installation Guide](user-guide/installation.md)
-- [API Reference](api-reference.md)
-- [GitHub Repository](https://github.com/yourusername/wrf_ensembly)
+- [Tutorial](tutorial.md)
+- [Installation Guide](installation.md)
+- [Command Reference](usage.md)
+- [GitHub Repository](https://github.com/NOA-ReACT/wrf_ensembly)

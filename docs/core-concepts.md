@@ -117,11 +117,11 @@ In the typical WRF-Ensembly workflow, we don't use the raw wrfout files. The fol
 3. Concatenate all files into a single file, one per cycle and member.
 4. Compute the ensemble statistics (mean and standard deviation), leaving you with two files per cycle.
 
-During the final steps, the files are also compressed using a netCDF-compatible algorithm (zstd is recommended, but zlib is more widely available) and the variables are 'packed' to avoid storing too many insignificant digits. Both these processes are optional and configurable (see the `[postprocess]` section of the [Configuration](./configuration.md#Postprocess)). The user can select whether to store only the ensemble statistics or all member files, the first cutting down the output size significantly.
+During the final steps, the files are also compressed using a netCDF-compatible algorithm (zstd is recommended, but zlib is more widely available) and the variables are 'packed' to avoid storing too many insignificant digits. Both these processes are optional and configurable (see the `[postprocess]` section of the [Configuration](./configuration.md#postprocess)). The user can select whether to store only the ensemble statistics or all member files, the first cutting down the output size significantly.
 
 Because there are many tools that use raw wrfout files, the above is all optional. You can find the wrfout files inside the `scratch/` directory.
 
-More information about postprocessing is available in the [Postprocessing](./postprocessing.md) section, including how the processing pipeline is setup.
+More information about postprocessing is available in the [Postprocessing](./postprocess.md) section, including how the processing pipeline is setup.
 
 
 ## HPC intergration (SLURM)
