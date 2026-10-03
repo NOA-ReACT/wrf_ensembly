@@ -163,6 +163,12 @@ INSTRUMENT_REGISTRY: dict[str, InstrumentSpec] = {
         x=AxisSpec(dim="x", label="X", coord="longitude"),
         y=AxisSpec(dim="y", label="Y", coord="latitude"),
     ),
+    "MTG_REACT": InstrumentSpec(
+        label="MTG-REACT (XGBoost on MTG FCI)",
+        geometry=Geometry.MAP_SWATH,
+        x=AxisSpec(dim="x", label="X", coord="longitude"),
+        y=AxisSpec(dim="y", label="Y", coord="latitude"),
+    ),
     "GRASP_HARP2": InstrumentSpec(
         label="GRASP HARP2",
         geometry=Geometry.MAP_SWATH,
@@ -252,6 +258,30 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         vmin=0,
         vmax=2,
         model_equivalent="AOD_355",
+    ),
+    "AOD_Fine_355nm": QuantitySpec(
+        label="Fine mode Aerosol Optical Depth @ 355nm",
+        units="",
+        cmap="Oranges",
+        vmin=0,
+        vmax=2,
+        model_equivalent="AOD_FINE_355",
+    ),
+    "AOD_Coarse_355nm": QuantitySpec(
+        label="Coarse mode Aerosol Optical Depth @ 355nm",
+        units="",
+        cmap="Oranges",
+        vmin=0,
+        vmax=2,
+        model_equivalent="AOD_COARSE_355",
+    ),
+    "DOD_355nm": QuantitySpec(
+        label="Dust Optical Depth @ 355nm",
+        units="",
+        cmap="Oranges",
+        vmin=0,
+        vmax=2,
+        model_equivalent="DOD_355",
     ),
     "AOD_440nm": QuantitySpec(
         label="Aerosol Optical Depth @ 440nm",

@@ -8,6 +8,9 @@ import pandas as pd
 from wrf_ensembly.external import ExternalProcess
 
 OBS_TYPE_TABLE = {
+    "AOD_355nm": "AIRSENSE_AOD",
+    "AOD_Fine_355nm": "AIRSENSE_AOD_FINE",
+    "AOD_Coarse_355nm": "AIRSENSE_AOD_COARSE",
     "AOD_500nm": "AIRSENSE_AOD",
     "AOD_Fine_500nm": "AIRSENSE_AOD_FINE",
     "AOD_Coarse_500nm": "AIRSENSE_AOD_COARSE",

@@ -35,6 +35,7 @@ from wrf_ensembly.observations.converters import (
     grasp_synergy_cli,
     modis_cli,
     msg_seviri_cli,
+    mtg_react_cli,
     remotap_spexone_cli,
     viirs_cli,
 )
@@ -77,6 +78,7 @@ convert_group.add_command(grasp_synergy_cli)
 convert_group.add_command(viirs_cli)
 convert_group.add_command(modis_cli)
 convert_group.add_command(msg_seviri_cli)
+convert_group.add_command(mtg_react_cli)
 convert_group.add_command(aeolus_l2a_cli)
 convert_group.add_command(aeolus_l2b_cli)
 

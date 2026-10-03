@@ -9,6 +9,7 @@ from .grasp_harp2 import grasp_harp2 as grasp_harp2_cli
 from .grasp_synergy import grasp_synergy as grasp_synergy_cli
 from .modis import modis as modis_cli
 from .msg_seviri import msg_seviri as msg_seviri_cli
+from .mtg_react import mtg_react as mtg_react_cli
 from .remotap_spexone import remotap_spexone as remotap_spexone_cli
 from .viirs import viirs as viirs_cli
 
@@ -22,6 +23,7 @@ __all__ = [
     "viirs_cli",
     "modis_cli",
     "msg_seviri_cli",
+    "mtg_react_cli",
     "aeolus_l2a_cli",
     "aeolus_l2b_cli",
 ]
