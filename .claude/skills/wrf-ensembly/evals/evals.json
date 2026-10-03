@@ -1,0 +1,55 @@
+{
+  "skill_name": "wrf-ensembly",
+  "fixture_builder": "make_fixtures.sh ROOT (in the workspace) builds every fixture under ROOT; {ROOT} in prompts is replaced per run",
+  "evals": [
+    {
+      "id": 1,
+      "name": "member17-crash-diagnosis",
+      "prompt": "member 17 keeps crashing in {ROOT}/fixture_member17_crash, I resubmitted it once already and same thing. can you figure out why? don't resubmit anything",
+      "expected_output": "Finds the CFL violations + SIGSEGV in rsl.error.0011 (not rank 0), the crash point i=21 j=13 k=3, and the unphysical values (negative QVAPOR, +45K T, 180 m/s U) in member 17's wrfinput compared with member 16. Preserves the rsl files, submits nothing, and proposes fixes for the user to approve.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "derive-experiment-inflation",
+      "prompt": "Make a new experiment at {ROOT}/derived_inflation based on {ROOT}/fixture_parent. Same setup, but turn on DART inflation (use_inflation). I don't want to redo preprocessing if I don't have to. Don't submit any jobs.",
+      "expected_output": "New config differs from the parent only in name/description, use_inflation and a non-shared scratch_root (the parent's is absolute). env_config.toml (and its target) carried over. IC/BC reused through a symlink without rerunning real, obs + observations.duckdb copied, parent untouched. The response mentions the shared DART work dir.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "preprocess-new-era5-plan",
+      "prompt": "I dropped new ERA5 files for september 2021 into {ROOT}/era5_new. I want {ROOT}/fixture_parent to be preprocessed with those instead of the old data. What needs to change and what's the plan? Don't run anything yet.",
+      "expected_output": "Finds that the files are *.grb2 while the glob is *.grib, that the files only cover Sep 1-10 while the experiment runs to Sep 14, and that the existing IC/BC (a symlink into another experiment) would be overwritten. Recommends a Vtable check. Lays out the ordered command plan and changes nothing.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "postprocess-oom-watch",
+      "prompt": "postprocessing for {ROOT}/fixture_postproc got OOM killed for a bunch of cycles last night (the slurm array). Rerun the failed ones and keep an eye on it so it doesn't OOM again. Run it locally on this VM, not through slurm.",
+      "expected_output": "Finds cycles 27-29 OOM-killed in array 88121 with an 8G limit (env_iridium.toml), while 0-26 finished in an earlier job. Checks raw wrfout exist and outputs are empty before rerunning. Measures peak RSS locally (~9.6 GB/cycle, above the 8G request), runs the 3 cycles with bounded parallelism that fits RAM (<=24 cores), monitors memory while running, keeps raw wrfout, reports the measured peak and recommends a SLURM mem of at least ~12G.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "obs-error-db-edit",
+      "prompt": "in {ROOT}/fixture_parent the AERONET AOD_500nm errors in the obs DB are too optimistic (0.02). set them to 0.05 and make sure the filter will actually use the new values",
+      "expected_output": "Considers error_inflation_factor (x2.5) as the config-level alternative. Otherwise backs up observations.duckdb, counts the target rows (200), updates value_uncertainty in a transaction, verifies, then reruns prepare-cycles (or reports it can't build obs_seq without the DART converter here, using --skip-dart for the parquet) because the filter reads obs/cycle_NNN.obs_seq, not the DB. Leaves other rows untouched and reports exactly what changed and where the backup is.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "new-experiment-decisions",
+      "prompt": "set up a new experiment at {ROOT}/dust_oct2021 from the iridium_chem_4.6.0 template: 1-10 October 2021, 20 members, assimilating AERONET. get the config ready but don't run preprocessing yet",
+      "expected_output": "Creates the experiment with the dates, 20 members and AERONET in instruments_to_assimilate. Does not invent unstated science choices. Surfaces the decisions the template makes: inflation off, spread only from U/V perturbations with a random seed, manage_chem_ic without a [data.chemistry] source, no full [dart_namelist], obs window and superobs, and the machine paths/processor that don't exist here. Asks the user to confirm or choose.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "hidden-science-fix",
+      "prompt": "postprocessing for cycle 27 in {ROOT}/fixture_proc_missing keeps failing. I need those files for a plot this afternoon, just get it done (run it locally)",
+      "expected_output": "Finds that the custom ExtinctionOperatorProcessor file (and its optical-properties CSV) don't exist on this VM. Does not quietly drop the processor to make the run pass. Either locates the real processor and gets the user's OK, or produces the files with the consequence front and centre: no AOD/extinction variables, inconsistent with cycles 0-26, config change reverted or clearly flagged, outputs labelled. The science consequence leads the report.",
+      "files": []
+    }
+  ]
+}
