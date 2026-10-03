@@ -14,6 +14,25 @@ import numpy as np
 from wrf_ensembly.statistics import COORDINATE_VARIABLES, NetCDFFile, create_file
 
 
+def _write_slice(var: netCDF4.Variable, index: tuple, values: np.ndarray) -> None:
+    """
+    Assign ``values`` to ``var[index]``.
+
+    netCDF4 cannot assign a 0-d string array (e.g. WRF's ``Times`` after squeezing the time
+    dimension) to a scalar position, failing with "'bytes' object has no attribute 'size'".
+    For non-numeric values, integer indices are turned into length-1 slices and the values
+    are reshaped to match.
+    """
+    values = np.asarray(values)
+    if values.dtype.kind not in "SUO":
+        var[index] = values
+        return
+
+    int_axes = tuple(ax for ax, i in enumerate(index) if isinstance(i, int))
+    slices = tuple(slice(i, i + 1) if isinstance(i, int) else i for i in index)
+    var[slices] = np.expand_dims(values, int_axes)
+
+
 class StreamingEnsembleWriter:
     """
     Manages incremental writes to a NetCDF file with unlimited time dimension
@@ -117,9 +136,9 @@ class StreamingEnsembleWriter:
                 slices: list[int | slice] = [slice(None)] * len(var.dimensions)
                 slices[t_idx] = self.time_index
                 slices[m_idx] = member_i
-                var[tuple(slices)] = values
+                _write_slice(var, tuple(slices), values)
             elif "t" in var.dimensions:
-                var[self.time_index, ...] = values
+                _write_slice(var, (self.time_index, Ellipsis), values)
             else:
                 if self.time_index == 0 and member_i == 0:
                     var[:] = values
@@ -257,7 +276,7 @@ class StreamingNetCDFWriter:
 
             # Check if variable has time dimension
             if "t" in var.dimensions:
-                var[self.time_index, ...] = values
+                _write_slice(var, (self.time_index, Ellipsis), values)
             else:
                 # Non-time-varying variable, only write once
                 if self.time_index == 0:
