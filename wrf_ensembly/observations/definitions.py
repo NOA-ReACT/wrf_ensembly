@@ -281,7 +281,7 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         cmap="Oranges",
         vmin=0,
         vmax=2,
-        model_equivalent="DOD_355",
+        model_equivalent="AOD_DUST_355",
     ),
     "AOD_440nm": QuantitySpec(
         label="Aerosol Optical Depth @ 440nm",

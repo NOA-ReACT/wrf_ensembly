@@ -115,7 +115,7 @@ Additional instruments used by converters but not yet in `INSTRUMENT_REGISTRY` (
 | `AOD_355nm` | AOD @ 355nm | — | `AOD_355` | `AIRSENSE_AOD` |
 | `AOD_Fine_355nm` | Fine mode AOD @ 355nm | — | `AOD_FINE_355` | `AIRSENSE_AOD_FINE` |
 | `AOD_Coarse_355nm` | Coarse mode AOD @ 355nm | — | `AOD_COARSE_355` | `AIRSENSE_AOD_COARSE` |
-| `DOD_355nm` | Dust Optical Depth @ 355nm | — | `DOD_355` | — |
+| `DOD_355nm` | Dust Optical Depth @ 355nm | — | `AOD_DUST_355` | — |
 | `AOD_440nm` | AOD @ 440nm | — | `AOD_440` | — |
 | `AOD_Fine_440nm` | Fine mode AOD @ 440nm | — | `AOD_FINE_440` | — |
 | `AOD_Coarse_440nm` | Coarse mode AOD @ 440nm | — | `AOD_COARSE_440` | — |
