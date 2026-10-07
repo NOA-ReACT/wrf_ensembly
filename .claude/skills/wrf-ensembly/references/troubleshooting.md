@@ -33,6 +33,7 @@ For a failed `advance-member` of member M in the current cycle:
 |---|---|---|
 | `RSL file not found` in the log, and no rsl files at all | wrf.exe never started: MPI launcher, environment, missing binary or libs | Read the SLURM .out. Check `slurm.pre_commands`, `environment`, `mpirun_command` in config |
 | `cfl` / `w-cfl` lines piling up in rsl.error before the crash | Numerical instability | See "One member keeps crashing" below |
+| `forrtl`/SIGSEGV on every rank right after `processing lateral boundary`, first timestep | Stack limit, when run outside SLURM | `ulimit -s unlimited` in the same shell (the jobfiles set it) |
 | `forrtl`/SIGSEGV with no CFL warnings | Bad input values, stack/memory, or a bad node | Compare nodes across attempts, check the input fields |
 | Same node each time it fails | Hardware/node issue | Exclude the node (`--exclude=` in the `slurm.directives`), tell the user |
 | `DUE TO TIME LIMIT` | Walltime too short | Compare with `status runtime-stats` for typical durations |
@@ -66,6 +67,7 @@ the state? a broken file?).
 ## Rerunning a member after the fix
 
 - Locally: `wrf-ensembly EXP ensemble advance-member --member 17 [--cores N]`. It runs the current cycle.
+  Do `ulimit -s unlimited` and the config's `slurm.pre_commands` first, in the same command.
 - Through SLURM: `slurm run-experiment` only queues the members that haven't advanced yet. If an
   analysis job is still in the queue waiting on the failed array, it will sit there forever
   (`DependencyNeverSatisfied`). Check `squeue` and ask before you `scancel` it and requeue.

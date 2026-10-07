@@ -122,6 +122,11 @@ locally on the dev VM is fine to just do. On the dev VM (`Iridium`), use at most
 (`--cores`, `--jobs`). It has 32 hardware threads, but they're hyperthreads. The user runs the very large experiments by hand
 on a separate big HPC; if a path or hostname suggests that machine, only inspect, don't act.
 
+Running WRF or DART outside SLURM (e.g. `advance-member` in your shell) needs what the jobfiles
+normally set up: `ulimit -s unlimited` (otherwise wrf.exe segfaults right after reading wrfbdy)
+and the `slurm.pre_commands` from the config (spack env etc.) for MPI and the netCDF libraries.
+Run them in the same shell command as `wrf-ensembly`, since shell state doesn't persist.
+
 Status files are plain JSON/marker files, written atomically, one writer each. Prefer the
 `status` commands (`set-member`, `set-experiment`, `reconcile`) to fix them, but hand
 inspection with `ls`/`cat` is expected and safe.
