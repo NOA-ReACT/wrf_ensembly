@@ -65,6 +65,14 @@ def setup_from_other_experiment(
     logger.setup("ensemble-setup-from-other-experiment", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
+    if exp.cfg.assimilation.cycling_mode == "restart":
+        # This links the other experiment's forecasts and IC/BC, but a restart-mode
+        # experiment continues from WRF restart files, which this doesn't set up yet
+        logger.error(
+            'setup-from-other-experiment does not support cycling_mode = "restart" yet'
+        )
+        sys.exit(1)
+
     logger.info(f"Opening second experiment at {other_experiment}")
     other_exp = experiment.Experiment(other_experiment.resolve())
 
@@ -478,6 +486,8 @@ def cycle(experiment_path: Path, jobs: int | None):
     # Move the experiment pointer to the next cycle, which starts out empty
     exp.set_next_cycle()
     logger.info(f"Cycled to cycle {next_cycle_i}")
+
+    exp.clean_restart_files()
 
 
 @ensemble_cli.command()

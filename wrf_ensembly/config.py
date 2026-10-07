@@ -331,6 +331,13 @@ class AssimilationConfig:
     You still need to set the inflation settings correctly in the DART namelist.
     """
 
+    keep_restart_files: bool = False
+    """
+    With `cycling_mode = "restart"`, keep every cycle's WRF restart files in
+    `scratch/restart`. By default `cycle` deletes the ones no cycle can be rerun from
+    anymore, since they are large (all of WRF's state, for every member).
+    """
+
 
 @dataclass
 class TemporalBinConfig:

@@ -1,6 +1,7 @@
 import datetime as dt
 import json
 import os
+import shutil
 from collections.abc import Iterable, Iterator
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
@@ -564,6 +565,41 @@ class Experiment:
         self.state_machine.current_cycle.transition(StateTransition.FILTER_COMPLETE)
 
         return True
+
+    def clean_restart_files(self) -> None:
+        """
+        Deletes the WRF restart files in scratch that no cycle can start from anymore, in
+        restart mode, unless `assimilation.keep_restart_files` is set. Call after moving
+        to the next cycle.
+
+        The current cycle starts from the previous cycle's restart files, which are kept
+        so it can be rerun. Older cycles' are deleted, and so are any restart files of
+        the previous cycle other than the one at its end (written when a forecast
+        extension reaches past the next restart time).
+        """
+
+        if (
+            self.cfg.assimilation.cycling_mode != "restart"
+            or self.cfg.assimilation.keep_restart_files
+        ):
+            return
+
+        previous_i = self.current_cycle_i - 1
+        if previous_i < 0:
+            return
+        for cycle_dir in sorted(self.paths.scratch_restart.glob("cycle_*")):
+            if int(cycle_dir.name.removeprefix("cycle_")) < previous_i:
+                logger.info(f"Removing restart files in {cycle_dir}")
+                shutil.rmtree(cycle_dir)
+
+        end = self.cycles[previous_i].end
+        keep = f"wrfrst_d01_{end:%Y-%m-%d_%H:%M:%S}"
+        for member_i in range(self.cfg.assimilation.n_members):
+            member_dir = self.paths.scratch_restart_path(previous_i, member_i)
+            for f in member_dir.glob("wrfrst_*"):
+                if f.name != keep:
+                    logger.info(f"Removing unused restart file {f}")
+                    f.unlink()
 
     def member_initial_state(self, member_i: int, cycle_i: int) -> Path:
         """
