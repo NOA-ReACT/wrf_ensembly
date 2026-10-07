@@ -333,28 +333,14 @@ class Experiment:
 
     def update_bc(self, member_i: int):
         """
-        Run `update_wrf_bc` to update the boundary conditions of a member to match the initial conditions.
+        Update the boundary conditions of a member to match its initial conditions.
         """
 
         member_path = self.paths.member_path(member_i)
-        icbc_target_file = member_path / "wrfinput_d01"
-        bdy_target_file = member_path / "wrfbdy_d01"
-
-        res = update_bc.update_wrf_bc(
-            self.cfg,
-            icbc_target_file,
-            bdy_target_file,
-            log_filename=f"update_bc_member_{member_i}.log",
+        update_bc.update_wrf_bc(
+            member_path / "wrfinput_d01", member_path / "wrfbdy_d01"
         )
-        if (
-            res.returncode != 0
-            or "update_wrf_bc Finished successfully" not in res.output
-        ):
-            logger.error(
-                f"Member {member_i}: update_wrf_bc failed with exit code {res.returncode}"
-            )
-            logger.error(res.output)
-            raise external.ExternalProcessFailed(res)
+        logger.info(f"Member {member_i}: Updated boundary conditions")
 
     def advance_member(self, member_idx: int, cores: int) -> bool:
         """

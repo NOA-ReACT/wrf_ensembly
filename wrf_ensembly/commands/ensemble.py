@@ -264,13 +264,12 @@ def apply_perturbations(experiment_path: Path, jobs: Optional[int], force: bool)
 @pass_experiment_path
 def update_bc(experiment_path: Path, jobs: Optional[int]):
     """
-    Runs `update_wrf_bc` for all members to update boundary conditions.
+    Updates the boundary conditions of all members to match their initial conditions.
     Use this after you have modified the initial conditions (perts or cycling).
     """
 
     logger.setup("ensemble-update-bc", experiment_path)
     exp = experiment.Experiment(experiment_path)
-    exp.set_dart_environment()
 
     jobs = utils.determine_jobs(jobs)
     logger.info(f"Using {jobs} jobs")
