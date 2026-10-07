@@ -2,7 +2,6 @@ import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Optional
 
 import click
 import netCDF4
@@ -150,7 +149,7 @@ def setup_from_other_experiment(
     help="Force regenerating perturbations even if already done",
 )
 @pass_experiment_path
-def generate_perturbations(experiment_path: Path, jobs: Optional[int], force: bool):
+def generate_perturbations(experiment_path: Path, jobs: int | None, force: bool):
     """
     Generates perturbations for all experiment cycles.
 
@@ -211,7 +210,7 @@ def generate_perturbations(experiment_path: Path, jobs: Optional[int], force: bo
     help="Force applying perturbations even if already done for this cycle",
 )
 @pass_experiment_path
-def apply_perturbations(experiment_path: Path, jobs: Optional[int], force: bool):
+def apply_perturbations(experiment_path: Path, jobs: int | None, force: bool):
     """
     Applies perturbations to the initial conditions of the current cycle.
     Make sure to update the boundary conditions afterwards!
@@ -262,7 +261,7 @@ def apply_perturbations(experiment_path: Path, jobs: Optional[int], force: bool)
     help="How many files to process in parallel",
 )
 @pass_experiment_path
-def update_bc(experiment_path: Path, jobs: Optional[int]):
+def update_bc(experiment_path: Path, jobs: int | None):
     """
     Updates the boundary conditions of all members to match their initial conditions.
     Use this after you have modified the initial conditions (perts or cycling).
@@ -493,7 +492,7 @@ def cycle(experiment_path: Path, jobs: int | None):
     help="Which cycle to reset (defaults to current cycle)",
 )
 @pass_experiment_path
-def reset_cycle(experiment_path: Path, cycle: Optional[int]):
+def reset_cycle(experiment_path: Path, cycle: int | None):
     """
     Reset the cycle state to INITIALIZED.
 

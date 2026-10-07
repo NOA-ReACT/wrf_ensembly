@@ -331,7 +331,7 @@ class Experiment:
 
         logger.info(f"Applied perturbations to member {member_i}")
 
-    def update_bc(self, member_i: int):
+    def update_bc(self, member_i: int) -> None:
         """
         Update the boundary conditions of a member to match its initial conditions.
         """

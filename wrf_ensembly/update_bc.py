@@ -63,7 +63,7 @@ NEXT_BDY_TIME = "md___nextbdytimee_x_t_d_o_m_a_i_n_m_e_t_a_data_"
 WRF_TIME_FORMAT = "%Y-%m-%d_%H:%M:%S"
 
 
-def _parse_wrf_times(var: netCDF4.Variable) -> list[dt.datetime]:
+def parse_wrf_times(var: "netCDF4.Variable[np.bytes_]") -> list[dt.datetime]:
     """Parses a WRF (Time, DateStrLen) character variable into timezone-aware datetimes"""
 
     return [
@@ -72,11 +72,15 @@ def _parse_wrf_times(var: netCDF4.Variable) -> list[dt.datetime]:
     ]
 
 
-def _write_wrf_time(var: netCDF4.Variable, index: int, time: dt.datetime):
+def write_wrf_time(
+    var: "netCDF4.Variable[np.bytes_]", index: int, time: dt.datetime
+) -> None:
+    """Writes `time` at `index` of a WRF (Time, DateStrLen) character variable"""
+
     var[index] = np.frombuffer(time.strftime(WRF_TIME_FORMAT).encode(), dtype="S1")
 
 
-def _edges(field: np.ndarray, width: int) -> dict[str, np.ndarray]:
+def edges(field: np.ndarray, width: int) -> dict[str, np.ndarray]:
     """
     Cuts the outer `width` rows of a (..., south_north, west_east) field for each side of the
     domain, in the wrfbdy layout (bdy_width, ..., n). The east and north sides are counted
@@ -114,10 +118,10 @@ def couple(state: Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
     muu = 0.5 * (padded[1:-1, :-1] + padded[1:-1, 1:])
     muv = 0.5 * (padded[:-1, 1:-1] + padded[1:, 1:-1])
 
-    def half(mass):
+    def half(mass: np.ndarray) -> np.ndarray:
         return state["C1H"][:, None, None] * mass + state["C2H"][:, None, None]
 
-    def full(mass):
+    def full(mass: np.ndarray) -> np.ndarray:
         return state["C1F"][:, None, None] * mass + state["C2F"][:, None, None]
 
     coupled = {
@@ -139,7 +143,7 @@ def update_boundaries(
     bdy: netCDF4.Dataset,
     state: Mapping[str, np.ndarray],
     analysis_time: dt.datetime,
-):
+) -> None:
     """
     Updates an open wrfbdy file in place so that its boundaries match `state` at
     `analysis_time`.
@@ -153,7 +157,7 @@ def update_boundaries(
         analysis_time: The time of `state`.
     """
 
-    bdy_times = _parse_wrf_times(bdy["Times"])
+    bdy_times = parse_wrf_times(bdy["Times"])
     candidates = [i for i, t in enumerate(bdy_times) if t <= analysis_time]
     if not candidates:
         raise ValueError(
@@ -161,8 +165,8 @@ def update_boundaries(
         )
     itime = candidates[-1]
 
-    this_time = _parse_wrf_times(bdy[THIS_BDY_TIME])[itime]
-    next_time = _parse_wrf_times(bdy[NEXT_BDY_TIME])[itime]
+    this_time = parse_wrf_times(bdy[THIS_BDY_TIME])[itime]
+    next_time = parse_wrf_times(bdy[NEXT_BDY_TIME])[itime]
     if not this_time <= analysis_time < next_time:
         raise ValueError(
             f"Analysis time {analysis_time} is outside boundary record {itime} "
@@ -173,7 +177,7 @@ def update_boundaries(
     width = bdy.dimensions["bdy_width"].size
 
     for name, field in couple(state).items():
-        for side, first_new in _edges(field, width).items():
+        for side, first_new in edges(field, width).items():
             value_var = bdy[f"{name}_B{side}"]
             tend_var = bdy[f"{name}_BT{side}"]
 
@@ -186,7 +190,7 @@ def update_boundaries(
             value_var[itime] = first_new
             tend_var[itime] = (last - first_new) / interval_new
 
-    _write_wrf_time(bdy[THIS_BDY_TIME], itime, analysis_time)
+    write_wrf_time(bdy[THIS_BDY_TIME], itime, analysis_time)
 
 
 def read_state(ds: netCDF4.Dataset) -> tuple[dict[str, np.ndarray], dt.datetime]:
@@ -199,11 +203,11 @@ def read_state(ds: netCDF4.Dataset) -> tuple[dict[str, np.ndarray], dt.datetime]
 
     names = [*STATE_VARIABLES, *(v for v in MOIST_VARIABLES if v in ds.variables)]
     state = {name: ds[name][0].astype("f8") for name in names}
-    time = _parse_wrf_times(ds["Times"])[0]
+    time = parse_wrf_times(ds["Times"])[0]
     return state, time
 
 
-def update_wrf_bc(wrfinput: Path, wrfbdy: Path):
+def update_wrf_bc(wrfinput: Path, wrfbdy: Path) -> None:
     """
     Updates the given `wrfbdy` file to match the `wrfinput` file.
     Required if you have modified the `wrfinput` file.

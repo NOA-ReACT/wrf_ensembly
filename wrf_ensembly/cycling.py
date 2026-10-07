@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional
 
 import pandas as pd
 
@@ -14,17 +13,13 @@ class CycleInformation:
     cycle_offset: timedelta
     index: int
     output_interval: int | None
-    forecast_end: datetime | None = None  # type: ignore[assignment]
+    forecast_end: datetime
     """
     End time of the forward (member) run, which may extend past `end` by
     `time_control.forecast_extension` minutes (clamped to the experiment end).
     Used only for the forward run and boundary conditions; the assimilation
-    boundary remains `end`. Defaults to `end` when no extension is configured.
+    boundary remains `end`. Equal to `end` when no extension is configured.
     """
-
-    def __post_init__(self):
-        if self.forecast_end is None:
-            self.forecast_end = self.end
 
     def __str__(self) -> str:
         return f"Cycle #{self.index}: {self.start} -> {self.end}, Offset: {self.cycle_offset.seconds // 60 // 60}h"
@@ -101,3 +96,19 @@ def get_cycle_information(cfg: config.Config) -> list[CycleInformation]:
     cycles = sorted(cycles, key=lambda c: c.index)
 
     return cycles
+
+
+def get_full_period(cfg: config.Config) -> CycleInformation:
+    """
+    A pseudo-cycle spanning the whole experiment. In `restart` cycling mode, real.exe
+    runs once for this period instead of once per cycle.
+    """
+
+    return CycleInformation(
+        start=cfg.time_control.start,
+        end=cfg.time_control.end,
+        cycle_offset=timedelta(0),
+        index=0,
+        output_interval=None,
+        forecast_end=cfg.time_control.end,
+    )

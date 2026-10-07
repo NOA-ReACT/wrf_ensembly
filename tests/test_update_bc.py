@@ -1,4 +1,5 @@
 import datetime as dt
+from pathlib import Path
 
 import netCDF4
 import numpy as np
@@ -12,7 +13,7 @@ INTERVAL = dt.timedelta(hours=6)
 
 
 def make_state(rng: np.random.Generator) -> dict[str, np.ndarray]:
-    def field(*shape, scale=1.0, offset=0.0):
+    def field(*shape: int, scale: float = 1.0, offset: float = 0.0) -> np.ndarray:
         return offset + scale * rng.standard_normal(shape)
 
     return {
@@ -35,12 +36,12 @@ def make_state(rng: np.random.Generator) -> dict[str, np.ndarray]:
     }
 
 
-def write_times(var, times):
+def write_times(var: "netCDF4.Variable[np.bytes_]", times: list[dt.datetime]) -> None:
     for i, t in enumerate(times):
-        update_bc._write_wrf_time(var, i, t)
+        update_bc.write_wrf_time(var, i, t)
 
 
-def make_wrfbdy(path, state, n_records=2):
+def make_wrfbdy(path: Path, state: dict[str, np.ndarray], n_records: int = 2) -> None:
     """A wrfbdy whose first record holds `state` and whose tendencies are random."""
 
     rng = np.random.default_rng(1)
@@ -58,7 +59,7 @@ def make_wrfbdy(path, state, n_records=2):
             write_times(bdy.createVariable(name, "S1", ("Time", "DateStrLen")), times)
 
         for name, field in coupled.items():
-            for side, slab in update_bc._edges(field, WIDTH).items():
+            for side, slab in update_bc.edges(field, WIDTH).items():
                 dims = (
                     "Time",
                     "bdy_width",
@@ -75,13 +76,13 @@ def make_wrfbdy(path, state, n_records=2):
                     tend[i] = slab * change / INTERVAL.total_seconds()
 
 
-def assert_close(actual, desired):
+def assert_close(actual: np.ndarray, desired: np.ndarray) -> None:
     """Equal up to float32 rounding, relative to the magnitude of the whole field"""
     scale = max(np.abs(desired).max(), np.abs(actual).max())
     np.testing.assert_allclose(actual, desired, rtol=0, atol=1e-5 * scale)
 
 
-def read_record(path, itime):
+def read_record(path: Path, itime: int) -> dict[str, np.ndarray]:
     with netCDF4.Dataset(path) as bdy:
         bdy.set_auto_mask(False)
         return {
@@ -93,7 +94,7 @@ def read_record(path, itime):
 
 def test_edges_are_counted_inwards_from_the_boundary():
     field = np.arange(NY * NX).reshape(NY, NX)
-    edges = update_bc._edges(field, WIDTH)
+    edges = update_bc.edges(field, WIDTH)
 
     np.testing.assert_array_equal(edges["XS"][0], field[:, 0])
     np.testing.assert_array_equal(edges["XS"][1], field[:, 1])
@@ -128,7 +129,7 @@ def test_coupling_uses_hybrid_coefficients():
     np.testing.assert_array_equal(coupled["MU"], state["MU"])
 
 
-def test_unchanged_state_leaves_boundaries_unchanged(tmp_path):
+def test_unchanged_state_leaves_boundaries_unchanged(tmp_path: Path):
     state = make_state(np.random.default_rng(0))
     path = tmp_path / "wrfbdy_d01"
     make_wrfbdy(path, state)
@@ -142,7 +143,7 @@ def test_unchanged_state_leaves_boundaries_unchanged(tmp_path):
         assert_close(after[name], before[name])
 
 
-def test_modified_state_keeps_the_value_at_the_end_of_the_interval(tmp_path):
+def test_modified_state_keeps_the_value_at_the_end_of_the_interval(tmp_path: Path):
     rng = np.random.default_rng(0)
     state = make_state(rng)
     path = tmp_path / "wrfbdy_d01"
@@ -161,7 +162,7 @@ def test_modified_state_keeps_the_value_at_the_end_of_the_interval(tmp_path):
     old = before[0]
     coupled = update_bc.couple(modified)
     for name in ("U", "T", "MU", "QVAPOR"):
-        for side, slab in update_bc._edges(coupled[name], WIDTH).items():
+        for side, slab in update_bc.edges(coupled[name], WIDTH).items():
             value, tend = f"{name}_B{side}", f"{name}_BT{side}"
             assert_close(after[value], slab)
 
@@ -173,11 +174,11 @@ def test_modified_state_keeps_the_value_at_the_end_of_the_interval(tmp_path):
     for name, value in before[1].items():
         np.testing.assert_array_equal(read_record(path, 0)[name], value)
     with netCDF4.Dataset(path) as bdy:
-        this_times = update_bc._parse_wrf_times(bdy[update_bc.THIS_BDY_TIME])
+        this_times = update_bc.parse_wrf_times(bdy[update_bc.THIS_BDY_TIME])
     assert this_times == [START, analysis_time]
 
 
-def test_moisture_at_the_end_of_the_interval_is_not_negative(tmp_path):
+def test_moisture_at_the_end_of_the_interval_is_not_negative(tmp_path: Path):
     state = make_state(np.random.default_rng(0))
     path = tmp_path / "wrfbdy_d01"
     make_wrfbdy(path, state)
@@ -198,7 +199,7 @@ def test_moisture_at_the_end_of_the_interval_is_not_negative(tmp_path):
         np.testing.assert_allclose(end, 0, atol=1e-5 * np.abs(value).max())
 
 
-def test_analysis_time_outside_the_file_is_rejected(tmp_path):
+def test_analysis_time_outside_the_file_is_rejected(tmp_path: Path):
     state = make_state(np.random.default_rng(0))
     path = tmp_path / "wrfbdy_d01"
     make_wrfbdy(path, state, n_records=1)

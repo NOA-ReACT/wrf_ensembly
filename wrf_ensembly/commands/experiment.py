@@ -3,7 +3,6 @@ import shutil
 import sys
 from importlib import resources
 from pathlib import Path
-from typing import Optional
 
 import click
 from rich.console import Console
@@ -151,6 +150,8 @@ def copy_model(experiment_path: Path, force: bool):
     metgrid_table_target = exp.paths.work_wps / "metgrid" / "METGRID.TBL.ARW"
     metgrid_table_target.parent.mkdir(exist_ok=True)
     utils.copy(metgrid_table_source, metgrid_table_target)
+    # metgrid.exe opens METGRID.TBL, which WPS links to the ARW table
+    (metgrid_table_target.parent / "METGRID.TBL").symlink_to(metgrid_table_target.name)
 
     wps_required_binaries = ["geogrid", "ungrib", "metgrid"]
     for binary_name in wps_required_binaries:
@@ -189,7 +190,7 @@ def copy_model(experiment_path: Path, force: bool):
     "--to-csv", type=click.Path(path_type=Path), help="Write cycle info to CSV file"
 )
 @pass_experiment_path
-def cycle_info(experiment_path: Path, to_csv: Optional[Path]):
+def cycle_info(experiment_path: Path, to_csv: Path | None):
     """Prints cycle information"""
 
     logger.setup("experiment-cycle-info", experiment_path)

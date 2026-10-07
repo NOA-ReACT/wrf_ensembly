@@ -5,7 +5,6 @@ import sys
 import tomllib
 from itertools import chain
 from pathlib import Path
-from typing import Optional
 
 import click
 import numpy as np
@@ -13,14 +12,14 @@ import xarray as xr
 from rich.console import Console
 from rich.table import Table
 
-from wrf_ensembly import config, experiment, external, utils, wrf
+from wrf_ensembly import config, cycling, experiment, external, utils, wrf
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 
 
 def check_is_member_option_is_required(
-    ctx: click.Context, param: click.Parameter, value: Optional[int]
-) -> Optional[int]:
+    ctx: click.Context, _param: click.Parameter, value: int | None
+) -> int | None:
     """
     Click option callback to check if --member is required
 
@@ -122,7 +121,7 @@ def geogrid(experiment_path: Path):
     help="When using different IC/BC for each member, which member to ungrib",
 )
 @pass_experiment_path
-def ungrib(experiment_path: Path, member: Optional[int]):
+def ungrib(experiment_path: Path, member: int | None):
     """
     Runs ungrib.exe for the experiment, after linking the grib files into the WPS directory
     """
@@ -219,7 +218,11 @@ def metgrid(experiment_path: Path):
 
 
 @preprocess_cli.command()
-@click.option("--cycle", required=True, type=int, help="Which cycle to run real for")
+@click.option(
+    "--cycle",
+    type=int,
+    help='Which cycle to run real for. Only with cycling_mode = "wrfinput"',
+)
 @click.option(
     "--cores", type=int, help="Number of cores to use for real.exe", default=None
 )
@@ -236,23 +239,43 @@ def metgrid(experiment_path: Path):
 )
 @pass_experiment_path
 def real(
-    experiment_path: Path, cycle: int, cores, member: Optional[int], auto_clean_up=True
+    experiment_path: Path,
+    cycle: int | None,
+    cores: int | None,
+    member: int | None,
+    auto_clean_up: bool = True,
 ):
     """
-    Run real.exe to produce the initial (wrfinput) and boundary (wrfbdy) conditions the
-    given CYCLE. You should run this for all cycles to have initial/boundary conditions for
-    your experiment.
+    Run real.exe to produce the initial (wrfinput) and boundary (wrfbdy) conditions, and
+    the lower boundary conditions (wrflowinp) if `sst_update = 1`.
+
+    With `cycling_mode = "wrfinput"`, run this for every cycle (--cycle). With
+    `cycling_mode = "restart"`, run it once without --cycle: it produces the initial
+    conditions for the first cycle and boundary conditions for the whole experiment.
     """
 
-    logger.setup(f"preprocess-real-cycle_{cycle}", experiment_path)
+    label = "full_period" if cycle is None else f"cycle_{cycle}"
+    logger.setup(f"preprocess-real-{label}", experiment_path)
 
     exp = experiment.Experiment(experiment_path)
     exp.set_wrf_environment()
+
+    restart_mode = exp.cfg.assimilation.cycling_mode == "restart"
+    if restart_mode and cycle is not None:
+        logger.error(
+            'With cycling_mode = "restart", real runs once for the whole experiment, '
+            "drop --cycle"
+        )
+        sys.exit(1)
+    if not restart_mode and cycle is None:
+        logger.error('--cycle is required with cycling_mode = "wrfinput"')
+        sys.exit(1)
+    period = cycling.get_full_period(exp.cfg) if cycle is None else exp.cycles[cycle]
     wps_dir = exp.paths.work_preprocessing_wps
     wrf_dir = exp.paths.work_preprocessing_wrf
 
     # Copy WRF to a new directory to run real.exe (allows to run multiple in parallel)
-    work_dir = exp.paths.work_preprocessing / f"real_cycle_{cycle}"
+    work_dir = exp.paths.work_preprocessing / f"real_{label}"
     if exp.cfg.data.per_member_meteorology:
         work_dir = work_dir / f"member_{member:02d}"
     if work_dir.is_dir():
@@ -282,7 +305,7 @@ def real(
     # Generate namelist
     wrf.generate_wrf_namelist(
         exp.cfg,
-        exp.cycles[cycle],
+        period,
         False,
         wrf_dir / "namelist.input",
         add_iofields=False,
@@ -338,28 +361,20 @@ def real(
 
     logger.info("real finished successfully")
 
-    data_dir = exp.paths.data_icbc
-    data_dir.mkdir(parents=True, exist_ok=True)
-    if exp.cfg.data.per_member_meteorology:
-        wrfinput_path = (
-            data_dir
-            / f"member_{member:02d}"
-            / f"wrfinput_d01_member_{member:02d}_cycle_{cycle}"
-        )
-        wrfbdy_path = (
-            data_dir
-            / f"member_{member:02d}"
-            / f"wrfbdy_d01_member_{member:02d}_cycle_{cycle}"
-        )
-    else:
-        wrfinput_path = data_dir / f"wrfinput_d01_cycle_{cycle}"
-        wrfbdy_path = data_dir / f"wrfbdy_d01_cycle_{cycle}"
-    utils.move(wrf_dir / "wrfinput_d01", wrfinput_path)
-    logger.info(f"Moved wrfinput_d01 to {wrfinput_path}")
-    utils.move(wrf_dir / "wrfbdy_d01", wrfbdy_path)
-    logger.info(f"Moved wrfbdy_d01 to {wrfbdy_path}")
+    # In restart mode the initial conditions are the first cycle's, the boundary
+    # conditions cover the whole experiment (cycle = None)
+    file_member = member if exp.cfg.data.per_member_meteorology else None
+    outputs = [("wrfinput_d01", 0 if restart_mode else cycle), ("wrfbdy_d01", cycle)]
+    if (wrf_dir / "wrflowinp_d01").exists():
+        outputs.append(("wrflowinp_d01", cycle))
+    for prefix, file_cycle in outputs:
+        target = exp.paths.icbc_file_path(prefix, file_member, file_cycle)
+        utils.move(wrf_dir / prefix, target)
+        logger.info(f"Moved {prefix} to {target}")
 
-    utils.copy(wrf_dir / "namelist.input", data_dir / f"namelist.input_cycle_{cycle}")
+    utils.copy(
+        wrf_dir / "namelist.input", exp.paths.data_icbc / f"namelist.input_{label}"
+    )
 
     if auto_clean_up:
         logger.info(f"Removing temporary work directory {work_dir}")
@@ -371,7 +386,7 @@ def real(
     "--jobs", type=int, help="Number of processes to use (also respects SLURM_NTASKS)"
 )
 @pass_experiment_path
-def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
+def interpolate_chem(experiment_path: Path, jobs: int | None):
     """
     Uses `interpolator-for-wrfchem` to interpolate the chemical initial conditions onto the WRF domain.
 
@@ -474,10 +489,16 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
                 log_filename="interpolator_wrfinput.log",
             )
         )
-    for cycle in exp.cycles:
+    # One wrfbdy per cycle, or one for the whole experiment in restart mode
+    if exp.cfg.assimilation.cycling_mode == "restart":
+        bdy_cycles = [None]
+    else:
+        bdy_cycles = [cycle.index for cycle in exp.cycles]
+    for cycle_i in bdy_cycles:
         for member_i in members:
-            wrfinput_path = exp.paths.ic_path(member_i, cycle.index)
-            wrfbdy_path = exp.paths.bc_path(member_i, cycle.index)
+            # The wrfinput is only read for the grid
+            wrfinput_path = exp.paths.ic_path(member_i, cycle_i or 0)
+            wrfbdy_path = exp.paths.bc_path(member_i, cycle_i)
             args = [
                 "interpolator-for-wrfchem",
                 chem.model_name,
@@ -494,7 +515,11 @@ def interpolate_chem(experiment_path: Path, jobs: Optional[int]):
             commands.append(
                 external.ExternalProcess(
                     args,
-                    log_filename=f"interpolator_wrfbdy_cycle_{cycle.index}.log",
+                    log_filename=(
+                        "interpolator_wrfbdy_full_period.log"
+                        if cycle_i is None
+                        else f"interpolator_wrfbdy_cycle_{cycle_i}.log"
+                    ),
                 )
             )
 
@@ -566,25 +591,38 @@ def icbc_status(experiment_path: Path):
         else:
             return f"[yellow]~ {n_ok}/{n_total}[/yellow]"
 
+    # (row label, cycle of the IC file, cycle of the BC/lower boundary files). In restart
+    # mode there's one IC file for the first cycle and BC files for the whole experiment.
+    if exp.cfg.assimilation.cycling_mode == "restart":
+        rows = [("full period", 0, None)]
+    else:
+        rows = [(str(c.index), c.index, c.index) for c in exp.cycles]
+    check_lowinp = exp.cfg.wrf_namelist.get("physics", {}).get("sst_update", 0) == 1
+
     table = Table(title="IC/BC Status")
     table.add_column("Cycle", justify="center", style="bold cyan")
     table.add_column("IC", justify="center")
     table.add_column("BC", justify="center")
+    if check_lowinp:
+        table.add_column("Lower BC", justify="center")
     if chem_vars:
         table.add_column("Chem (IC)", justify="center")
         table.add_column("Chem (BC)", justify="center")
 
-    for cycle in exp.cycles:
+    for label, ic_cycle, bc_cycle in rows:
         ic_ok = 0
         bc_ok = 0
+        lowinp_ok = 0
         ic_chem_ok = 0
         bc_chem_ok = 0
         ic_chem_checked = 0
         bc_chem_checked = 0
 
         for i in range(n_members):
-            ic = exp.paths.ic_path(i, cycle.index)
-            bc = exp.paths.bc_path(i, cycle.index)
+            ic = exp.paths.ic_path(i, ic_cycle)
+            bc = exp.paths.bc_path(i, bc_cycle)
+            if exp.paths.lowinp_path(i, bc_cycle).exists():
+                lowinp_ok += 1
 
             if ic.exists():
                 ic_ok += 1
@@ -608,10 +646,12 @@ def icbc_status(experiment_path: Path):
                             bc_chem_ok += 1
 
         row = [
-            str(cycle.index),
+            label,
             summarize(ic_ok, n_members),
             summarize(bc_ok, n_members),
         ]
+        if check_lowinp:
+            row.append(summarize(lowinp_ok, n_members))
         if chem_vars:
             row.append(summarize_chem(ic_chem_ok, ic_chem_checked, n_members))
             row.append(summarize_chem(bc_chem_ok, bc_chem_checked, n_members))

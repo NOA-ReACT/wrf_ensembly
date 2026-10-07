@@ -141,10 +141,21 @@ def check(exp: Path, cfg: dict, r: Report):
     # --- State / cycled variables --------------------------------------------------
     state = list(g(cfg, "assimilation.state_variables", []) or [])
     cycled = list(g(cfg, "assimilation.cycled_variables", []) or [])
-    not_cycled = [v for v in state if v not in cycled]
-    r.add("DECIDE", f"DA state ({len(state)} vars): {state}"
-                    + (f"; not cycled (analysis discarded at `cycle`, fine for diagnostic vars like W): {not_cycled}"
-                       if not_cycled else ""))
+    mode = g(cfg, "assimilation.cycling_mode", "wrfinput")
+    sst_update = g(cfg, "wrf_namelist.physics.sst_update", 0)
+    if mode == "restart":
+        r.add("DECIDE", f"cycling mode: restart files (whole model state carries over, cycled_variables unused), "
+                        f"sst_update={sst_update}"
+                        + (" (lower boundary frozen at its initial values)" if sst_update != 1 else ""))
+        r.add("DECIDE", f"DA state ({len(state)} vars): {state}")
+    else:
+        not_cycled = [v for v in state if v not in cycled]
+        r.add("DECIDE", f"cycling mode: fresh wrfinput every cycle, {len(cycled)} cycled variables, sst_update={sst_update}")
+        r.add("DECIDE", f"DA state ({len(state)} vars): {state}"
+                        + (f"; not cycled (analysis discarded at `cycle`, fine for diagnostic vars like W): {not_cycled}"
+                           if not_cycled else ""))
+        if "T" in cycled and "THM" not in cycled:
+            r.add("ERROR", "cycled_variables has T but not THM: WRF starts from THM, so temperature isn't cycled")
 
     # --- Perturbations -----------------------------------------------------------
     pv = g(cfg, "perturbations.variables", {}) or {}

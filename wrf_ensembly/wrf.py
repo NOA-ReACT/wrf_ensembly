@@ -1,6 +1,5 @@
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 import cartopy.crs as ccrs
 import pyproj
@@ -138,8 +137,8 @@ def generate_wrf_namelist(
     cycle: CycleInformation,
     chem_in_opt: bool,
     path: Path,
-    member: Optional[int] = None,
-    paths: Optional[ExperimentPaths] = None,
+    member: int | None = None,
+    paths: ExperimentPaths | None = None,
     add_iofields: bool = True,
 ):
     """
@@ -239,6 +238,16 @@ def generate_wrf_namelist(
                 wrf_namelist[name] |= group
             else:
                 wrf_namelist[name] = group
+
+    # With sst_update, real.exe writes the lower boundary (SST, vegetation, albedo, sea ice)
+    # to wrflowinp_d01 and wrf.exe reads it as auxinput4. Both refuse to run without these.
+    if wrf_namelist.get("physics", {}).get("sst_update", 0) == 1:
+        time_control = wrf_namelist["time_control"]
+        time_control.setdefault("io_form_auxinput4", 2)
+        time_control.setdefault("auxinput4_inname", "wrflowinp_d<domain>")
+        time_control.setdefault(
+            "auxinput4_interval", cfg.time_control.boundary_update_interval
+        )
 
     # Handle chem_in_opt
     if cfg.data.manage_chem_ic:

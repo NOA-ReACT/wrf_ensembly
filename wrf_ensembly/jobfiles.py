@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from wrf_ensembly import experiment, templates
 from wrf_ensembly.console import logger
@@ -44,14 +44,21 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
         _build_command(base_cmd, "geogrid"),
     ]
 
+    # real.exe runs once per cycle, or once for the whole experiment in restart mode
+    real_runs: list[dict[str, int]]
+    if exp.cfg.assimilation.cycling_mode == "restart":
+        real_runs = [{}]
+    else:
+        real_runs = [{"cycle": cycle} for cycle in range(len(exp.cycles))]
+
     if exp.cfg.data.per_member_meteorology:
         commands.append(f"for MEMBER in {{0..{len(exp.members) - 1}}}; do")
         commands.append(_build_command(base_cmd, "ungrib", member="$MEMBER"))
         commands.append(_build_command(base_cmd, "metgrid"))
         commands.extend(
             [
-                _build_command(base_cmd, "real", cycle=cycle, member="$MEMBER")
-                for cycle in range(len(exp.cycles))
+                _build_command(base_cmd, "real", member="$MEMBER", **real_args)
+                for real_args in real_runs
             ]
         )
         commands.append(_build_command(base_cmd, "interpolate-chem", member="$MEMBER"))
@@ -62,10 +69,7 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
                 _build_command(base_cmd, "ungrib"),
                 _build_command(base_cmd, "metgrid"),
             ]
-            + [
-                _build_command(base_cmd, "real", cycle=cycle)
-                for cycle in range(len(exp.cycles))
-            ]
+            + [_build_command(base_cmd, "real", **real_args) for real_args in real_runs]
             + [
                 _build_command(base_cmd, "interpolate-chem"),
             ]
@@ -203,7 +207,7 @@ def generate_advance_array_jobfile(
 
 def generate_make_analysis_jobfile(
     exp: experiment.Experiment,
-    cycle: Optional[int] = None,
+    cycle: int | None = None,
     queue_next_cycle: bool = False,
     compute_postprocess: bool = False,
     clean_scratch: bool = False,

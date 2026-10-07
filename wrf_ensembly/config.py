@@ -299,11 +299,25 @@ class AssimilationConfig:
     n_members: int
     """Number of ensemble members."""
 
-    cycled_variables: list[str]
-    """Which variables to carry forward from the previous cycle"""
-
     state_variables: list[str]
     """Which variables to use in the state vector"""
+
+    cycling_mode: Literal["wrfinput", "restart"] = "wrfinput"
+    """
+    How each cycle's initial conditions are built.
+
+    - `wrfinput`: real.exe makes a wrfinput/wrfbdy pair for every cycle. The variables in
+      `cycled_variables` are copied from the analysis into the next cycle's wrfinput, and
+      everything else comes fresh from real.exe (including the lower boundary).
+    - `restart`: real.exe runs once for the whole experiment. Members continue from their
+      own WRF restart file, with the analysis written into it, so the whole model state
+      (physics, chemistry, accumulated fields) carries over. Use `sst_update = 1` to keep
+      the lower boundary (SST, vegetation, albedo, sea ice) up to date.
+    """
+
+    cycled_variables: list[str] = field(default_factory=list)
+    """Which variables to carry forward from the previous cycle. Only used with
+    `cycling_mode = "wrfinput"`, where it must not be empty."""
 
     filter_mpi_tasks: int = 1
     """If != 1, then filter will be executed w/ MPI and this many tasks (mpirun -n <filter_mpi_tasks>). Also check `slurm.mpirun_command`."""
@@ -918,10 +932,38 @@ class Config(DataClassTOMLMixin):
                     overrides[name] = overrides.get(name, {}) | group
         return overrides
 
-    def check(self):
+    def check(self) -> None:
         """
-        Checks for likely mistakes in the configuration and logs a warning for each.
+        Checks the configuration. Raises a ValueError for settings that are not supported
+        and logs a warning for likely mistakes.
         """
+
+        physics = self.wrf_namelist.get("physics", {})
+        dynamics = self.wrf_namelist.get("dynamics", {})
+        if self.assimilation.cycling_mode == "wrfinput":
+            if not self.assimilation.cycled_variables:
+                raise ValueError(
+                    "assimilation.cycled_variables is empty, nothing would be carried over "
+                    'between cycles with cycling_mode = "wrfinput"'
+                )
+        else:
+            # The analysis is rebalanced (p, alpha from mu, ph, theta) with WRF's
+            # hypsometric_opt = 2 equations, the default since WRF v3.7
+            hypsometric_opt = dynamics.get("hypsometric_opt", 2)
+            if hypsometric_opt != 2:
+                raise ValueError(
+                    f'cycling_mode = "restart" needs hypsometric_opt = 2, not {hypsometric_opt}'
+                )
+            if self.assimilation.cycled_variables:
+                logger.warning(
+                    'assimilation.cycled_variables is ignored with cycling_mode = "restart", '
+                    "the whole model state carries over between cycles"
+                )
+            if physics.get("sst_update", 0) != 1:
+                logger.warning(
+                    'cycling_mode = "restart" without sst_update = 1: SST, vegetation, '
+                    "albedo and sea ice stay at their initial values for the whole experiment"
+                )
 
         # WRF v4 initialises its prognostic temperature from THM. T in wrfinput/wrfout is a
         # diagnostic (dry potential temperature) that WRF does not read back.

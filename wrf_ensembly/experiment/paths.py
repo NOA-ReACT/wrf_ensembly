@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Optional
 
 from wrf_ensembly.config import Config
 
@@ -121,7 +120,7 @@ class ExperimentPaths:
         return self.ensemble_path / f"member_{i:02d}"
 
     def forecast_path(
-        self, cycle: Optional[int] = None, member: Optional[int] = None
+        self, cycle: int | None = None, member: int | None = None
     ) -> Path:
         if cycle is None:
             return self.data_forecasts
@@ -129,13 +128,13 @@ class ExperimentPaths:
             return self.data_forecasts / f"cycle_{cycle:03d}"
         return self.data_forecasts / f"cycle_{cycle:03d}" / f"member_{member:02d}"
 
-    def analysis_path(self, cycle: Optional[int] = None) -> Path:
+    def analysis_path(self, cycle: int | None = None) -> Path:
         if cycle is None:
             return self.data_analysis
         return self.data_analysis / f"cycle_{cycle:03d}"
 
     def scratch_forecasts_path(
-        self, cycle: Optional[int] = None, member: Optional[int] = None
+        self, cycle: int | None = None, member: int | None = None
     ) -> Path:
         if cycle is None:
             return self.scratch_forecasts
@@ -143,40 +142,63 @@ class ExperimentPaths:
             return self.scratch_forecasts / f"cycle_{cycle:03d}"
         return self.scratch_forecasts / f"cycle_{cycle:03d}" / f"member_{member:02d}"
 
-    def scratch_analysis_path(self, cycle: Optional[int] = None) -> Path:
+    def scratch_analysis_path(self, cycle: int | None = None) -> Path:
         if cycle is None:
             return self.scratch_analysis
         return self.scratch_analysis / f"cycle_{cycle:03d}"
 
-    def scratch_dart_path(self, cycle: Optional[int] = None) -> Path:
+    def scratch_dart_path(self, cycle: int | None = None) -> Path:
         if cycle is None:
             return self.scratch_dart
         return self.scratch_dart / f"cycle_{cycle:03d}"
+
+    def icbc_file_path(
+        self, prefix: str, member: int | None, cycle: int | None
+    ) -> Path:
+        """
+        Where real.exe's output `prefix` (e.g. `wrfbdy_d01`) is stored. `member = None` is
+        the file shared by all members, `cycle = None` the file for the whole experiment,
+        as made in the `restart` cycling mode.
+        """
+        cycle_suffix = "" if cycle is None else f"_cycle_{cycle}"
+        if member is None:
+            return self.data_icbc / f"{prefix}{cycle_suffix}"
+        return (
+            self.data_icbc
+            / f"member_{member:02d}"
+            / f"{prefix}_member_{member:02d}{cycle_suffix}"
+        )
+
+    def _icbc_path(self, prefix: str, member: int, cycle: int | None) -> Path:
+        """
+        Like `icbc_file_path`, but returns the member-specific path only if it exists,
+        otherwise the shared path.
+        """
+        member_path = self.icbc_file_path(prefix, member, cycle)
+        if member_path.exists():
+            return member_path
+        return self.icbc_file_path(prefix, None, cycle)
 
     def ic_path(self, member: int, cycle: int) -> Path:
         """
         Get the initial conditions (wrfinput) file for a given member/cycle.
         Returns the member-specific path if it exists, otherwise the shared path.
         """
-        member_path = (
-            self.data_icbc
-            / f"member_{member:02d}"
-            / f"wrfinput_d01_member_{member:02d}_cycle_{cycle}"
-        )
-        if member_path.exists():
-            return member_path
-        return self.data_icbc / f"wrfinput_d01_cycle_{cycle}"
+        return self._icbc_path("wrfinput_d01", member, cycle)
 
-    def bc_path(self, member: int, cycle: int) -> Path:
+    def bc_path(self, member: int, cycle: int | None) -> Path:
         """
-        Get the boundary conditions (wrfbdy) file for a given member/cycle.
+        Get the boundary conditions (wrfbdy) file for a given member/cycle, or for the
+        whole experiment if `cycle` is None.
         Returns the member-specific path if it exists, otherwise the shared path.
         """
-        member_path = (
-            self.data_icbc
-            / f"member_{member:02d}"
-            / f"wrfbdy_d01_member_{member:02d}_cycle_{cycle}"
-        )
-        if member_path.exists():
-            return member_path
-        return self.data_icbc / f"wrfbdy_d01_cycle_{cycle}"
+        return self._icbc_path("wrfbdy_d01", member, cycle)
+
+    def lowinp_path(self, member: int, cycle: int | None) -> Path:
+        """
+        Get the lower boundary conditions (wrflowinp, written by real.exe when
+        `sst_update = 1`) file for a given member/cycle, or for the whole experiment if
+        `cycle` is None.
+        Returns the member-specific path if it exists, otherwise the shared path.
+        """
+        return self._icbc_path("wrflowinp_d01", member, cycle)
