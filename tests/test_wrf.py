@@ -70,3 +70,74 @@ def test_full_period_icbc_paths(tmp_path: Path):
     member_file.parent.mkdir(parents=True)
     member_file.touch()
     assert paths.lowinp_path(1, None) == member_file
+
+
+def member_namelist_text(cfg: config.Config, tmp_path: Path, cycle: int) -> str:
+    """Namelist for member 0 at `cycle`, as advance-member writes it"""
+
+    paths = ExperimentPaths(tmp_path / "experiment", cfg)
+    path = tmp_path / "namelist.input"
+    wrf.generate_wrf_namelist(
+        cfg,
+        cycling.get_cycle_information(cfg)[cycle],
+        True,
+        path,
+        member=0,
+        paths=paths,
+        add_iofields=False,
+    )
+    return path.read_text()
+
+
+def make_restart_config() -> config.Config:
+    cfg = make_config()
+    cfg.assimilation.cycling_mode = "restart"
+    cfg.assimilation.cycled_variables = []
+    cfg.time_control.analysis_interval = 360
+    return cfg
+
+
+def test_restart_mode_first_cycle_is_a_cold_start(tmp_path: Path):
+    text = member_namelist_text(make_restart_config(), tmp_path, 0)
+
+    assert "restart = .false." in text
+    assert "restart_interval = 360" in text
+    assert "override_restart_timers = .true." in text
+    rst_dir = tmp_path / "experiment/scratch/restart/cycle_000/member_00"
+    assert f"rst_outname = '{rst_dir}/wrfrst_d<domain>_<date>'" in text
+    assert rst_dir.is_dir()
+
+
+def test_restart_mode_later_cycles_restart(tmp_path: Path):
+    text = member_namelist_text(make_restart_config(), tmp_path, 1)
+
+    assert "restart = .true." in text
+    assert "scratch/restart/cycle_001/member_00/wrfrst_d<domain>_<date>" in text
+
+
+def test_restart_interval_follows_the_cycle_duration(tmp_path: Path):
+    cfg = make_restart_config()
+    cfg.time_control.cycles = {1: config.CycleConfig(duration=180)}
+
+    assert "restart_interval = 180" in member_namelist_text(cfg, tmp_path, 1)
+    assert "restart_interval = 360" in member_namelist_text(cfg, tmp_path, 2)
+
+
+def test_real_never_restarts(tmp_path: Path):
+    cfg = make_restart_config()
+    path = tmp_path / "namelist.input"
+    wrf.generate_wrf_namelist(cfg, cycling.get_full_period(cfg), False, path)
+
+    text = path.read_text()
+    assert "restart = .false." in text
+    assert "rst_outname" not in text
+
+
+def test_wrfinput_mode_keeps_restart_settings(tmp_path: Path):
+    cfg = make_config()
+    cfg.wrf_namelist["time_control"]["restart_interval"] = 1234
+
+    text = member_namelist_text(cfg, tmp_path, 1)
+    assert "restart_interval = 1234" in text
+    assert "rst_outname" not in text
+    assert "override_restart_timers" not in text

@@ -239,6 +239,22 @@ def generate_wrf_namelist(
             else:
                 wrf_namelist[name] = group
 
+    # In restart mode, every cycle writes a restart file at its end, and every cycle but
+    # the first starts from one (the first starts from real.exe's wrfinput). This
+    # overrides any restart settings in the config, which can't work here.
+    if cfg.assimilation.cycling_mode == "restart":
+        time_control = wrf_namelist["time_control"]
+        time_control["restart"] = member is not None and cycle.index > 0
+        if member is not None and paths is not None:
+            rst_dest = paths.scratch_restart_path(cycle.index, member)
+            rst_dest.mkdir(parents=True, exist_ok=True)
+            time_control["restart_interval"] = int(
+                (cycle.end - cycle.start).total_seconds() // 60
+            )
+            time_control["rst_outname"] = f"{rst_dest}/wrfrst_d<domain>_<date>"
+            # Take history_interval etc. from the namelist, not from the restart file
+            time_control["override_restart_timers"] = True
+
     # With sst_update, real.exe writes the lower boundary (SST, vegetation, albedo, sea ice)
     # to wrflowinp_d01 and wrf.exe reads it as auxinput4. Both refuse to run without these.
     if wrf_namelist.get("physics", {}).get("sst_update", 0) == 1:

@@ -63,6 +63,7 @@ class ExperimentPaths:
         self.scratch_forecasts = self.scratch / "forecasts"
         self.scratch_analysis = self.scratch / "analysis"
         self.scratch_dart = self.scratch / "dart"
+        self.scratch_restart = self.scratch / "restart"
 
     def create_directories(self):
         """Creates all required directories"""
@@ -83,6 +84,7 @@ class ExperimentPaths:
         self.scratch_forecasts.mkdir()
         self.scratch_analysis.mkdir()
         self.scratch_dart.mkdir()
+        self.scratch_restart.mkdir()
 
         self.logs.mkdir(exist_ok=True)
         self.logs_slurm.mkdir()
@@ -151,6 +153,13 @@ class ExperimentPaths:
         if cycle is None:
             return self.scratch_dart
         return self.scratch_dart / f"cycle_{cycle:03d}"
+
+    def scratch_restart_path(self, cycle: int, member: int) -> Path:
+        """
+        Where a member writes its WRF restart files during a cycle, in the `restart`
+        cycling mode. The one at the cycle end is the next cycle's initial state.
+        """
+        return self.scratch_restart / f"cycle_{cycle:03d}" / f"member_{member:02d}"
 
     def icbc_file_path(
         self, prefix: str, member: int | None, cycle: int | None
