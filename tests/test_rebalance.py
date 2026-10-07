@@ -157,3 +157,35 @@ def test_rebalance_rejects_other_hypsometric_options(tmp_path: Path):
     with netCDF4.Dataset(tmp_path / "wrfrst", "r+") as ds:
         with pytest.raises(ValueError, match="hypsometric_opt = 2"):
             rebalance.rebalance(ds)
+
+
+def test_rebalance_applies_only_the_change(tmp_path: Path):
+    state, _ = make_state(np.random.default_rng(0))
+    write_restart(tmp_path / "wrfrst", state, hypsometric_opt=2)
+
+    # Stored fields slightly off from the formula, as WRF's float32 values are
+    with netCDF4.Dataset(tmp_path / "wrfrst", "r+") as ds:
+        rebalance.rebalance(ds)
+        for name in rebalance.BALANCED_FIELDS:
+            ds[name][0] = ds[name][0] * (1 + 1e-6)
+    with netCDF4.Dataset(tmp_path / "wrfrst") as ds:
+        stored = {name: ds[name][0] for name in rebalance.BALANCED_FIELDS}
+
+    # No change in the state: the stored fields stay exactly as they are
+    with netCDF4.Dataset(tmp_path / "wrfrst", "r+") as ds:
+        before = rebalance.balanced_fields(ds)
+        rebalance.rebalance(ds, before)
+    with netCDF4.Dataset(tmp_path / "wrfrst") as ds:
+        for name in rebalance.BALANCED_FIELDS:
+            np.testing.assert_array_equal(ds[name][0], stored[name])
+
+    # A warmer column: P moves by the change of the balanced pressure
+    with netCDF4.Dataset(tmp_path / "wrfrst", "r+") as ds:
+        before = rebalance.balanced_fields(ds)
+        ds["THM_2"][0] = ds["THM_2"][0] + 1.0
+        after = rebalance.balanced_fields(ds)
+        rebalance.rebalance(ds, before)
+        np.testing.assert_allclose(
+            ds["P"][0], stored["P"] + (after["P"] - before["P"]), rtol=1e-12
+        )
+        assert (after["P"] > before["P"]).all()

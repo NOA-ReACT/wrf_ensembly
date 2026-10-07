@@ -15,8 +15,15 @@ integration:
   down from the model top. WRF recomputes these every time step before the physics, so
   they are only rewritten to keep the file consistent.
 
-The prognostic fields are read from their current time level (`_2`). Write the analysis
-to both levels (`_1` and `_2`) before rebalancing.
+The prognostic fields are read from their current time level (`_2`), so write the new
+state first (see `restart.write_state`).
+
+In practice this matters little: WRF recomputes P and AL from the state at every acoustic
+step, so stale values only enter the first RK substep. Inserting a +1 K / +2 m/s blob
+into a restart file and running with and without the rebalance gave surface pressures
+within 0.2 Pa of each other after 10 minutes, while the increment itself changed them by
+200 Pa (wrf_rst_support, checks/rebalance_test, Oct 2026). It is kept because it is cheap,
+an exact no-op where the state didn't change, and leaves the restart file consistent.
 """
 
 import netCDF4
@@ -106,13 +113,10 @@ def compute_balanced_fields(
     }
 
 
-def rebalance(ds: netCDF4.Dataset) -> None:
+def balanced_fields(ds: netCDF4.Dataset) -> dict[str, np.ndarray]:
     """
-    Recomputes AL, P, ALT, P_HYD and P_HYD_W of an open WRF restart file from its current
-    prognostic state, in place.
-
-    Args:
-        ds: WRF restart file, opened for writing
+    Computes AL, P, ALT, P_HYD and P_HYD_W from the current prognostic state of an open
+    WRF restart file, without changing it (see `compute_balanced_fields`).
     """
 
     if ds.getncattr("HYPSOMETRIC_OPT") != 2:
@@ -136,6 +140,28 @@ def rebalance(ds: netCDF4.Dataset) -> None:
     state = {name: ds[file_name][0].astype("f8") for name, file_name in names.items()}
     p_top = float(ds["P_TOP"][0])
 
-    balanced = compute_balanced_fields(state, p_top, int(ds.getncattr("USE_THETA_M")))
-    for name, field in balanced.items():
-        ds[name][0] = field
+    return compute_balanced_fields(state, p_top, int(ds.getncattr("USE_THETA_M")))
+
+
+def rebalance(ds: netCDF4.Dataset, before: dict[str, np.ndarray] | None = None) -> None:
+    """
+    Recomputes AL, P, ALT, P_HYD and P_HYD_W of an open WRF restart file from its current
+    prognostic state, in place.
+
+    WRF computes these in single precision, so recomputing them changes them by float32
+    noise (a few Pa in P) even where the state is unchanged. Pass `before`, the
+    `balanced_fields` of the file before its state was changed, to apply only the change
+    instead: field += balanced(now) - before. Where the state didn't change, the fields
+    then stay exactly as WRF wrote them.
+
+    Args:
+        ds: WRF restart file, opened for writing
+        before: Optionally, `balanced_fields(ds)` from before the state was changed
+    """
+
+    after = balanced_fields(ds)
+    for name, field in after.items():
+        if before is None:
+            ds[name][0] = field
+        else:
+            ds[name][0] = ds[name][0] + (field - before[name])

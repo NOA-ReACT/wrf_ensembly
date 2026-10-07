@@ -16,6 +16,8 @@ from wrf_ensembly import (
     external,
     obs_sequence,
     perturbations,
+    rebalance,
+    restart,
     update_bc,
     utils,
     wrf,
@@ -678,15 +680,10 @@ class Experiment:
     def _cycle_member_restart(self, member_i: int, use_forecast: bool) -> None:
         """
         `cycle_member` for the `restart` cycling mode: the member's restart file at the
-        end of the current cycle is copied into its directory, the original is kept in
-        scratch so the next cycle can be rerun.
+        end of the current cycle is copied into its directory (the original is kept in
+        scratch so the next cycle can be rerun). Unless cycling the forecast, the
+        `state_variables` of the analysis are written into it and it is rebalanced.
         """
-
-        if not use_forecast:
-            raise NotImplementedError(
-                "Writing the analysis into restart files is not implemented yet, "
-                'cycling_mode = "restart" only cycles forecasts for now'
-            )
 
         member_path = self.paths.member_path(member_i)
         next_cycle_i = self.current_cycle_i + 1
@@ -704,7 +701,32 @@ class Experiment:
             f.unlink()
         (member_path / "wrfinput_d01").unlink(missing_ok=True)
 
-        utils.copy(source, self.member_initial_state(member_i, next_cycle_i))
+        initial_state = self.member_initial_state(member_i, next_cycle_i)
+        utils.copy(source, initial_state)
+
+        if not use_forecast:
+            analysis_file = (
+                self.paths.scratch_analysis_path(self.current_cycle_i)
+                / f"member_{member_i:02d}"
+                / f"wrfout_d01_{end:%Y-%m-%d_%H:%M:%S}"
+            )
+            if not analysis_file.exists():
+                raise FileNotFoundError(analysis_file)
+            with (
+                netCDF4.Dataset(analysis_file, "r") as nc_analysis,  # type: ignore
+                netCDF4.Dataset(initial_state, "r+") as nc_restart,  # type: ignore
+            ):
+                before = rebalance.balanced_fields(nc_restart)
+                written = restart.write_state(
+                    nc_restart, nc_analysis, self.cfg.assimilation.state_variables
+                )
+                rebalance.rebalance(nc_restart, before)
+                nc_restart.experiment_name = self.cfg.metadata.name
+            logger.info(
+                f"Member {member_i}: Wrote the analysis ({', '.join(written)}) into "
+                f"{initial_state.name} and rebalanced it"
+            )
+
         self.prepare_member_boundaries(member_i, next_cycle_i)
 
     def set_wrf_environment(self):
