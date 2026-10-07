@@ -14,6 +14,7 @@ only the change is applied.
 """
 
 import netCDF4
+import numpy as np
 
 from wrf_ensembly import update_bc
 from wrf_ensembly.console import logger
@@ -30,6 +31,29 @@ def field_names(ds: netCDF4.Dataset, name: str) -> list[str]:
     if name in ds.variables:
         return [name]
     return []
+
+
+def set_field(ds: netCDF4.Dataset, name: str, value: np.ndarray) -> None:
+    """
+    Sets a field of a restart file to `value`, in place. For fields with two time levels
+    the value goes into `_2` and the same change is added to `_1`. Also works on files
+    without time levels (wrfinput), where it just sets the field.
+
+    Args:
+        ds: The file, opened for writing
+        name: The field's plain name (U, THM, DUST_1, ...)
+        value: The new value, broadcastable to the field's shape (with Time)
+    """
+
+    targets = field_names(ds, name)
+    if not targets:
+        raise KeyError(f"{name} not in {ds.filepath()}")
+    if len(targets) == 2:
+        level_1, level_2 = targets
+        ds[level_1][:] = ds[level_1][:] + (value - ds[level_2][:])
+        ds[level_2][:] = value
+    else:
+        ds[targets[0]][:] = value
 
 
 def write_state(
@@ -64,12 +88,6 @@ def write_state(
             where = "source" if name not in source.variables else "restart file"
             logger.warning(f"{name} not in the {where}, not copied")
             continue
-        field = source[name][:]
-        if len(targets) == 2:
-            level_1, level_2 = targets
-            restart[level_1][:] = restart[level_1][:] + (field - restart[level_2][:])
-            restart[level_2][:] = field
-        else:
-            restart[targets[0]][:] = field
+        set_field(restart, name, source[name][:])
         written.append(name)
     return written

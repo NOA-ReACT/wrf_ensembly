@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import netCDF4
+import numpy as np
 import xarray as xr
 
 from wrf_ensembly import (
@@ -276,18 +277,21 @@ class Experiment:
             raise FileNotFoundError(
                 f"Perturbation file for cycle {self.current_cycle_i} not found at {pert_file}"
             )
-        wrfinput_path = self.paths.member_path(member_i) / "wrfinput_d01"
-        if not wrfinput_path.exists():
+        initial_state = self.member_initial_state(member_i, self.current_cycle_i)
+        if not initial_state.exists():
             raise FileNotFoundError(
-                f"Initial conditions file for member {member_i} not found at {wrfinput_path}"
+                f"Initial conditions file for member {member_i} not found at {initial_state}"
             )
+        # In restart mode, after the first cycle, it's a restart file that needs rebalancing
+        is_restart = initial_state.name.startswith("wrfrst")
 
         perts = xr.open_dataset(pert_file).sel(member=member_i)
         pert_config = {
             name: json.loads(var.attrs["cfg"]) for name, var in perts.data_vars.items()
         }
 
-        with netCDF4.Dataset(wrfinput_path, "r+") as member_icbc:  # type: ignore
+        with netCDF4.Dataset(initial_state, "r+") as member_icbc:  # type: ignore
+            before = rebalance.balanced_fields(member_icbc) if is_restart else None
             for name, cfg in pert_config.items():
                 if "operation" not in cfg:
                     raise ValueError(
@@ -297,7 +301,7 @@ class Experiment:
 
                 logger.debug(f"Applying perturbation to {name} for member {member_i}")
                 logger.debug(f"Perturbation config: {pert_config}")
-                if name not in member_icbc.variables:
+                if not restart.field_names(member_icbc, name):
                     raise ValueError(f"Variable {name} not found in member IC/BC file.")
 
                 field = perts[name].to_numpy()
@@ -321,15 +325,21 @@ class Experiment:
                             "Cannot use 'assign' operation with midcycle taper"
                         )
 
+                # Perturb the current state, `set_field` handles restart time levels
+                current = member_icbc[restart.field_names(member_icbc, name)[-1]][:]
                 match operation:
                     case "add":
-                        member_icbc[name][:] += field
+                        perturbed = current + field
                     case "multiply":
-                        member_icbc[name][:] *= field
+                        perturbed = current * field
                     case "assign":
-                        member_icbc[name][:] = field
+                        perturbed = np.broadcast_to(field, current.shape)
                     case _:
                         raise ValueError(f"Unknown perturbation operation: {operation}")
+                restart.set_field(member_icbc, name, perturbed)
+
+            if before is not None:
+                rebalance.rebalance(member_icbc, before)
 
         logger.info(f"Applied perturbations to member {member_i}")
 

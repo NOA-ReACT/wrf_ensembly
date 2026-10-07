@@ -70,3 +70,29 @@ def test_write_state_needs_matching_times(tmp_path: Path):
     ):
         with pytest.raises(ValueError, match="Restart file is at"):
             restart.write_state(rst, analysis, ["U"])
+
+
+def test_set_field(tmp_path: Path):
+    make_file(tmp_path / "wrfrst", {"U_1": 0, "U_2": 1, "DUST_1": 3})
+
+    with netCDF4.Dataset(tmp_path / "wrfrst", "r+") as rst:
+        restart.set_field(rst, "U", rst["U_2"][:] * 2)
+        restart.set_field(rst, "DUST_1", np.full(SHAPE, 5.0))
+        with pytest.raises(KeyError, match="SEAS_1"):
+            restart.set_field(rst, "SEAS_1", np.zeros(SHAPE))
+
+    with netCDF4.Dataset(tmp_path / "wrfrst") as rst:
+        np.testing.assert_array_equal(rst["U_2"][:], 2)
+        np.testing.assert_array_equal(rst["U_1"][:], 1)
+        np.testing.assert_array_equal(rst["DUST_1"][:], 5)
+
+
+def test_set_field_on_files_without_time_levels(tmp_path: Path):
+    make_file(tmp_path / "wrfinput", {"U": 1, "THM": 2})
+
+    with netCDF4.Dataset(tmp_path / "wrfinput", "r+") as ds:
+        restart.set_field(ds, "U", np.full(SHAPE, 7.0))
+
+    with netCDF4.Dataset(tmp_path / "wrfinput") as ds:
+        np.testing.assert_array_equal(ds["U"][:], 7)
+        np.testing.assert_array_equal(ds["THM"][:], 2)
