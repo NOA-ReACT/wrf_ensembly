@@ -954,6 +954,11 @@ class Config(DataClassTOMLMixin):
                 raise ValueError(
                     f'cycling_mode = "restart" needs hypsometric_opt = 2, not {hypsometric_opt}'
                 )
+            if not dynamics.get("non_hydrostatic", True):
+                raise ValueError(
+                    'cycling_mode = "restart" needs non_hydrostatic = true, the analysis '
+                    "is rebalanced with the nonhydrostatic equation of state"
+                )
             if self.assimilation.cycled_variables:
                 logger.warning(
                     'assimilation.cycled_variables is ignored with cycling_mode = "restart", '

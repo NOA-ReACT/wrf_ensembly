@@ -120,3 +120,11 @@ def test_check_warns_about_cycled_variables_in_restart_mode(
     cfg.check()
 
     assert "cycled_variables is ignored" in caplog.text
+
+
+def test_check_rejects_restart_mode_hydrostatic():
+    cfg = make_restart_config()
+    cfg.wrf_namelist.setdefault("dynamics", {})["non_hydrostatic"] = False
+
+    with pytest.raises(ValueError, match="non_hydrostatic = true"):
+        cfg.check()
