@@ -95,28 +95,41 @@ def copy_model(experiment_path: Path, force: bool):
 
     # Copy WRF/WPS in the work directory
     # Depending on whether WRF was built using the traditional buildscripts or CMake, the binaries will be either in
-    # `run/` with the exe suffix (old scripts) or inside `install/bin` without the suffix. We need all other files
-    # from `run/` regardless. Let's try to handle all cases!
+    # `run/` with the exe suffix (old scripts) or inside `install/bin` without the suffix. CMake also installs the
+    # data files in `install/run`. When both builds exist, the CMake one wins: a classic build left over in `run/`
+    # is usually stale and would otherwise shadow it.
     wrf_required_binaries = ["wrf", "real", "tc", "ndown"]
+    wrf_root = exp.cfg.directories.wrf_root
+    cmake_install = wrf_root / "install"
+    if (cmake_install / "bin" / "wrf").exists():
+        logger.info(f"Using the CMake build of WRF in {cmake_install}")
+        run_dir = cmake_install / "run"
+        binary_sources = {b: cmake_install / "bin" / b for b in wrf_required_binaries}
+    else:
+        logger.info(f"Using the classic build of WRF in {wrf_root / 'run'}")
+        run_dir = wrf_root / "run"
+        binary_sources = {b: run_dir / f"{b}.exe" for b in wrf_required_binaries}
 
+    # Binaries are copied separately below, skip them (and the CMake symlinks to them) here
+    binary_names = {
+        *wrf_required_binaries,
+        *(f"{b}.exe" for b in wrf_required_binaries),
+    }
     shutil.copytree(
-        exp.cfg.directories.wrf_root / "run",
+        run_dir,
         exp.paths.work_wrf,
         symlinks=False,  # Maybe fix symlinks so that they are valid after getting copied?
+        ignore=lambda d, names: (
+            [n for n in names if n in binary_names] if Path(d) == run_dir else []
+        ),
     )
-    cmake_bin_dir = exp.cfg.directories.wrf_root / "install" / "bin"
 
-    # Look for binaries
-    for binary_name in wrf_required_binaries:
-        binary_path = exp.paths.work_wrf / f"{binary_name}.exe"
-        if not binary_path.exists():
-            # Try grabbing from CMake
-            cmake_bin = cmake_bin_dir / binary_name
-            if cmake_bin.exists:
-                utils.copy(cmake_bin, binary_path)
-
-        msg = "Yes" if binary_path.exists() else "[warning]No[/warning]"
-        logger.info(f"- {binary_name}: {msg}")
+    for binary_name, source in binary_sources.items():
+        if source.exists():
+            utils.copy(source, exp.paths.work_wrf / f"{binary_name}.exe")
+            logger.info(f"- {binary_name}: {source}")
+        else:
+            logger.warning(f"- {binary_name}: not found at {source}")
 
     logger.info(f"Copied WRF to {exp.paths.work_wrf}")
 
@@ -142,14 +155,15 @@ def copy_model(experiment_path: Path, force: bool):
     wps_required_binaries = ["geogrid", "ungrib", "metgrid"]
     for binary_name in wps_required_binaries:
         target_path = exp.paths.work_wps / f"{binary_name}.exe"
-        classic_source_path = exp.cfg.directories.wps_root / "{binary_name}.exe"
+        classic_source_path = exp.cfg.directories.wps_root / f"{binary_name}.exe"
         cmake_source_path = (
             exp.cfg.directories.wps_root / "install" / "bin" / binary_name
         )
-        if classic_source_path.exists():
-            utils.copy(classic_source_path, target_path)
-        elif cmake_source_path.exists():
+        # Same as WRF, prefer the CMake build if both exist
+        if cmake_source_path.exists():
             utils.copy(cmake_source_path, target_path)
+        elif classic_source_path.exists():
+            utils.copy(classic_source_path, target_path)
         else:
             logger.error(f"WPS Binary {binary_name} not found")
 
