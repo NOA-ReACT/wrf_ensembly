@@ -195,21 +195,26 @@ def update_boundaries(
 
 def read_state(ds: netCDF4.Dataset) -> tuple[dict[str, np.ndarray], dt.datetime]:
     """
-    Reads the fields `update_boundaries` needs from a wrfinput (or wrfout) file.
+    Reads the fields `update_boundaries` needs from a wrfinput, wrfout or WRF restart
+    file. Restart files keep both time levels of the prognostic fields (`U_1`, `U_2`,
+    ...), and `_2` is the current state.
 
     Returns:
         The fields without the Time dimension, and the file's time.
     """
 
+    def name_in_file(name: str) -> str:
+        return f"{name}_2" if f"{name}_2" in ds.variables else name
+
     names = [*STATE_VARIABLES, *(v for v in MOIST_VARIABLES if v in ds.variables)]
-    state = {name: ds[name][0].astype("f8") for name in names}
+    state = {name: ds[name_in_file(name)][0].astype("f8") for name in names}
     time = parse_wrf_times(ds["Times"])[0]
     return state, time
 
 
 def update_wrf_bc(wrfinput: Path, wrfbdy: Path) -> None:
     """
-    Updates the given `wrfbdy` file to match the `wrfinput` file.
+    Updates the given `wrfbdy` file to match the `wrfinput` (or restart) file.
     Required if you have modified the `wrfinput` file.
 
     Args:

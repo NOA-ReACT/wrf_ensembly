@@ -209,3 +209,29 @@ def test_analysis_time_outside_the_file_is_rejected(tmp_path: Path):
             update_bc.update_boundaries(bdy, state, START - INTERVAL)
         with pytest.raises(ValueError, match="outside boundary record"):
             update_bc.update_boundaries(bdy, state, START + INTERVAL)
+
+
+def test_read_state_takes_the_current_time_level_of_restart_files(tmp_path: Path):
+    state = make_state(np.random.default_rng(0))
+    two_levels = {"U", "V", "W", "PH", "THM", "MU"}
+
+    with netCDF4.Dataset(tmp_path / "wrfrst_d01", "w") as ds:
+        ds.createDimension("Time", None)
+        ds.createDimension("DateStrLen", 19)
+        write_times(ds.createVariable("Times", "S1", ("Time", "DateStrLen")), [START])
+        for name, field in state.items():
+            dims = ("Time", *(f"{name}_{i}" for i in range(field.ndim)))
+            for dim, size in zip(dims[1:], field.shape):
+                ds.createDimension(dim, size)
+            names = [f"{name}_1", f"{name}_2"] if name in two_levels else [name]
+            for file_name in names:
+                var = ds.createVariable(file_name, "f8", dims)
+                # The _1 level is one time step old, fill it with something else
+                var[0] = field if not file_name.endswith("_1") else field + 100
+
+    with netCDF4.Dataset(tmp_path / "wrfrst_d01") as ds:
+        read, time = update_bc.read_state(ds)
+
+    assert time == START
+    for name, field in state.items():
+        np.testing.assert_array_equal(read[name], field)

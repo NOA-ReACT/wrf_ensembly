@@ -338,7 +338,8 @@ class Experiment:
 
         member_path = self.paths.member_path(member_i)
         update_bc.update_wrf_bc(
-            member_path / "wrfinput_d01", member_path / "wrfbdy_d01"
+            self.member_initial_state(member_i, self.current_cycle_i),
+            member_path / "wrfbdy_d01",
         )
         logger.info(f"Member {member_i}: Updated boundary conditions")
 
@@ -373,7 +374,7 @@ class Experiment:
             )
             return False
 
-        ic_path = (member_path / "wrfinput_d01").resolve()
+        ic_path = self.member_initial_state(member_idx, self.current_cycle_i).resolve()
         bc_path = (member_path / "wrfbdy_d01").resolve()
         if not ic_path.exists() or not bc_path.exists():
             logger.error(
@@ -508,7 +509,9 @@ class Experiment:
         # Link wrfinput, required by filter to read coordinates
         wrfinput_path = dart_dir / "wrfinput_d01"
         wrfinput_path.unlink(missing_ok=True)
-        wrfinput_cur_cycle_path = self.paths.ic_path(0, self.current_cycle_i)
+        # Any wrfinput of the domain works, the grid doesn't change between cycles. In
+        # restart mode, only the first cycle has one.
+        wrfinput_cur_cycle_path = self.paths.ic_path(0, 0)
         wrfinput_path.symlink_to(wrfinput_cur_cycle_path)
         logger.info(f"Linked {wrfinput_path} to {wrfinput_cur_cycle_path}")
 
@@ -550,6 +553,18 @@ class Experiment:
 
         return True
 
+    def member_initial_state(self, member_i: int, cycle_i: int) -> Path:
+        """
+        The file a member starts a cycle from, in its directory: the wrfinput, or in
+        restart mode (after the first cycle) the WRF restart file at the cycle's start.
+        """
+
+        member_path = self.paths.member_path(member_i)
+        if self.cfg.assimilation.cycling_mode == "restart" and cycle_i > 0:
+            start = self.cycles[cycle_i].start
+            return member_path / f"wrfrst_d01_{start:%Y-%m-%d_%H:%M:%S}"
+        return member_path / "wrfinput_d01"
+
     def prepare_member_boundaries(self, member_i: int, cycle_i: int) -> None:
         """
         Puts the boundary conditions for a cycle in the member's directory: the wrfbdy
@@ -584,15 +599,37 @@ class Experiment:
 
     def cycle_member(self, member_i: int, use_forecast: bool):
         """
-        Merge the IC/BC of a member with the analysis from the previous cycle.
-        Must be done for all members after finishing a set of forward runs and running
-        the filter. If you have no observations and filter is skipped, run this step with
-        use_forecast=True to use the forecast from the previous cycle as the analysis.
+        Prepares a member for the next cycle, starting from the analysis of the current
+        cycle. Must be done for all members after finishing a set of forward runs and
+        running the filter. If you have no observations and filter is skipped, run this
+        step with use_forecast=True to use the forecast from the current cycle as the
+        analysis.
+
+        In `wrfinput` cycling mode, the next cycle's wrfinput gets the `cycled_variables`
+        from the analysis. In `restart` mode, the member continues from its restart file.
 
         Args:
             member_i: Index of the member to cycle
             use_forecast: Use the forecast from the previous cycle as the analysis
         """
+
+        member_path = self.paths.member_path(member_i)
+        if self.cfg.assimilation.cycling_mode == "restart":
+            self._cycle_member_restart(member_i, use_forecast)
+        else:
+            self._cycle_member_wrfinput(member_i, use_forecast)
+
+        # Remove forecast files, log files
+        logger.info(f"Cleaning up member directory {member_path}")
+        for f in member_path.glob("wrfout*"):
+            logger.debug(f"Removing forecast file {f}")
+            f.unlink()
+        for f in member_path.glob("rsl*"):
+            logger.debug(f"Removing log file {f}")
+            f.unlink()
+
+    def _cycle_member_wrfinput(self, member_i: int, use_forecast: bool) -> None:
+        """`cycle_member` for the `wrfinput` cycling mode"""
 
         member_path = self.paths.member_path(member_i)
         next_cycle_i = self.current_cycle_i + 1
@@ -638,14 +675,37 @@ class Experiment:
             # Add experiment name to attributes
             nc_icbc.experiment_name = self.cfg.metadata.name
 
-        # Remove forecast files, log files
-        logger.info(f"Cleaning up member directory {member_path}")
-        for f in member_path.glob("wrfout*"):
-            logger.debug(f"Removing forecast file {f}")
+    def _cycle_member_restart(self, member_i: int, use_forecast: bool) -> None:
+        """
+        `cycle_member` for the `restart` cycling mode: the member's restart file at the
+        end of the current cycle is copied into its directory, the original is kept in
+        scratch so the next cycle can be rerun.
+        """
+
+        if not use_forecast:
+            raise NotImplementedError(
+                "Writing the analysis into restart files is not implemented yet, "
+                'cycling_mode = "restart" only cycles forecasts for now'
+            )
+
+        member_path = self.paths.member_path(member_i)
+        next_cycle_i = self.current_cycle_i + 1
+        end = self.current_cycle.end
+        source = self.paths.scratch_restart_path(self.current_cycle_i, member_i) / (
+            f"wrfrst_d01_{end:%Y-%m-%d_%H:%M:%S}"
+        )
+        if not source.exists():
+            raise FileNotFoundError(source)
+        logger.info(f"Member {member_i}: Continuing from {source}")
+
+        # Only the next cycle's restart file belongs in the member directory. A stale
+        # wrfinput would be ignored by wrf.exe, but could be modified by mistake.
+        for f in member_path.glob("wrfrst_d01_*"):
             f.unlink()
-        for f in member_path.glob("rsl*"):
-            logger.debug(f"Removing log file {f}")
-            f.unlink()
+        (member_path / "wrfinput_d01").unlink(missing_ok=True)
+
+        utils.copy(source, self.member_initial_state(member_i, next_cycle_i))
+        self.prepare_member_boundaries(member_i, next_cycle_i)
 
     def set_wrf_environment(self):
         """
