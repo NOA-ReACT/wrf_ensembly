@@ -2,7 +2,11 @@ import datetime as dt
 from importlib import resources
 from pathlib import Path
 
-from wrf_ensembly import config, cycling, wrf
+import netCDF4
+import numpy as np
+import pytest
+
+from wrf_ensembly import config, cycling, update_bc, wrf
 from wrf_ensembly.experiment.paths import ExperimentPaths
 
 
@@ -141,3 +145,71 @@ def test_wrfinput_mode_keeps_restart_settings(tmp_path: Path):
     assert "restart_interval = 1234" in text
     assert "rst_outname" not in text
     assert "override_restart_timers" not in text
+
+
+def make_long_wrfbdy(
+    path: Path, n_records: int, interval_h: int = 6
+) -> list[dt.datetime]:
+    """A minimal wrfbdy with `n_records` records starting at 2026-03-01 12:00"""
+
+    start = dt.datetime(2026, 3, 1, 12, tzinfo=dt.timezone.utc)
+    times = [start + dt.timedelta(hours=interval_h * i) for i in range(n_records + 1)]
+    with netCDF4.Dataset(path, "w") as ds:
+        ds.createDimension("Time", None)
+        ds.createDimension("DateStrLen", 19)
+        ds.createDimension("bdy_width", 2)
+        ds.START_DATE = "2026-03-01_12:00:00"
+        for name, values in (
+            ("Times", times[:-1]),
+            (update_bc.THIS_BDY_TIME, times[:-1]),
+            (update_bc.NEXT_BDY_TIME, times[1:]),
+        ):
+            var = ds.createVariable(name, "S1", ("Time", "DateStrLen"))
+            for i, t in enumerate(values):
+                update_bc.write_wrf_time(var, i, t)
+        mu = ds.createVariable("MU_BXS", "f4", ("Time", "bdy_width"), zlib=True)
+        mu.units = "Pa"
+        mu[:] = np.arange(n_records * 2).reshape(n_records, 2)
+    return times
+
+
+def test_extract_boundary_records_for_a_cycle(tmp_path: Path):
+    times = make_long_wrfbdy(tmp_path / "long", 6)
+
+    n = wrf.extract_boundary_records(
+        tmp_path / "long", tmp_path / "out", times[2], times[4]
+    )
+
+    assert n == 2
+    with netCDF4.Dataset(tmp_path / "out") as ds:
+        assert update_bc.parse_wrf_times(ds[update_bc.THIS_BDY_TIME]) == times[2:4]
+        np.testing.assert_array_equal(ds["MU_BXS"][:], [[4, 5], [6, 7]])
+        assert ds["MU_BXS"].units == "Pa"
+        assert ds["MU_BXS"].filters()["zlib"]
+        assert ds.START_DATE == "2026-03-02_00:00:00"
+
+
+def test_extract_boundary_records_partial_intervals(tmp_path: Path):
+    # A cycle starting and ending between boundary times needs both records it touches
+    times = make_long_wrfbdy(tmp_path / "long", 6)
+    start = times[1] + dt.timedelta(hours=3)
+
+    n = wrf.extract_boundary_records(
+        tmp_path / "long", tmp_path / "out", start, start + dt.timedelta(hours=6)
+    )
+
+    assert n == 2
+    with netCDF4.Dataset(tmp_path / "out") as ds:
+        assert update_bc.parse_wrf_times(ds[update_bc.THIS_BDY_TIME]) == times[1:3]
+
+
+def test_extract_boundary_records_outside_the_file(tmp_path: Path):
+    times = make_long_wrfbdy(tmp_path / "long", 2)
+
+    with pytest.raises(ValueError, match="does not cover"):
+        wrf.extract_boundary_records(
+            tmp_path / "long",
+            tmp_path / "out",
+            times[1],
+            times[2] + dt.timedelta(hours=1),
+        )

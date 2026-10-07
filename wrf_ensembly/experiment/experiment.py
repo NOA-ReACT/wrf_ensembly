@@ -550,6 +550,38 @@ class Experiment:
 
         return True
 
+    def prepare_member_boundaries(self, member_i: int, cycle_i: int) -> None:
+        """
+        Puts the boundary conditions for a cycle in the member's directory: the wrfbdy
+        (in restart mode, the cycle's records of the experiment-long one) and the lower
+        boundary (wrflowinp, linked) if real.exe made one.
+        """
+
+        member_path = self.paths.member_path(member_i)
+        cycle = self.cycles[cycle_i]
+        bdy_target = member_path / "wrfbdy_d01"
+        if self.cfg.assimilation.cycling_mode == "restart":
+            n_records = wrf.extract_boundary_records(
+                self.paths.bc_path(member_i, None),
+                bdy_target,
+                cycle.start,
+                cycle.forecast_end,
+            )
+            logger.info(f"Member {member_i}: Extracted {n_records} boundary record(s)")
+            lowinp = self.paths.lowinp_path(member_i, None)
+        else:
+            utils.copy(self.paths.bc_path(member_i, cycle_i), bdy_target)
+            lowinp = self.paths.lowinp_path(member_i, cycle_i)
+
+        lowinp_target = member_path / "wrflowinp_d01"
+        lowinp_target.unlink(missing_ok=True)
+        if lowinp.exists():
+            lowinp_target.symlink_to(lowinp.resolve())
+        elif self.cfg.wrf_namelist.get("physics", {}).get("sst_update", 0) == 1:
+            raise FileNotFoundError(
+                f"sst_update = 1 but there's no lower boundary file at {lowinp}"
+            )
+
     def cycle_member(self, member_i: int, use_forecast: bool):
         """
         Merge the IC/BC of a member with the analysis from the previous cycle.
@@ -587,14 +619,9 @@ class Experiment:
         logger.info(f"Using {analysis_file} as analysis for member {member_i}")
 
         # Copy the initial & boundary condition files for the next cycle, as is
-        icbc_file = self.paths.ic_path(member_i, next_cycle_i)
-        bdy_file = self.paths.bc_path(member_i, next_cycle_i)
-
         icbc_target_file = member_path / "wrfinput_d01"
-        bdy_target_file = member_path / "wrfbdy_d01"
-
-        utils.copy(icbc_file, icbc_target_file)
-        utils.copy(bdy_file, bdy_target_file)
+        utils.copy(self.paths.ic_path(member_i, next_cycle_i), icbc_target_file)
+        self.prepare_member_boundaries(member_i, next_cycle_i)
 
         # Copy cycled variables from the analysis file to the IC file
         with (

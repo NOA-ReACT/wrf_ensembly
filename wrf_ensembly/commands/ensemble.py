@@ -33,15 +33,10 @@ def setup(experiment_path: Path):
     for i in range(exp.cfg.assimilation.n_members):
         member_dir = exp.paths.member_path(i)
 
-        ic_file = exp.paths.ic_path(i, 0)
-        bc_file = exp.paths.bc_path(i, 0)
-
         # Copy initial and boundary conditions
-        utils.copy(ic_file, member_dir / "wrfinput_d01")
-        logger.info(f"Member {i}: Copied wrfinput_d01")
-
-        utils.copy(bc_file, member_dir / "wrfbdy_d01")
-        logger.info(f"Member {i}: Copied wrfbdy_d01_cycle_0")
+        utils.copy(exp.paths.ic_path(i, 0), member_dir / "wrfinput_d01")
+        exp.prepare_member_boundaries(i, 0)
+        logger.info(f"Member {i}: Copied initial and boundary conditions")
 
 
 @ensemble_cli.command()

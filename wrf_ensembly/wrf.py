@@ -1,16 +1,21 @@
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import cartopy.crs as ccrs
+import netCDF4
 import pyproj
 import xarray as xr
 import xwrf  # noqa: F401
 
-from wrf_ensembly import fortran_namelists
+from wrf_ensembly import fortran_namelists, update_bc
 from wrf_ensembly.config import Config, DomainControlConfig
 from wrf_ensembly.console import logger
 from wrf_ensembly.cycling import CycleInformation
 from wrf_ensembly.experiment.paths import ExperimentPaths
+
+if TYPE_CHECKING:
+    from netCDF4 import CompressionLevel
 
 ESSENTIAL_VARIABLES = set(
     [
@@ -279,6 +284,75 @@ def generate_wrf_namelist(
         path = path / "namelist.input"
     fortran_namelists.write_namelist(wrf_namelist, path)
     logger.info(f"Wrote namelist to {path}")
+
+
+def extract_boundary_records(
+    src: Path, dest: Path, start: datetime, end: datetime
+) -> int:
+    """
+    Copies the records of a wrfbdy file needed to run from `start` to `end` into a new
+    file. These are the records whose interval (from `thisbdytime` to `nextbdytime`)
+    overlaps [start, end).
+
+    Used in the restart cycling mode, where real.exe makes one wrfbdy for the whole
+    experiment and each member gets the part its cycle needs. `update_bc` then modifies
+    the member's copy.
+
+    Args:
+        src: The wrfbdy to read from
+        dest: The wrfbdy to create, overwritten if it exists
+        start: Start of the run
+        end: End of the run
+
+    Returns:
+        The number of records copied
+    """
+
+    with netCDF4.Dataset(src, "r") as ds_src:  # type: ignore
+        ds_src.set_auto_mask(False)
+        this_times = update_bc.parse_wrf_times(ds_src[update_bc.THIS_BDY_TIME])
+        next_times = update_bc.parse_wrf_times(ds_src[update_bc.NEXT_BDY_TIME])
+        records = [
+            i
+            for i, (this, nxt) in enumerate(zip(this_times, next_times))
+            if this < end and nxt > start
+        ]
+        if (
+            not records
+            or this_times[records[0]] > start
+            or next_times[records[-1]] < end
+        ):
+            raise ValueError(
+                f"{src} does not cover {start} -> {end} "
+                f"({this_times[0]} -> {next_times[-1]})"
+            )
+        first, last = records[0], records[-1] + 1
+
+        dest.unlink(missing_ok=True)
+        with netCDF4.Dataset(dest, "w", format=ds_src.data_model) as ds_dest:  # type: ignore
+            ds_dest.setncatts({a: ds_src.getncattr(a) for a in ds_src.ncattrs()})
+            ds_dest.START_DATE = this_times[first].strftime("%Y-%m-%d_%H:%M:%S")
+            for name, dim in ds_src.dimensions.items():
+                ds_dest.createDimension(name, None if dim.isunlimited() else dim.size)
+            for name, var in ds_src.variables.items():
+                # Keep the compression and chunking of the source (WRF built with
+                # netCDF4 compresses its output), or the copy ends up larger than
+                # the whole experiment's file
+                filters = var.filters()
+                chunking = var.chunking()
+                out = ds_dest.createVariable(
+                    name,
+                    var.datatype,
+                    var.dimensions,
+                    zlib=filters["zlib"],
+                    complevel=cast("CompressionLevel", filters["complevel"]),
+                    shuffle=filters["shuffle"],
+                    chunksizes=None if chunking == "contiguous" else chunking,
+                )
+                out.setncatts({a: var.getncattr(a) for a in var.ncattrs()})
+                out[:] = var[first:last]
+
+    return last - first
 
 
 def _create_proj_crs(domain: DomainControlConfig):
