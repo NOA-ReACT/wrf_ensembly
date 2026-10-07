@@ -158,7 +158,6 @@ compute_ensemble_sd = true
 
 [wrf_namelist.time_control]
 input_from_file = true
-history_interval = 60
 frames_per_outfile = 1
 restart = false
 restart_interval = 3600

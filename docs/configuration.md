@@ -591,12 +591,16 @@ dart = { DART_DEBUG = "1" }
 
 WRF namelist overrides and per-member customizations.
 
+The run times, `interval_seconds`, `history_interval` and output paths are generated from
+`[time_control]` (including per-cycle overrides in `[time_control.cycles]`), so don't set
+them here: values in `[wrf_namelist]` take precedence and would replace them for every cycle.
+
 ```toml
 [wrf_namelist]
 # Global namelist overrides
 [wrf_namelist.time_control]
-history_interval = 60
-restart_interval = 3600
+io_form_history = 2
+frames_per_outfile = 1
 
 [wrf_namelist.domains]
 time_step = 180

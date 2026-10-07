@@ -170,7 +170,6 @@ params = { optical_properties_file = "/home/thgeorgiou/work/L2Aplus/extinction_o
 
 [wrf_namelist.time_control]
 input_from_file = true
-history_interval = 60
 frames_per_outfile = 1
 restart = false
 restart_interval = 3600
