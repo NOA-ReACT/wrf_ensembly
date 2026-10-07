@@ -132,6 +132,11 @@ experiment_dir/
 - `logger.setup(command_name, experiment_path)` creates timestamped log dirs
 - Format: `logs/YYYY-MM-DD_HHMMSS-COMMAND/wrf_ensembly.log`
 
+**Cycling modes** (`assimilation.cycling_mode`): `wrfinput` makes one wrfinput/wrfbdy per cycle with real.exe and copies `cycled_variables` from the analysis into the next wrfinput. `restart` runs real.exe once for the whole experiment and continues each member from its own WRF restart file (`scratch/restart/`), writing only the analysis' `state_variables` into it.
+- `restart.py`: writing into restart files (two time levels `X_1`/`X_2` for the dynamics fields)
+- `rebalance.py`: recomputes P/AL after the restart file's state changed (analysis, perturbations)
+- `update_bc.py`: Python port of DART's `update_wrf_bc` (hybrid-coordinate coupling), reads wrfinput or restart files
+
 **WRF Operations (`wrf.py`)**
 - WRF-specific utilities (namelists, file operations)
 - Handles wrfinput/wrfbdy files
@@ -191,7 +196,8 @@ wrf-ensembly $EXP_PATH preprocess setup
 wrf-ensembly $EXP_PATH preprocess geogrid
 wrf-ensembly $EXP_PATH preprocess ungrib
 wrf-ensembly $EXP_PATH preprocess metgrid
-wrf-ensembly $EXP_PATH preprocess real --cycle X
+wrf-ensembly $EXP_PATH preprocess real --cycle X   # cycling_mode = "wrfinput", for every cycle
+wrf-ensembly $EXP_PATH preprocess real             # cycling_mode = "restart", once
 ```
 
 **Running a cycle** (these act on the experiment's current cycle):

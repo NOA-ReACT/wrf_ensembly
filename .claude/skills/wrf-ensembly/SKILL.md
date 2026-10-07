@@ -25,8 +25,11 @@ command is `wrf-ensembly <EXP> <group> <command>`. One **cycle** is:
 1. `ensemble advance-member` — each member runs wrf.exe (separate jobs, often separate nodes)
 2. `ensemble filter` — DART assimilates `obs/cycle_NNN.obs_seq` into the forecasts
 3. `ensemble analysis` — collect DART output into analysis files
-4. `ensemble cycle` — copy next cycle's IC/BC into each member dir, overwrite the
-   `cycled_variables` from the analysis, bump the current cycle
+4. `ensemble cycle` — prepare each member dir for the next cycle and bump the current cycle.
+   With `assimilation.cycling_mode = "wrfinput"` (default): copy the next cycle's IC/BC and
+   overwrite the `cycled_variables` from the analysis. With `"restart"`: copy the member's
+   WRF restart file from `scratch/restart/`, write the analysis' `state_variables` into it,
+   and cut the cycle's records out of the experiment-long `wrfbdy_d01`
 
 Where things live (paths that matter for debugging):
 
@@ -111,7 +114,8 @@ regenerated but it takes hours to days. Watch for indirect deletion too:
 - `postprocess run` rewrites `data/forecasts`/`data/analysis` for that cycle. Those files may
   have been copied in from another HPC with **no raw wrfout behind them**. Check that the
   scratch wrfout exist before rerunning, or you replace good output with nothing.
-- `preprocess real --cycle N` rewrites that cycle's IC/BC. If `data/initial_boundary` is a
+- `preprocess real --cycle N` (or `preprocess real` in restart mode, which rewrites the
+  experiment-long `wrfbdy_d01`) rewrites that cycle's IC/BC. If `data/initial_boundary` is a
   symlink to another experiment, you are overwriting *that* experiment's files.
 - `experiment copy-model --force` wipes `work/ensemble/member_*` (including rsl evidence).
 - `status reset` / `ensemble reset-cycle` don't delete data but rewind state; confirm intent.

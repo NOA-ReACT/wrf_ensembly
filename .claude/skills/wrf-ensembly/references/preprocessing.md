@@ -13,6 +13,7 @@ preprocess geogrid      # once per domain
 preprocess ungrib       # links GRIB files from data.meteorology, runs ungrib.exe
 preprocess metgrid
 preprocess real --cycle N      # once per cycle; parallel-safe (own work dir per cycle)
+                               # restart mode: `preprocess real` once, no --cycle
 preprocess interpolate-chem    # WRF-Chem only, edits the IC files in place
 ```
 

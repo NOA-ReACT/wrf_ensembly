@@ -81,7 +81,13 @@ At this point, you will be able to find the `met_em*` files inside the `work/pre
 wrf-ensembly /path/to/experiment preprocess real --cycle 0
 ```
 
-The above command will take care to generate the namelist for `real.exe`, run `real.exe`, and copy the final `wrfinput_d01` and `wrfbdy_d01` files to the `data/initial_conditions` directory. You must run real for every cycle in your experiment.
+The above command will take care to generate the namelist for `real.exe`, run `real.exe`, and copy the final `wrfinput_d01` and `wrfbdy_d01` files to the `data/initial_boundary` directory. You must run real for every cycle in your experiment.
+
+If the experiment uses `cycling_mode = "restart"` (see the configuration reference), run real once, without `--cycle`. It makes the first cycle's `wrfinput_d01` and a `wrfbdy_d01` (and `wrflowinp_d01` with `sst_update = 1`) for the whole experiment:
+
+```bash
+wrf-ensembly /path/to/experiment preprocess real
+```
 
 To make this whole process easier, you can generate a SLURM jobfile for preprocessing using the `slurm preprocessing` command:
 
@@ -92,7 +98,7 @@ sbatch /path/to/experiment/jobfiles/preprocessing.sh
 
 You can setup which `#SBATCH` directives you want to include in the jobfile by editing the `[slurm]` section of the config file.
 
-Successful execution of all preprocessing steps will result in the `data/initial_conditions` directory being populated with the `wrfinput_d01` and `wrfbdy_d01` files for each cycle. You can check the status of the preprocessing using the `status` command:
+Successful execution of all preprocessing steps will result in the `data/initial_boundary` directory being populated with the `wrfinput_d01` and `wrfbdy_d01` files for each cycle. You can check the status of the preprocessing using the `status` command:
 
 If you are using WRF-Chem and you want to use the interpolator-for-wrfchem to generate initial conditions, you can use the `preprocess interpolate-chem` command:
 
@@ -198,7 +204,7 @@ This will generate the perturbation files inside `data/diagnostics/perturbations
 wrf-ensembly /path/to/experiment ensemble apply-perturbations --jobs 8
 ```
 
-You can repeat the `setup` -> perturbations process as many times as you want to tune your perturbations. The `setup` command will always copy the original `wrfinput_d01` and `wrfbdy_d01` files from the `data/initial_conditions/` directory, so you can always start fresh.
+You can repeat the `setup` -> perturbations process as many times as you want to tune your perturbations. The `setup` command will always copy the original `wrfinput_d01` and `wrfbdy_d01` files from the `data/initial_boundary/` directory, so you can always start fresh.
 
 The `update-bc` step is crucial after applying perturbations or cycling. When you modify the initial conditions field, you might introduce inconsistencies with the boundary conditions if there are changes near the boundary. These inconsistencies can lead to unexpected behavior in the model. The `ensemble update-bc` will ensure that the edges of the domain are consistent with the boundary conditions using the `update-wrf-bc` tool from DART. You should run this command after applying perturbations or cycling the ensemble:
 

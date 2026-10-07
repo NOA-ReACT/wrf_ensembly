@@ -214,11 +214,37 @@ use_inflation = false
 | Field | Type | Description |
 |-------|------|-------------|
 | `n_members` | int | **Required.** Number of ensemble members |
-| `cycled_variables` | [string] | **Required.** Variables to carry forward from the previous cycle |
-| `state_variables` | [string] | **Required.** Variables to include in the state vector for assimilation |
+| `state_variables` | [string] | **Required.** Variables to include in the state vector for assimilation. Use `THM`, not `T`: WRF starts from `THM` and ignores changes to `T` |
+| `cycling_mode` | string | `"wrfinput"` or `"restart"`, see [Cycling modes](#cycling-modes). *Default: "wrfinput"* |
+| `cycled_variables` | [string] | Variables to carry forward from the previous cycle. Required (non-empty) with `cycling_mode = "wrfinput"`, ignored with `"restart"` |
+| `keep_restart_files` | bool | With `cycling_mode = "restart"`, keep every cycle's restart files in `scratch/restart` instead of deleting the ones no cycle can be rerun from. *Default: false* |
 | `filter_mpi_tasks` | int | Number of MPI tasks for DART filter. If != 1, filter runs with MPI. *Default: 1* |
 | `half_window_length_minutes` | int | Half-length of the observation window in minutes. Observations within this window around the analysis time are used. *Default: 30* |
 | `use_inflation` | bool | Whether to manage DART inflation files between cycles (sets `inf_initial_from_restart`/`inf_sd_initial_from_restart` appropriately). You still need to configure inflation in the DART namelist. *Default: false* |
+
+### Cycling modes
+
+How each cycle's initial conditions are built:
+
+- **`wrfinput`**: real.exe makes a `wrfinput`/`wrfbdy` pair for every cycle
+  (`preprocess real --cycle N`). `ensemble cycle` copies the `cycled_variables` from the
+  analysis into the next cycle's `wrfinput`. Everything else comes fresh from real.exe,
+  including the lower boundary (SST, vegetation), but WRF also re-initialises its
+  physics on every cold start (for example cloud droplet number, TKE and u* start from
+  zero or a constant).
+- **`restart`**: real.exe runs once for the whole experiment (`preprocess real` without
+  `--cycle`), making the first cycle's `wrfinput` and one `wrfbdy` for the whole period.
+  Members continue from their own WRF restart file, so the whole model state carries
+  over. `ensemble cycle` writes the `state_variables` of the analysis into the restart
+  file (and nothing else, so cycling the forecast is an exact no-op) and rebalances
+  pressure and density. Each member gets the boundary records of its cycle from the
+  long `wrfbdy`. Set `sst_update = 1` in `[wrf_namelist.physics]` to keep SST,
+  vegetation, albedo and sea ice up to date through `wrflowinp`, otherwise they stay at
+  their first-cycle values. Needs `hypsometric_opt = 2` and `non_hydrostatic = true`
+  (the WRF defaults). Restart files hold all of WRF's state (about 0.8 GB per member for
+  a 280x150x60 domain with GOCART), see `keep_restart_files`.
+  Accumulated fields (`RAINNC`, deposition fluxes, ...) and `XTIME` keep counting from
+  the start of the experiment instead of restarting every cycle.
 
 ## Observations
 
