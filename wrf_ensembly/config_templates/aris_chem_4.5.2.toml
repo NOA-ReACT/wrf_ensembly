@@ -70,7 +70,7 @@ cycled_variables = [
   'V',
   'P',
   'PH',
-  'T',
+  'THM',
   'MU',
   'QVAPOR',
   'QCLOUD',
@@ -101,7 +101,7 @@ cycled_variables = [
 ]
 # Which variables to use in the state vector
 # Should probably match the DART namelist!
-state_variables = ['U', 'V', 'W', 'PH', 'T', 'MU', 'QVAPOR', 'PSFC']
+state_variables = ['U', 'V', 'W', 'PH', 'THM', 'MU', 'QVAPOR', 'PSFC']
 
 [slurm]
 command_prefix = "micromamba run -n wrf "

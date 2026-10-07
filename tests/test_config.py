@@ -41,3 +41,30 @@ def test_per_member_overrides_reject_unknown_keys(key):
 
     with pytest.raises(ValueError, match=key):
         cfg.wrf_namelist_overrides_for_member(0)
+
+
+def test_check_warns_about_cycling_t_instead_of_thm(caplog):
+    cfg = make_config({})
+    cfg.assimilation.cycled_variables = ["U", "V", "T", "QVAPOR"]
+
+    cfg.check()
+
+    assert "cycled_variables contains 'T' but not 'THM'" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "default.toml",
+        "iridium_chem_4.6.0.toml",
+        pytest.param(
+            "aris_chem_4.5.2.toml",
+            marks=pytest.mark.xfail(reason="template has no [observations] section"),
+        ),
+    ],
+)
+def test_templates_pass_check(template, caplog):
+    path = resources.files("wrf_ensembly.config_templates").joinpath(template)
+    config.read_config(path, inject_environment=False)
+
+    assert "THM" not in caplog.text

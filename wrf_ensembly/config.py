@@ -11,7 +11,7 @@ from mashumaro.config import BaseConfig
 from mashumaro.mixins.toml import DataClassTOMLMixin
 from mashumaro.types import SerializationStrategy
 
-from wrf_ensembly.console import console
+from wrf_ensembly.console import console, logger
 
 
 class UTCDatetimeStrategy(SerializationStrategy):
@@ -918,6 +918,22 @@ class Config(DataClassTOMLMixin):
                     overrides[name] = overrides.get(name, {}) | group
         return overrides
 
+    def check(self):
+        """
+        Checks for likely mistakes in the configuration and logs a warning for each.
+        """
+
+        # WRF v4 initialises its prognostic temperature from THM. T in wrfinput/wrfout is a
+        # diagnostic (dry potential temperature) that WRF does not read back.
+        for name in ("cycled_variables", "state_variables"):
+            variables = getattr(self.assimilation, name)
+            if "T" in variables and "THM" not in variables:
+                logger.warning(
+                    f"assimilation.{name} contains 'T' but not 'THM'. WRF starts from THM, "
+                    "T is a diagnostic it doesn't read, so changes to T have no effect. "
+                    "Use 'THM' instead."
+                )
+
 
 def _convert_datetimes_to_iso(obj: Any) -> Any:
     """
@@ -1002,6 +1018,8 @@ def read_config(path: Path, inject_environment=True) -> Config:
         cfg = Config.from_dict(merged_dict)
     else:
         cfg = Config.from_toml(base_text)
+
+    cfg.check()
 
     if inject_environment:
         for k, v in cfg.environment.universal.items():

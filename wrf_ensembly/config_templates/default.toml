@@ -62,7 +62,7 @@ cycled_variables = [
   "V",
   "P",
   "PH",
-  "T",
+  "THM",
   "MU",
   "QVAPOR",
   "QCLOUD",
@@ -81,7 +81,7 @@ cycled_variables = [
   "SMOIS",
   "TSK",
 ]
-state_variables = ["U", "V", "W", "PH", "T", "MU", "QVAPOR", "PSFC"]
+state_variables = ["U", "V", "W", "PH", "THM", "MU", "QVAPOR", "PSFC"]
 
 [observations]
 # instruments_to_assimilate =  # Optional; defaults to all available instruments
