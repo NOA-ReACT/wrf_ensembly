@@ -6,7 +6,7 @@ from pathlib import Path
 import click
 import netCDF4
 
-from wrf_ensembly import experiment, utils
+from wrf_ensembly import config, experiment, utils
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import ExperimentStateError, StateTransition
@@ -58,23 +58,28 @@ def setup_from_other_experiment(
     forwards.
 
     The other experiment must have the same cycle setup (start/end dates, output interval,
-    boundary conditions interval) and the same domain. The forecast files for the requested cycle
-    must be available in the scratch directory.
+    boundary conditions interval), domain and cycling mode. The forecast files for the
+    requested cycle must be available in the scratch directory. In restart mode, its
+    restart files at the end of the cycle are copied too, so they must still exist (see
+    `assimilation.keep_restart_files_for_cycles`).
     """
 
     logger.setup("ensemble-setup-from-other-experiment", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
-    if exp.cfg.assimilation.cycling_mode == "restart":
-        # This links the other experiment's forecasts and IC/BC, but a restart-mode
-        # experiment continues from WRF restart files, which this doesn't set up yet
-        logger.error(
-            'setup-from-other-experiment does not support cycling_mode = "restart" yet'
-        )
-        sys.exit(1)
-
     logger.info(f"Opening second experiment at {other_experiment}")
     other_exp = experiment.Experiment(other_experiment.resolve())
+
+    # A restart-mode experiment continues from restart files, which a wrfinput-mode one
+    # doesn't write. The other way around, there are no wrfinput files for later cycles.
+    mode = exp.cfg.assimilation.cycling_mode
+    other_mode = other_exp.cfg.assimilation.cycling_mode
+    if mode != other_mode:
+        logger.error(
+            f'This experiment has cycling_mode = "{mode}" but the other one "{other_mode}", '
+            "they must be the same"
+        )
+        sys.exit(1)
 
     # Check if the domain and time control setups are the same
     res = exp.cfg.domain_control.is_equal(other_exp.cfg.domain_control)
@@ -93,6 +98,41 @@ def setup_from_other_experiment(
         logger.error("Experiments do not have the same amount of members")
         sys.exit(1)
 
+    # In restart mode the members continue from the other experiment's restart files at
+    # the end of the cycle. Check they are all there before changing anything.
+    cycle_end = other_exp.cycles[cycle].end
+    restart_files = []
+    if mode == "restart":
+        restart_files = [
+            other_exp.paths.scratch_restart_path(cycle, i)
+            / f"wrfrst_d01_{cycle_end:%Y-%m-%d_%H:%M:%S}"
+            for i in range(exp.cfg.assimilation.n_members)
+        ]
+        missing = [f for f in restart_files if not f.exists()]
+        if missing:
+            logger.error(
+                f"{len(missing)} restart file(s) of cycle {cycle} are missing from the other "
+                f"experiment, e.g. {missing[0]}. `cycle` deletes old restart files unless "
+                f"the cycle is in assimilation.keep_restart_files_for_cycles (or "
+                f"keep_restart_files is set)"
+            )
+            sys.exit(1)
+
+    # Namelist differences are allowed (e.g. emission tuning), but a restart takes the
+    # model state from the other experiment, so physics or chemistry changes may not
+    # work. Point them out.
+    differences = config.wrf_namelist_differences(exp.cfg, other_exp.cfg)
+    if differences:
+        shown = differences[:20]
+        more = (
+            f"\n  ... and {len(differences) - 20} more" if len(differences) > 20 else ""
+        )
+        logger.warning(
+            "The WRF namelist differs from the other experiment's (this / other):\n  "
+            + "\n  ".join(shown)
+            + more
+        )
+
     # Link other experiments IC/BC directory to current exp.
     icbc_dir = exp.paths.data_icbc
     logger.info(
@@ -105,7 +145,6 @@ def setup_from_other_experiment(
     icbc_dir.symlink_to(other_exp.paths.data_icbc, target_is_directory=True)
 
     # Check if the required forecasts exist in the scratch directory & link them in the current experiment
-    cycle_end = other_exp.cycles[cycle].end
     required_wrfout_filename = f"wrfout_d01_{cycle_end:%Y-%m-%d_%H:%M:%S}"
     logger.info(f"Required forecast filename: {required_wrfout_filename}")
 
@@ -128,6 +167,13 @@ def setup_from_other_experiment(
         symlink_loc.unlink(missing_ok=True)
         logger.info(f"Linking {symlink_loc} to {required_wrfout_file}")
         symlink_loc.symlink_to(required_wrfout_file)
+
+        # The restart file is copied, not linked, so the other experiment can delete
+        # its own and this one can modify its copy
+        if restart_files:
+            target = exp.paths.scratch_restart_path(cycle, i) / restart_files[i].name
+            logger.info(f"Copying {restart_files[i]} to {target}")
+            utils.copy(restart_files[i], target)
 
         # Set member as advanced
         exp.members[i].advanced = True

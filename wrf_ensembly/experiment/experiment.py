@@ -569,8 +569,8 @@ class Experiment:
     def clean_restart_files(self) -> None:
         """
         Deletes the WRF restart files in scratch that no cycle can start from anymore, in
-        restart mode, unless `assimilation.keep_restart_files` is set. Call after moving
-        to the next cycle.
+        restart mode, unless `assimilation.keep_restart_files` is set or the cycle is in
+        `assimilation.keep_restart_files_for_cycles`. Call after moving to the next cycle.
 
         The current cycle starts from the previous cycle's restart files, which are kept
         so it can be rerun. Older cycles' are deleted, and so are any restart files of
@@ -587,8 +587,10 @@ class Experiment:
         previous_i = self.current_cycle_i - 1
         if previous_i < 0:
             return
+        keep_cycles = set(self.cfg.assimilation.keep_restart_files_for_cycles)
         for cycle_dir in sorted(self.paths.scratch_restart.glob("cycle_*")):
-            if int(cycle_dir.name.removeprefix("cycle_")) < previous_i:
+            cycle_i = int(cycle_dir.name.removeprefix("cycle_"))
+            if cycle_i < previous_i and cycle_i not in keep_cycles:
                 logger.info(f"Removing restart files in {cycle_dir}")
                 shutil.rmtree(cycle_dir)
 

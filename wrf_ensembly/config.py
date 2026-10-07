@@ -338,6 +338,13 @@ class AssimilationConfig:
     anymore, since they are large (all of WRF's state, for every member).
     """
 
+    keep_restart_files_for_cycles: list[int] = field(default_factory=list)
+    """
+    With `cycling_mode = "restart"`, cycles whose restart files (written at the cycle's
+    end) are never deleted, e.g. to start another experiment from there later with
+    `ensemble setup-from-other-experiment`.
+    """
+
 
 @dataclass
 class TemporalBinConfig:
@@ -987,6 +994,33 @@ class Config(DataClassTOMLMixin):
                     "T is a diagnostic it doesn't read, so changes to T have no effect. "
                     "Use 'THM' instead."
                 )
+
+
+def wrf_namelist_differences(cfg: Config, other: Config) -> list[str]:
+    """
+    Differences between two configs' WRF namelist overrides (`[wrf_namelist]` and
+    `[wrf_namelist_per_member]`), as "key: this / other" lines sorted by key.
+    """
+
+    def flatten(prefix: str, value: object) -> dict[str, object]:
+        if isinstance(value, dict):
+            items: dict[str, object] = {}
+            for key, sub in value.items():
+                items |= flatten(f"{prefix}.{key}", sub)
+            return items
+        return {prefix: value}
+
+    def all_keys(c: Config) -> dict[str, object]:
+        return flatten("wrf_namelist", c.wrf_namelist) | flatten(
+            "wrf_namelist_per_member", c.wrf_namelist_per_member
+        )
+
+    ours, theirs = all_keys(cfg), all_keys(other)
+    return [
+        f"{key}: {ours.get(key, '(unset)')} / {theirs.get(key, '(unset)')}"
+        for key in sorted(ours.keys() | theirs.keys())
+        if ours.get(key) != theirs.get(key)
+    ]
 
 
 def _convert_datetimes_to_iso(obj: Any) -> Any:

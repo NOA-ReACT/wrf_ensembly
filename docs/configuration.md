@@ -218,6 +218,7 @@ use_inflation = false
 | `cycling_mode` | string | `"wrfinput"` or `"restart"`, see [Cycling modes](#cycling-modes). *Default: "wrfinput"* |
 | `cycled_variables` | [string] | Variables to carry forward from the previous cycle. Required (non-empty) with `cycling_mode = "wrfinput"`, ignored with `"restart"` |
 | `keep_restart_files` | bool | With `cycling_mode = "restart"`, keep every cycle's restart files in `scratch/restart` instead of deleting the ones no cycle can be rerun from. *Default: false* |
+| `keep_restart_files_for_cycles` | [int] | With `cycling_mode = "restart"`, cycles whose restart files (written at the cycle's end) are never deleted, e.g. to start another experiment from there with `ensemble setup-from-other-experiment`. *Default: []* |
 | `filter_mpi_tasks` | int | Number of MPI tasks for DART filter. If != 1, filter runs with MPI. *Default: 1* |
 | `half_window_length_minutes` | int | Half-length of the observation window in minutes. Observations within this window around the analysis time are used. *Default: 30* |
 | `use_inflation` | bool | Whether to manage DART inflation files between cycles (sets `inf_initial_from_restart`/`inf_sd_initial_from_restart` appropriately). You still need to configure inflation in the DART namelist. *Default: false* |

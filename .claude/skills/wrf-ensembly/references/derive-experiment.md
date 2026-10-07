@@ -78,6 +78,13 @@ the symlink. If preprocessing is needed later, remove the symlink and make a rea
 requires identical `domain_control` and `time_control`, and needs the parent's raw wrfout for cycle N
 to still be in its scratch directory. Check that before promising it.
 
+Both experiments must have the same `assimilation.cycling_mode`. In restart mode the parent's
+restart files at the end of cycle N are copied too, from `scratch/restart/cycle_NNN/`, and `cycle`
+deletes old ones as the parent moves on. If a branch point is planned, the parent needs
+`assimilation.keep_restart_files_for_cycles = [N]` (or `keep_restart_files = true`) from the start.
+The command lists `[wrf_namelist]` differences as a warning: tuning parameters are fine, but
+switching physics or chemistry schemes against the parent's restart state may not work.
+
 ## 4. Bring it up
 
 ```bash
