@@ -163,3 +163,31 @@ def test_plan_roundtrip():
     assert segments.SegmentPlan.from_dict(p.to_dict()) == p
     assert 2 in p and 5 in p and 6 not in p and 1 not in p
     assert list(p.cycles) == [2, 3, 4, 5]
+
+
+def test_shorten():
+    cycles = make_cycles(20)
+    p = plan(cycles, first=2, checkpoint_interval_hours=12)
+    assert p.last == 19
+
+    short = segments.shorten(p, cycles, 7, segments.STOP_RUN_UNTIL, 12, run_until=7)
+
+    assert (short.first, short.last, short.stop_reason) == (2, 7, "run_until")
+    assert short.run_until == 7
+    assert short.checkpoint_interval_min == 12 * 60  # 36 h
+    assert short.estimated_walltime_s == pytest.approx(36 * 100)
+
+    with pytest.raises(ValueError):
+        segments.shorten(p, cycles, 1, segments.STOP_RUN_UNTIL, 12)
+
+
+def test_new_stop_inside():
+    cycles = make_cycles(20)
+    p = plan(cycles, first=2)  # 2-19
+
+    assert segments.new_stop_inside(p, set(), None) is None
+    # Observations at the end or outside the segment are no reason to shorten it
+    assert segments.new_stop_inside(p, {1, 19}, 25) is None
+    assert segments.new_stop_inside(p, {9, 5}, None) == (5, "observations")
+    assert segments.new_stop_inside(p, {9}, 4) == (4, "run_until")
+    assert segments.new_stop_inside(p, {4}, 4) == (4, "observations")

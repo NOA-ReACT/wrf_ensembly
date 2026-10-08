@@ -203,3 +203,60 @@ def plan_segment(
         run_until=run_until,
         created=now.isoformat(),
     )
+
+
+def shorten(
+    plan: SegmentPlan,
+    cycles: list[CycleInformation],
+    last: int,
+    reason: str,
+    checkpoint_interval_hours: float,
+    run_until: int | None = None,
+) -> SegmentPlan:
+    """
+    The plan ending at `last` instead, for a new stop inside it (observations added,
+    `--run-until`). Only shortening is safe before the members start: the boundaries
+    extracted for the plan cover the shorter segment too.
+    """
+
+    if not plan.first <= last <= plan.last:
+        raise ValueError(f"Cycle {last} is not in segment {plan}")
+
+    segment_min = round(simulated_hours(cycles, plan.first, last) * 60)
+    analysis_interval_min = round(
+        (cycles[plan.first].end - cycles[plan.first].start).total_seconds() / 60
+    )
+    return SegmentPlan(
+        first=plan.first,
+        last=last,
+        checkpoint_interval_min=checkpoint_interval(
+            segment_min,
+            math.floor(checkpoint_interval_hours * 60),
+            analysis_interval_min,
+        ),
+        estimated_walltime_s=simulated_hours(cycles, plan.first, last)
+        * plan.rate_s_per_sim_hour,
+        rate_s_per_sim_hour=plan.rate_s_per_sim_hour,
+        rate_source=plan.rate_source,
+        stop_reason=reason,
+        run_until=run_until if run_until is not None else plan.run_until,
+        created=plan.created,
+    )
+
+
+def new_stop_inside(
+    plan: SegmentPlan, observation_cycles: set[int], run_until: int | None
+) -> tuple[int, str] | None:
+    """
+    The earliest cycle before the end of a plan that has become a stop since planning
+    (an observation file appeared, or `--run-until` asks for it), with the reason
+    """
+
+    inside = {i: STOP_OBSERVATIONS for i in observation_cycles if i in plan}
+    if run_until is not None and run_until in plan:
+        inside.setdefault(run_until, STOP_RUN_UNTIL)
+    inside.pop(plan.last, None)
+    if not inside:
+        return None
+    first_stop = min(inside)
+    return first_stop, inside[first_stop]
