@@ -336,8 +336,10 @@ def generate_postprocess_jobfile(
         ),
     ]
 
+    # The cycle must be given: by the time this job runs, the experiment has usually
+    # moved on, and `clean` defaults to the current cycle
     if clean:
-        commands.append(_build_command(base_cmd, "clean"))
+        commands.append(_build_command(base_cmd, "clean", cycle=cycle))
 
     jobfile.write_text(
         templates.generate(
@@ -394,7 +396,7 @@ def generate_postprocess_array_jobfile(
     ]
 
     if clean:
-        commands.append(_build_command(base_cmd, "clean"))
+        commands.append(_build_command(base_cmd, "clean", cycle="$SLURM_ARRAY_TASK_ID"))
 
     jobfile.write_text(
         templates.generate(
