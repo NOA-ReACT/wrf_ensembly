@@ -224,6 +224,12 @@ wrf-ensembly /path/to/experiment ensemble advance-member --member 2 --cores 24
 
 The forecasts are stored inside `scratch/forecasts/cycle_ABC`. Of course, you must advance all members to the next cycle before continuing. There is a SLURM helper for this we will cover later.
 
+With [segments](core-concepts.md#segments) enabled (restart mode only), `advance-member` runs the whole planned segment, several cycles at once, and files the output of each cycle into its own directory. `ensemble plan-segment` shows which cycles that is. Once all members are done, move the experiment to the segment's last cycle before continuing:
+
+```bash
+wrf-ensembly /path/to/experiment ensemble finish-segment
+```
+
 
 ## Running the assimilation filter, generating the analysis
 
@@ -248,7 +254,7 @@ The analysis files are stored in `scratch/analysis/cycle_ABC`.
 
 ## Cycling the experiment
 
-Finally, you can cycle the experiment using the `ensemble cycle` command. This will prepare the members for the next cycle by copying the new initial and boundary condition files, and adding the new analysis fields to them. After `cycle`, you should run `update-bc` and then the members are ready to be advanced to the next cycle. You can run the `cycle` command as follows:
+Finally, you can cycle the experiment using the `ensemble cycle` command. This will prepare the members for the next cycle: in `wrfinput` mode it copies the next cycle's initial and boundary condition files and adds the analysis fields to them; in `restart` mode it continues each member from its restart file and writes the analysis into it (see [Cycling](core-concepts.md#cycling)). With segments, it also plans the next segment. After `cycle`, you should run `update-bc` and then the members are ready to be advanced to the next cycle. If the cycle had no observations, skip `filter` and `analysis`; `cycle` then continues from the forecast. You can run the `cycle` command as follows:
 
 ```bash
 wrf-ensembly /path/to/experiment ensemble cycle

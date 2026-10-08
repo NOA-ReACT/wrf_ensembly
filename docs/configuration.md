@@ -247,7 +247,11 @@ How each cycle's initial conditions are built:
   (the WRF defaults). Restart files hold all of WRF's state (about 0.8 GB per member for
   a 280x150x60 domain with GOCART), see `keep_restart_files`.
   Accumulated fields (`RAINNC`, deposition fluxes, ...) and `XTIME` keep counting from
-  the start of the experiment instead of restarting every cycle.
+  the start of the experiment instead of restarting every cycle. A few things are not
+  carried over exactly (for example `EDUST1`-`EDUST5`, which aren't in the restart file),
+  see [what a restart doesn't carry over](./core-concepts.md#what-a-restart-doesnt-carry-over-exactly).
+  With `restart` mode you can also run several cycles as one WRF run, see
+  [Segments](#segments).
 
 ## Segments
 
@@ -282,7 +286,7 @@ With segments, a few things mean something slightly different:
 - `assimilation.keep_restart_files_for_cycles` always ends a segment, so the restart
   file is there for `setup-from-other-experiment` as soon as the run reaches the cycle.
 - `perturb_every_cycle` noise is only applied where the members stop.
-- Fields WRF accumulates since the last restart (`EDUST1`-`EDUST5` and `TOT_EDUST` with
+- Fields that start over at every restart (`EDUST1`-`EDUST5` and `TOT_EDUST` with
   GOCART) add up over the whole segment instead of one cycle.
 
 ## Observations
