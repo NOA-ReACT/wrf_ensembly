@@ -30,6 +30,11 @@ def setup(experiment_path: Path):
     first_cycle = exp.cycles[0]
     logger.info(f"Configuring members for cycle 0: {str(first_cycle)}")
 
+    # The boundaries are extracted for the whole first segment. A plan made beforehand
+    # with `plan-segment` (e.g. with --run-until) is kept.
+    if exp.cfg.segments.enabled and exp.segment_of(0) is None:
+        exp.plan_segment(0)
+
     for i in range(exp.cfg.assimilation.n_members):
         member_dir = exp.paths.member_path(i)
 
@@ -389,7 +394,11 @@ def advance_member(
     logger.info(f"Using {cores} cores for wrf.exe")
 
     # Run WRF!
-    success = exp.advance_member(member, cores=cores)
+    try:
+        success = exp.advance_member(member, cores=cores)
+    except ExperimentStateError as e:
+        logger.error(str(e))
+        sys.exit(1)
     if not success:
         sys.exit(1)
 
@@ -431,6 +440,12 @@ def analysis(experiment_path: Path):
 
     logger.setup("ensemble-analysis", experiment_path)
     exp = experiment.Experiment(experiment_path)
+
+    try:
+        exp.check_segment_finished()
+    except ExperimentStateError as e:
+        logger.error(str(e))
+        sys.exit(1)
 
     can_run, error = exp.state_machine.can_run_analysis(exp.current_cycle_i)
     if not can_run:
@@ -487,15 +502,27 @@ def analysis(experiment_path: Path):
     type=click.IntRange(min=0, max=None),
     help="How many files to process in parallel",
 )
+@click.option(
+    "--run-until",
+    type=int,
+    help="With segments, end the next segment at this cycle at the latest",
+)
 @pass_experiment_path
-def cycle(experiment_path: Path, jobs: int | None):
+def cycle(experiment_path: Path, jobs: int | None, run_until: int | None):
     """
     Prepares the experiment for the next cycle by copying the cycled variables from the analysis
-    to the initial conditions and preparing the namelist.
+    to the initial conditions and preparing the namelist. With segments, plans the next
+    segment first.
     """
 
     logger.setup("cycle", experiment_path)
     exp = experiment.Experiment(experiment_path)
+
+    try:
+        exp.check_segment_finished()
+    except ExperimentStateError as e:
+        logger.error(str(e))
+        sys.exit(1)
 
     if not exp.wait_for_all_members():
         n_advanced = exp.state.count_advanced(exp.current_cycle_i)
@@ -525,6 +552,13 @@ def cycle(experiment_path: Path, jobs: int | None):
     # Determine job count
     jobs = utils.determine_jobs(jobs)
     logger.info(f"Using {jobs} jobs")
+
+    # The boundaries `cycle_member` extracts cover the next segment
+    if exp.cfg.segments.enabled:
+        exp.plan_segment(
+            next_cycle_i,
+            run_until if run_until is not None and run_until >= next_cycle_i else None,
+        )
 
     # Do the cycling work
     with ProcessPoolExecutor(max_workers=jobs) as executor:
@@ -557,12 +591,22 @@ def cycle(experiment_path: Path, jobs: int | None):
     type=int,
     help="End the segment at this cycle at the latest",
 )
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    help="How many members to update the boundaries of in parallel",
+)
 @pass_experiment_path
-def plan_segment(experiment_path: Path, replan: bool, run_until: int | None):
+def plan_segment(
+    experiment_path: Path, replan: bool, run_until: int | None, jobs: int | None
+):
     """
     Plans the segment (several cycles run as one WRF run) starting at the current cycle,
     with `[segments]` enabled. `cycle` and `setup` do this on their own; use this to see
     the plan, or to redo it with --replan after the observations changed.
+
+    The members' boundary conditions are extracted again for the new plan, and the
+    boundary increment of `update-bc` applied to them.
     """
 
     logger.setup("ensemble-plan-segment", experiment_path)
@@ -597,6 +641,27 @@ def plan_segment(experiment_path: Path, replan: bool, run_until: int | None):
         sys.exit(1)
 
     exp.plan_segment(cycle_i, run_until)
+    exp.refresh_segment_boundaries(utils.determine_jobs(jobs))
+
+
+@ensemble_cli.command()
+@pass_experiment_path
+def finish_segment(experiment_path: Path):
+    """
+    After all members ran a segment of several cycles, marks its cycles but the last as
+    complete and moves the experiment to the last one, where filter, analysis and cycle
+    run as usual. Does nothing if the experiment is not at the start of such a segment,
+    so it can always run first in the analysis job.
+    """
+
+    logger.setup("ensemble-finish-segment", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    try:
+        exp.finish_segment()
+    except ExperimentStateError as e:
+        logger.error(str(e))
+        sys.exit(1)
 
 
 @ensemble_cli.command()
@@ -617,6 +682,11 @@ def reset_cycle(experiment_path: Path, cycle: int | None):
     WARNING: This does not clean up any files or undo any work. It only resets
     the state tracking. You may need to manually clean up files before re-running
     the cycle.
+
+    With segments, a cycle inside the segment the experiment is in resets the whole
+    segment: the status of all its cycles, and the output and restart files its
+    members wrote are deleted. The experiment goes back to the segment's first cycle
+    and the segment is planned again.
     """
 
     logger.setup("ensemble-reset-cycle", experiment_path)
@@ -627,6 +697,17 @@ def reset_cycle(experiment_path: Path, cycle: int | None):
     if cycle_idx < 0 or cycle_idx >= len(exp.cycles):
         logger.error(f"Invalid cycle index {cycle_idx}")
         sys.exit(1)
+
+    segment = exp.segment_of(cycle_idx)
+    if segment is not None:
+        logger.warning(f"Cycle {cycle_idx} is part of segment {segment}, resetting it")
+        try:
+            exp.reset_segment(segment, utils.determine_jobs(None))
+        except ExperimentStateError as e:
+            logger.error(str(e))
+            sys.exit(1)
+        logger.info(f"Segment reset, the experiment is at cycle {exp.current_cycle_i}")
+        return
 
     cycle_machine = exp.state_machine.get_cycle(cycle_idx)
     logger.warning(

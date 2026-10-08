@@ -217,11 +217,12 @@ def generate_make_analysis_jobfile(
     Generates a jobfile for the `filter`, `analysis` and `cycle` steps. At runtime, the
     script will check whether observations exist for the current cycle. If they do, all
     steps (filter, analysis, cycle) are run. If they don't, only the cycle step is run
-    with the `--use-forecast` flag.
+    with the `--use-forecast` flag. With segments, `finish-segment` runs first.
 
     Args:
         exp: The experiment
-        cycle: The cycle for which to run the analysis command. If None, all cycles will be processed.
+        cycle: The cycle for which to run the analysis command; with segments, the last
+            cycle of the segment.
         queue_next_cycle: Whether to queue the next cycle after the current one is done.
         compute_postprocess: Whether to compute postprocess after the analysis step.
         delete_members: Whether to delete the members' forecasts after processing them.
@@ -261,12 +262,16 @@ def generate_make_analysis_jobfile(
     }
 
     base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path} ensemble {{subcommand}}"
+    # With segments, `cycle` plans the next one, which ends at --run-until at the latest
+    cycle_args = {"run_until": run_until} if run_until is not None else {}
     commands = [
+        # Moves the experiment from the first to the last cycle of a segment
+        *([_build_command(base_cmd, "finish-segment")] if exp.cfg.segments.enabled else []),
         f"if [ -f {obs_file} ]; then",
         _build_command(base_cmd, "filter"),
         _build_command(base_cmd, "analysis"),
         "fi",
-        _build_command(base_cmd, "cycle"),
+        _build_command(base_cmd, "cycle", **cycle_args),
         f"if [ -f {pert_file} ]; then",
         _build_command(base_cmd, "apply-perturbations"),
         "fi",

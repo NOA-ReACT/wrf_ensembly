@@ -3,9 +3,10 @@ from pathlib import Path
 
 import click
 
-from wrf_ensembly import experiment, external, jobfiles
+from wrf_ensembly import experiment, external, jobfiles, segments
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
+from wrf_ensembly.segments import SegmentPlan
 
 
 @click.group(name="slurm", cls=GroupWithStartEndPrint)
@@ -172,6 +173,10 @@ def run_experiment(
 
     If for some cycle there are not prepared observations (in the `obs` directory), the
     generated job will skip the analysis step and go straight to cycling.
+
+    With segments, the members run the whole planned segment, and the analysis job
+    finishes it first. A segment no member has started yet is shortened if one of its
+    cycles got observations since planning, or is the `--run-until` cycle.
     """
 
     logger.setup("slurm-run-experiment", experiment_path)
@@ -184,6 +189,21 @@ def run_experiment(
     if current_cycle.index == len(exp.cycles) - 1 and exp.all_members_advanced:
         logger.error("Last cycle already advanced, experiment finished")
         sys.exit(1)
+
+    # The cycle the members stop at, where the analysis job runs filter and cycle
+    last_cycle_i = current_cycle.index
+    if exp.cfg.segments.enabled:
+        segment = exp.segment_of(current_cycle.index)
+        if segment is not None and segment.first == current_cycle.index:
+            segment = _fit_segment(exp, segment, run_until)
+            last_cycle_i = segment.last
+        elif segment is None and not exp.all_members_advanced:
+            logger.error(
+                f"No segment is planned from cycle {current_cycle.index}, run "
+                "`ensemble plan-segment` first"
+            )
+            sys.exit(1)
+        logger.info(f"Running cycles {current_cycle.index}-{last_cycle_i}")
 
     # Generate and queue the advance members job array
     advance_job_id: int | None = None
@@ -210,13 +230,13 @@ def run_experiment(
 
     # Generate the analysis jobfile, queue it with dependency on the advance array
     queue_next_cycle = all_cycles
-    if run_until is not None and current_cycle.index == run_until:
+    if run_until is not None and last_cycle_i >= run_until:
         logger.warning("Reached --run-until limit, will not queue next cycle")
         queue_next_cycle = False
 
     jf = jobfiles.generate_make_analysis_jobfile(
         exp,
-        current_cycle.index,
+        last_cycle_i,
         queue_next_cycle,
         run_postprocess,
         clean_scratch,
@@ -237,9 +257,19 @@ def run_experiment(
     logger.info(f"Queued {jf} with ID {analysis_jobid}")
 
     if run_postprocess:
-        jf = jobfiles.generate_postprocess_jobfile(
-            exp, current_cycle.index, clean_scratch
-        )
+        if last_cycle_i == current_cycle.index:
+            jf = jobfiles.generate_postprocess_jobfile(
+                exp, current_cycle.index, clean_scratch
+            )
+        else:
+            n_cycles = last_cycle_i - current_cycle.index + 1
+            jf = jobfiles.generate_postprocess_array_jobfile(
+                exp,
+                current_cycle.index,
+                last_cycle_i,
+                max_parallel if max_parallel is not None else n_cycles,
+                clean_scratch,
+            )
         res = external.runc(
             [
                 *slurm_command.split(" "),
@@ -248,3 +278,38 @@ def run_experiment(
             ]
         )
         logger.info(f"Queued {jf} with ID {res.output.strip()}")
+
+
+def _fit_segment(
+    exp: experiment.Experiment, segment: SegmentPlan, run_until: int | None
+) -> SegmentPlan:
+    """
+    Shortens the current segment if one of its cycles became a stop since planning
+    (observations added, `--run-until`), as long as no member has started it. Exits if
+    one has, since the segment then has to be reset.
+    """
+
+    new_stop = segments.new_stop_inside(segment, exp.observation_cycles(), run_until)
+    if new_stop is None:
+        return segment
+
+    stop, reason = new_stop
+    if exp.segment_started(segment):
+        logger.error(
+            f"Cycle {stop} of segment {segment} is now a stop ({reason}), but members "
+            "have already started the segment. Reset it with "
+            f"`ensemble reset-cycle --cycle {segment.first}` to run it with the new stop."
+        )
+        sys.exit(1)
+
+    shorter = segments.shorten(
+        segment,
+        exp.cycles,
+        stop,
+        reason,
+        exp.cfg.segments.checkpoint_interval_hours,
+        run_until=run_until if reason == segments.STOP_RUN_UNTIL else None,
+    )
+    exp.state.set_segment_plan(shorter)
+    logger.warning(f"Shortened segment {segment} to {shorter} ({reason})")
+    return shorter

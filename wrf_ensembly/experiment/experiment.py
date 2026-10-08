@@ -388,7 +388,8 @@ class Experiment:
 
     def advance_member(self, member_idx: int, cores: int) -> bool:
         """
-        Run WRF to advance a member to the next cycle.
+        Run WRF to advance a member to the next cycle, or with segments to the end of the
+        current segment.
         Initial and boundary condition files must already be present in the member directory.
         Will generate the appropriate namelist. Will move forecasts to the output directory.
 
@@ -402,7 +403,15 @@ class Experiment:
 
         member = self.members[member_idx]
         member_path = self.paths.member_path(member_idx)
-        cycle = self.cycles[self.current_cycle_i]
+        segment = self.runnable_segment()
+        if len(segment) == 1:
+            # Keeps the cycle's own output interval and forecast extension
+            cycle = self.cycles[segment[0]]
+        else:
+            cycle = cycling.get_segment_period(self.cycles, segment[0], segment[-1])
+            logger.info(
+                f"Member {member_idx}: Running cycles {segment[0]}-{segment[-1]} as one run"
+            )
 
         # Refuse to run model if already advanced
         if member.advanced:
@@ -428,7 +437,12 @@ class Experiment:
         # Generate namelist
         wrf_namelist_path = member_path / "namelist.input"
         wrf.generate_wrf_namelist(
-            self.cfg, cycle, True, wrf_namelist_path, member_idx, self.paths
+            self.cfg,
+            cycle,
+            True,
+            wrf_namelist_path,
+            member_idx,
+            self.paths,
         )
 
         # Clean old log files
@@ -468,25 +482,79 @@ class Experiment:
             rsl_files = sorted(member_path.glob("rsl.*"))
             utils.zip_files(rsl_files, logger.log_dir / "rsl.zip")
 
-        # Delete first output file
+        self.file_segment_outputs(member_idx, segment)
+
+        # Every cycle of the segment gets its own status file. The first cycle's is what
+        # decides whether the member is advanced (`can_advance_member`, the job array),
+        # so it is written last: a job that dies in between counts as not advanced.
+        # The runtime goes on the last cycle's file only, since it is one run.
+        for cycle_i in reversed(segment):
+            if cycle_i == segment[-1]:
+                self.state.set_member_advanced(
+                    cycle_i,
+                    member_idx,
+                    start=start_time,
+                    end=end_time,
+                    duration_s=int((end_time - start_time).total_seconds()),
+                    simulated_s=int((cycle.end - cycle.start).total_seconds()),
+                )
+            else:
+                self.state.set_member_advanced(cycle_i, member_idx)
+        self.members[member_idx].advanced = True
+
+        return True
+
+    def file_segment_outputs(self, member_i: int, segment: range):
+        """
+        After a member ran a segment: WRF wrote all output and restart files into the
+        first cycle's scratch directories. Move each wrfout into the cycle it belongs to
+        (`start < time <= end`), delete the one at the segment start (as for a single
+        cycle), and move the restart file at the segment end into the last cycle's
+        restart directory, where `cycle` looks for it.
+
+        Safe to run again on files that were already moved.
+        """
+
+        first, last = segment[0], segment[-1]
+        first_dir = self.paths.scratch_forecasts_path(first, member_i)
         first_output = (
-            self.paths.scratch_forecasts_path(self.current_cycle_i, member_idx)
-            / f"wrfout_d01_{cycle.start.strftime('%Y-%m-%d_%H:%M:%S')}"
+            first_dir / f"wrfout_d01_{self.cycles[first].start:%Y-%m-%d_%H:%M:%S}"
         )
         if first_output.exists():
             logger.info(f"Removing first output file {first_output}")
             first_output.unlink()
 
-        self.state.set_member_advanced(
-            self.current_cycle_i,
-            member_idx,
-            start=start_time,
-            end=end_time,
-            duration_s=int((end_time - start_time).total_seconds()),
-        )
-        self.members[member_idx].advanced = True
+        if first == last:
+            return
 
-        return True
+        for f in sorted(first_dir.glob("wrfout_d01_*")):
+            time = wrf.wrfout_time(f.name)
+            cycle_i = next(
+                (
+                    i
+                    for i in segment
+                    if self.cycles[i].start < time <= self.cycles[i].end
+                ),
+                None,
+            )
+            if cycle_i is None or cycle_i == first:
+                continue
+            target = self.paths.scratch_forecasts_path(cycle_i, member_i) / f.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            f.rename(target)
+        logger.info(f"Member {member_i}: Sorted the output into cycles {first}-{last}")
+
+        if self.cfg.assimilation.cycling_mode == "restart":
+            end = self.cycles[last].end
+            name = f"wrfrst_d01_{end:%Y-%m-%d_%H:%M:%S}"
+            source = self.paths.scratch_restart_path(first, member_i) / name
+            target = self.paths.scratch_restart_path(last, member_i) / name
+            if source.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source.rename(target)
+                logger.info(f"Member {member_i}: Moved {name} to {target.parent}")
+            elif not target.exists():
+                raise FileNotFoundError(f"WRF wrote no restart file at {source}")
 
     def filter(self) -> bool:
         """
@@ -503,6 +571,7 @@ class Experiment:
         # ones to finish may not be visible here yet. Let the listing settle before the
         # check below decides the ensemble is incomplete. Returns immediately unless we
         # are in a batch job and members are actually missing.
+        self.check_segment_finished()
         self.wait_for_all_members()
 
         # Validate state
@@ -699,6 +768,179 @@ class Experiment:
         # Overlapping plans only exist if files were edited by hand; the latest start wins
         return max(covering, key=lambda p: p.first, default=None)
 
+    def runnable_segment(self) -> range:
+        """
+        The cycles the members run as one from the current cycle: the planned segment,
+        or only the current cycle without segments.
+
+        Raises:
+            ExperimentStateError: if segments are enabled but there is no plan starting
+                at the current cycle
+        """
+
+        cycle_i = self.current_cycle_i
+        if not self.cfg.segments.enabled:
+            return range(cycle_i, cycle_i + 1)
+        plan = self.segment_of(cycle_i)
+        if plan is None or plan.first != cycle_i:
+            raise ExperimentStateError(
+                f"No segment is planned from cycle {cycle_i}, run `ensemble plan-segment`"
+            )
+        return plan.cycles
+
+    def unfinished_segment(self) -> segments.SegmentPlan | None:
+        """
+        The segment of several cycles the experiment is at the start of, if any. Until
+        `finish_segment` has moved the experiment to its last cycle, the first cycle's
+        state says MEMBERS_ADVANCED once the members are done, but there is nothing to
+        filter or cycle from at its end.
+        """
+
+        plan = self.segment_of(self.current_cycle_i)
+        if plan is not None and plan.first == self.current_cycle_i < plan.last:
+            return plan
+        return None
+
+    def check_segment_finished(self) -> None:
+        """
+        Raises ExperimentStateError if the experiment is at the start of a segment of
+        several cycles, for the commands that act on the end of the current cycle
+        """
+
+        plan = self.unfinished_segment()
+        if plan is not None:
+            raise ExperimentStateError(
+                f"The experiment is at the start of segment {plan}, run "
+                "`ensemble finish-segment` once all members have advanced"
+            )
+
+    def finish_segment(self) -> None:
+        """
+        After all members ran the current segment: marks its cycles but the last as
+        complete (the forecast-only transition, as when cycling without a filter) and
+        moves the experiment to the last cycle, where filter/analysis/cycle run as
+        usual. Does nothing without a segment of several cycles, and is safe to run
+        again if it was interrupted.
+
+        Raises:
+            ExperimentStateError: if a member hasn't advanced every cycle, or an
+                observation file appeared for a cycle inside the segment after planning
+        """
+
+        plan = self.unfinished_segment()
+        if plan is None:
+            logger.info("Not at the start of a segment of several cycles, nothing to do")
+            return
+
+        n_members = self.cfg.assimilation.n_members
+        timeout = _member_visibility_timeout()
+        for cycle_i in plan.cycles:
+            n = self.state.count_advanced(cycle_i, expect=n_members, timeout=timeout)
+            if n < n_members:
+                raise ExperimentStateError(
+                    f"Only {n}/{n_members} members have advanced cycle {cycle_i} of "
+                    f"segment {plan}"
+                )
+
+        # The filter would only run at the end, and this cycle's observations would be
+        # skipped without a word
+        inside = sorted(i for i in self.observation_cycles() if plan.first <= i < plan.last)
+        if inside:
+            raise ExperimentStateError(
+                f"Cycle(s) {', '.join(map(str, inside))} got observations after segment "
+                f"{plan} was planned, so they were not assimilated. Reset it with "
+                f"`ensemble reset-cycle --cycle {plan.first}` to run it again with the "
+                "new stops."
+            )
+
+        for cycle_i in range(plan.first, plan.last):
+            machine = self.state_machine.get_cycle(cycle_i)
+            if machine.current_state != CycleState.CYCLE_COMPLETE:
+                machine.transition(StateTransition.CYCLE_COMPLETE)
+        self.current_cycle_i = plan.last
+        self.members = [
+            MemberStatus(i=i, advanced=True) for i in range(n_members)
+        ]
+        logger.info(f"Finished segment {plan}, now at cycle {plan.last}")
+
+    def reset_segment(self, plan: segments.SegmentPlan, jobs: int = 1) -> None:
+        """
+        Returns a segment to where its members can run it again from the start: forgets
+        the status of all its cycles, deletes the output and restart files (checkpoints)
+        the members wrote, so a rerun can't continue from files of an earlier attempt,
+        moves the experiment back to the first cycle and plans the segment again (which
+        picks up observations added since).
+
+        Only for the segment the experiment is in. The members' initial state at the
+        first cycle must still be in their directories, as it is until `cycle` runs.
+        """
+
+        if not plan.first <= self.current_cycle_i <= plan.last:
+            raise ExperimentStateError(
+                f"The experiment is at cycle {self.current_cycle_i}, outside segment "
+                f"{plan}, which can't be reset anymore"
+            )
+
+        for cycle_i in plan.cycles:
+            self.state_machine.get_cycle(cycle_i).reset()
+            for member_i in range(self.cfg.assimilation.n_members):
+                for f in self.paths.scratch_forecasts_path(cycle_i, member_i).glob(
+                    "wrfout_*"
+                ):
+                    f.unlink()
+                for f in self.paths.scratch_restart_path(cycle_i, member_i).glob(
+                    "wrfrst_*"
+                ):
+                    f.unlink()
+        logger.info(f"Reset the status of {plan} and deleted its output and restart files")
+
+        self.state.clear_segment_plan(plan.first)
+        self.current_cycle_i = plan.first
+        self.members = [
+            MemberStatus(i=i, advanced=False)
+            for i in range(self.cfg.assimilation.n_members)
+        ]
+
+        self.plan_segment(plan.first, plan.run_until)
+        self.refresh_segment_boundaries(jobs)
+
+    def refresh_segment_boundaries(self, jobs: int = 1) -> None:
+        """
+        After the current cycle's segment was (re)planned: extracts each member's wrfbdy
+        for the new length and applies the boundary increment again, as `update-bc` did
+        for the old one. Skipped before `ensemble setup`, when the members have nothing
+        to start from yet.
+        """
+
+        cycle_i = self.current_cycle_i
+        n_members = self.cfg.assimilation.n_members
+        missing = [
+            i
+            for i in range(n_members)
+            if not self.member_initial_state(i, cycle_i).exists()
+        ]
+        if cycle_i == 0 and len(missing) == n_members:
+            logger.info("The members are not set up yet, `ensemble setup` will do it")
+            return
+        if missing:
+            logger.warning(
+                f"{len(missing)} member(s) have no initial state for cycle {cycle_i} "
+                f"(e.g. {self.member_initial_state(missing[0], cycle_i)}), their "
+                "boundaries were not updated for the segment. Once they are set up, run "
+                "`ensemble plan-segment --replan`."
+            )
+            return
+
+        with ProcessPoolExecutor(max_workers=jobs) as executor:
+            for _ in executor.map(
+                self._refresh_member_boundaries, range(n_members)
+            ):
+                pass
+
+    def _refresh_member_boundaries(self, member_i: int) -> None:
+        self.prepare_member_boundaries(member_i, self.current_cycle_i)
+        self.update_bc(member_i)
+
     def segment_started(self, plan: segments.SegmentPlan) -> bool:
         """
         Whether any member has started running a segment: it has advanced, or has written
@@ -748,19 +990,24 @@ class Experiment:
     def prepare_member_boundaries(self, member_i: int, cycle_i: int) -> None:
         """
         Puts the boundary conditions for a cycle in the member's directory: the wrfbdy
-        (in restart mode, the cycle's records of the experiment-long one) and the lower
-        boundary (wrflowinp, linked) if real.exe made one.
+        (in restart mode, the cycle's records of the experiment-long one, or the whole
+        segment's if one starts at this cycle) and the lower boundary (wrflowinp, linked)
+        if real.exe made one.
         """
 
         member_path = self.paths.member_path(member_i)
         cycle = self.cycles[cycle_i]
         bdy_target = member_path / "wrfbdy_d01"
         if self.cfg.assimilation.cycling_mode == "restart":
+            end = cycle.forecast_end
+            segment = self.segment_of(cycle_i)
+            if segment is not None and segment.first == cycle_i:
+                end = self.cycles[segment.last].end
             n_records = wrf.extract_boundary_records(
                 self.paths.bc_path(member_i, None),
                 bdy_target,
                 cycle.start,
-                cycle.forecast_end,
+                end,
             )
             logger.info(f"Member {member_i}: Extracted {n_records} boundary record(s)")
             lowinp = self.paths.lowinp_path(member_i, None)

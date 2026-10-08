@@ -314,6 +314,24 @@ def reset(experiment_path: Path, confirm: bool):
     logger.info("Reset experiment state to cycle 0")
 
 
+def _status_cycles(exp: experiment.Experiment) -> range:
+    """
+    The cycles a member's status is set for: the current one, or at the start of a
+    segment of several cycles all of them, since the members run them as one
+    """
+
+    segment = exp.unfinished_segment()
+    if segment is not None:
+        return segment.cycles
+    return range(exp.current_cycle_i, exp.current_cycle_i + 1)
+
+
+def _describe(cycles: range) -> str:
+    if len(cycles) == 1:
+        return f"cycle {cycles[0]}"
+    return f"cycles {cycles[0]}-{cycles[-1]}"
+
+
 @status_cli.command()
 @click.argument("member_index", type=int)
 @click.argument("advanced", type=bool)
@@ -330,15 +348,17 @@ def set_member(experiment_path: Path, member_index: int, advanced: bool):
         )
         return
 
-    if advanced:
-        exp.state.set_member_advanced(exp.current_cycle_i, member_index)
-    else:
-        exp.state.clear_member(exp.current_cycle_i, member_index)
+    cycles = _status_cycles(exp)
+    for cycle_i in reversed(cycles):
+        if advanced:
+            exp.state.set_member_advanced(cycle_i, member_index)
+        else:
+            exp.state.clear_member(cycle_i, member_index)
     exp.members[member_index].advanced = advanced
 
     status_str = "advanced" if advanced else "not advanced"
     logger.info(
-        f"Set member {member_index} status for cycle {exp.current_cycle_i} to: {status_str}"
+        f"Set member {member_index} status for {_describe(cycles)} to: {status_str}"
     )
 
 
@@ -351,16 +371,18 @@ def set_all_members(experiment_path: Path, advanced: bool):
     logger.setup("status-set-all-members", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
+    cycles = _status_cycles(exp)
     for member in exp.members:
-        if advanced:
-            exp.state.set_member_advanced(exp.current_cycle_i, member.i)
-        else:
-            exp.state.clear_member(exp.current_cycle_i, member.i)
+        for cycle_i in reversed(cycles):
+            if advanced:
+                exp.state.set_member_advanced(cycle_i, member.i)
+            else:
+                exp.state.clear_member(cycle_i, member.i)
         member.advanced = advanced
 
     status_str = "advanced" if advanced else "not advanced"
     logger.info(
-        f"Set all {len(exp.members)} members for cycle {exp.current_cycle_i} to: {status_str}"
+        f"Set all {len(exp.members)} members for {_describe(cycles)} to: {status_str}"
     )
 
 
@@ -404,6 +426,13 @@ def set_experiment(experiment_path: Path, cycle: int, state: str):
     # Update cycle if changed
     if cycle is not None:
         exp.current_cycle_i = current_cycle
+        segment = exp.segment_of(current_cycle)
+        if segment is not None and current_cycle not in (segment.first, segment.last):
+            logger.warning(
+                f"Cycle {current_cycle} is inside segment {segment}, the members can only "
+                f"start from its first cycle. Plan a new segment from here with "
+                "`ensemble plan-segment --replan`, or reset the segment."
+            )
 
     # Update state if specified
     if state is not None:
@@ -441,6 +470,11 @@ def reconcile(experiment_path: Path, cycle: int | None, dry_run: bool):
     status files and the actual output have drifted apart, for example after a job was
     killed between finishing WRF and recording it.
 
+    With segments, a cycle inside a planned segment is decided by the forecast at the
+    segment's end, and the result applies to all its cycles: during the run, every
+    forecast is in the first cycle's directory, so a member that died halfway would
+    otherwise look advanced.
+
     Runtime statistics cannot be recovered this way, so members restored here will show
     no timings.
     """
@@ -453,11 +487,19 @@ def reconcile(experiment_path: Path, cycle: int | None, dry_run: bool):
         logger.error(f"Cycle {cycle_i} out of range (0-{len(exp.cycles) - 1})")
         return
 
-    cycle_info = exp.cycles[cycle_i]
+    segment = exp.segment_of(cycle_i)
+    cycles = (
+        segment.cycles if segment is not None else range(cycle_i, cycle_i + 1)
+    )
+    end_cycle = cycles[-1]
+    cycle_info = exp.cycles[end_cycle]
     wrfout_name = "wrfout_d01_" + cycle_info.end.strftime("%Y-%m-%d_%H:%M:%S")
-    recorded = exp.state.get_advanced_members(cycle_i)
+    # Recorded only if every cycle says so; a partial record is dropped if not on disk
+    per_cycle = [exp.state.get_advanced_members(c) for c in cycles]
+    recorded = set.intersection(*per_cycle)
+    partly_recorded = set.union(*per_cycle)
 
-    table = Table(title=f"Reconcile cycle {cycle_i}")
+    table = Table(title=f"Reconcile {_describe(cycles)}")
     table.add_column("Member", justify="center", style="bold cyan")
     table.add_column("Recorded", justify="center")
     table.add_column("On disk", justify="center")
@@ -466,13 +508,15 @@ def reconcile(experiment_path: Path, cycle: int | None, dry_run: bool):
     to_add: list[int] = []
     to_remove: list[int] = []
     for i in range(exp.cfg.assimilation.n_members):
-        on_disk = (exp.paths.scratch_forecasts_path(cycle_i, i) / wrfout_name).exists()
+        on_disk = (
+            exp.paths.scratch_forecasts_path(end_cycle, i) / wrfout_name
+        ).exists()
         is_recorded = i in recorded
 
         if on_disk and not is_recorded:
             action = "[green]mark as advanced[/green]"
             to_add.append(i)
-        elif not on_disk and is_recorded:
+        elif not on_disk and i in partly_recorded:
             action = "[red]forget advancement[/red]"
             to_remove.append(i)
         else:
@@ -488,7 +532,7 @@ def reconcile(experiment_path: Path, cycle: int | None, dry_run: bool):
     Console().print(table)
 
     if not to_add and not to_remove:
-        logger.info(f"Cycle {cycle_i} status already matches the files on disk")
+        logger.info(f"{_describe(cycles)} status already matches the files on disk")
         return
 
     if dry_run:
@@ -496,12 +540,14 @@ def reconcile(experiment_path: Path, cycle: int | None, dry_run: bool):
         return
 
     for i in to_add:
-        exp.state.set_member_advanced(cycle_i, i)
+        for c in reversed(cycles):
+            exp.state.set_member_advanced(c, i)
     for i in to_remove:
-        exp.state.clear_member(cycle_i, i)
+        for c in cycles:
+            exp.state.clear_member(c, i)
 
     logger.info(
-        f"Reconciled cycle {cycle_i}: marked {len(to_add)} member(s) as advanced, "
+        f"Reconciled {_describe(cycles)}: marked {len(to_add)} member(s) as advanced, "
         f"cleared {len(to_remove)}"
     )
     if to_add:
