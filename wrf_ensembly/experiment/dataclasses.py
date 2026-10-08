@@ -18,6 +18,13 @@ class RuntimeStatistics:
     duration_s: int
     """Duration of model execution in seconds"""
 
+    simulated_s: int | None = None
+    """
+    Simulated time of the run in seconds. With segments, one run covers several cycles,
+    so this is what makes runs comparable. Missing in older files, where the run was
+    the cycle.
+    """
+
 
 @dataclass
 class MemberStatus:

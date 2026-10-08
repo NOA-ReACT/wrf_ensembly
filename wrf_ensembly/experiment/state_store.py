@@ -176,6 +176,11 @@ class ExperimentState:
                     start=dt.datetime.fromisoformat(data["start"]),
                     end=dt.datetime.fromisoformat(data["end"]),
                     duration_s=int(data["duration_s"]),
+                    simulated_s=(
+                        int(data["simulated_s"])
+                        if data.get("simulated_s") is not None
+                        else None
+                    ),
                 )
         except (ValueError, TypeError, KeyError) as e:
             logger.warning(
@@ -198,10 +203,12 @@ class ExperimentState:
         start: dt.datetime | None = None,
         end: dt.datetime | None = None,
         duration_s: int | None = None,
+        simulated_s: int | None = None,
     ):
         """
         Record that a member finished running the model for a cycle, along with how long
-        it took. This is the only write that happens in parallel across nodes; each job
+        it took (and how much time it simulated, which is more than the cycle for a
+        segment). This is the only write that happens in parallel across nodes; each job
         writes only its own file.
 
         The runtime statistics are optional so that `status reconcile` can mark a member
@@ -213,6 +220,7 @@ class ExperimentState:
             "start": start.isoformat() if start is not None else None,
             "end": end.isoformat() if end is not None else None,
             "duration_s": duration_s,
+            "simulated_s": simulated_s,
             "host": socket.gethostname(),
             "job_id": os.environ.get("SLURM_JOB_ID"),
         }
@@ -354,6 +362,7 @@ class ExperimentState:
                 data["start"] = None
                 data["end"] = None
                 data["duration_s"] = None
+                data["simulated_s"] = None
                 self._write_json(path, data)
 
     # Cycle markers (filter_complete, analysis_complete, cycle_complete)
