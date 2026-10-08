@@ -65,6 +65,16 @@ def _member_visibility_timeout() -> float:
     return MEMBER_VISIBILITY_TIMEOUT_S if "SLURM_JOB_ID" in os.environ else 0.0
 
 
+SEGMENT_RATE_CYCLES = 5
+"""How many of the most recent cycles with member runs the segment rate is taken from"""
+
+SEGMENT_RATE_MIN_RUNS = 3
+"""Fewer member runs than this, and segments are sized by `expected_walltime_per_sim_hour`"""
+
+SEGMENT_RATE_PERCENTILE = 90
+"""Which percentile of the recent runs' seconds per simulated hour sizes segments"""
+
+
 # Groups that filter cannot run without. `[dart_namelist]` is the complete input.nml, so
 # these are only a sanity check; DART reports any other missing group itself.
 REQUIRED_DART_NAMELIST_GROUPS = ("filter_nml", "model_nml", "obs_kind_nml")
@@ -833,11 +843,32 @@ class Experiment:
             i for i in range(len(self.cycles)) if self.paths.obs_seq_path(i).exists()
         }
 
-    def segment_rate(self) -> tuple[float, str]:
+    def segment_rate(self, before_cycle: int) -> tuple[float, str]:
         """
         Wall clock seconds per simulated hour to size segments with, and where the number
-        came from
+        came from: a high percentile over the member runs of the recent cycles before
+        `before_cycle`, or `expected_walltime_per_sim_hour` while there are too few.
+
+        The runs include WRF's startup, so short runs look slower per hour than long
+        ones, which errs on the safe side for long segments.
         """
+
+        rates = []
+        for stats, _ in self.state.get_recent_runtime_statistics(
+            before_cycle, SEGMENT_RATE_CYCLES
+        ):
+            simulated_s = stats.simulated_s
+            if simulated_s is None:
+                # Recorded before segments: the run was the cycle
+                cycle = self.cycles[stats.cycle]
+                simulated_s = (cycle.forecast_end - cycle.start).total_seconds()
+            if simulated_s > 0 and stats.duration_s > 0:
+                rates.append(stats.duration_s / (simulated_s / 3600))
+
+        if len(rates) >= SEGMENT_RATE_MIN_RUNS:
+            return float(np.percentile(rates, SEGMENT_RATE_PERCENTILE)), (
+                f"p{SEGMENT_RATE_PERCENTILE} of {len(rates)} recent runs"
+            )
 
         rate = self.cfg.segments.expected_walltime_per_sim_hour
         if rate is None:
@@ -858,7 +889,7 @@ class Experiment:
             set(self.cfg.assimilation.keep_restart_files_for_cycles),
             run_until,
         )
-        rate, rate_source = self.segment_rate()
+        rate, rate_source = self.segment_rate(first)
         plan = segments.plan_segment(
             self.cycles,
             first,

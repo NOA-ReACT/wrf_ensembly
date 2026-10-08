@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any
 
-from wrf_ensembly import experiment, perturbations, templates
+from wrf_ensembly import experiment, perturbations, templates, utils
 from wrf_ensembly.console import logger
 
 
@@ -181,6 +181,19 @@ def generate_advance_array_jobfile(
         "output": f"{exp.paths.logs_slurm.resolve()}/%A_%a-advance_member.out",
         "array": array_spec,
     }
+
+    # With segments, the time limit follows the segment's length
+    segment = exp.segment_of(exp.current_cycle_i)
+    if segment is not None and segment.first == exp.current_cycle_i:
+        limit = min(
+            segment.estimated_walltime_s * exp.cfg.segments.safety_factor,
+            utils.parse_slurm_time(exp.cfg.segments.max_walltime),
+        )
+        dynamic_directives["time"] = utils.format_slurm_time(max(limit, 60))
+        logger.info(
+            f"Time limit {dynamic_directives['time']} for segment {segment} "
+            f"(rate from {segment.rate_source})"
+        )
 
     base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} ensemble advance-member"
     commands = [

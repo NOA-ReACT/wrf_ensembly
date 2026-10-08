@@ -2,6 +2,7 @@ import datetime as dt
 from importlib import resources
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from wrf_ensembly import experiment, jobfiles, segments
@@ -330,3 +331,63 @@ def test_fit_segment_refuses_started_segment(tmp_path: Path):
 
     with pytest.raises(SystemExit):
         slurm_commands._fit_segment(exp, plan, 1)
+
+
+def record_runs(exp, cycle_i: int, durations: list[int], simulated_h: float | None):
+    start = dt.datetime(2026, 1, 1)
+    for m, d in enumerate(durations):
+        exp.state.set_member_advanced(
+            cycle_i,
+            m,
+            start=start,
+            end=start + dt.timedelta(seconds=d),
+            duration_s=d,
+            simulated_s=None if simulated_h is None else int(simulated_h * 3600),
+        )
+
+
+def test_segment_rate_from_expected_until_there_are_runs(tmp_path: Path):
+    exp = make_experiment(tmp_path / "exp")
+    record_runs(exp, 0, [3600, 3600], 6)
+
+    assert exp.segment_rate(1) == (1800, "expected_walltime_per_sim_hour")
+
+
+def test_segment_rate_from_recent_runs(tmp_path: Path):
+    exp = make_experiment(tmp_path / "exp")
+    # Old runs without simulated_s (the run was the 6 h cycle): 600 s/h
+    record_runs(exp, 0, [3600] * 5, None)
+    # A segment of 24 h, recorded on its last cycle: 100-190 s/h
+    record_runs(exp, 4, [2400 + 240 * k for k in range(10)], 24)
+
+    rate, source = exp.segment_rate(5)
+
+    rates = [600] * 5 + [100 + 10 * k for k in range(10)]
+    assert rate == pytest.approx(float(np.percentile(rates, 90)))
+    assert source == "p90 of 15 recent runs"
+    # Only runs before the cycle being planned count
+    assert exp.segment_rate(1)[0] == pytest.approx(600)
+    assert exp.segment_rate(0)[1] == "expected_walltime_per_sim_hour"
+
+
+def test_advance_jobfile_time_limit(tmp_path: Path):
+    exp = make_experiment(
+        tmp_path / "exp", extra=SEGMENTS.replace("safety_factor = 1.0", "safety_factor = 1.25")
+    )
+    plan = exp.plan_segment(0)  # 3 cycles: 18 h at 1800 s/h is 9 h, x 1.25 fits 12 h
+    assert plan.last == 2
+
+    jf, _ = jobfiles.generate_advance_array_jobfile(exp)
+    assert "#SBATCH --time=0-11:15:00" in jf.read_text()
+
+    exp.plan_segment(0, run_until=1)  # 12 h: 6 h x 1.25
+    jf, _ = jobfiles.generate_advance_array_jobfile(exp)
+    assert "#SBATCH --time=0-07:30:00" in jf.read_text()
+
+
+def test_advance_jobfile_without_segments_keeps_configured_time(tmp_path: Path):
+    exp = make_experiment(tmp_path / "exp", extra="")
+
+    jf, _ = jobfiles.generate_advance_array_jobfile(exp)
+
+    assert "--time=0-" not in jf.read_text()

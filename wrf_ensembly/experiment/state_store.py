@@ -346,6 +346,29 @@ class ExperimentState:
         stats.sort(key=lambda s: (s[0].cycle, s[1]))
         return stats
 
+    def get_recent_runtime_statistics(
+        self, before_cycle: int, n_cycles: int
+    ) -> list[tuple[RuntimeStatistics, int]]:
+        """
+        The recorded model runs of the newest `n_cycles` cycles before `before_cycle`
+        that have any, as (statistics, member index). Reads only as many cycles as
+        needed, so it is cheap enough for `cycle` to use when planning.
+        """
+
+        stats = []
+        found_cycles = 0
+        for cycle in range(before_cycle - 1, -1, -1):
+            found = False
+            for i in sorted(self.get_advanced_members(cycle)):
+                record = self.get_member(cycle, i)
+                if record is not None and record.runtime is not None:
+                    stats.append((record.runtime, i))
+                    found = True
+            found_cycles += found
+            if found_cycles >= n_cycles:
+                break
+        return stats
+
     def clear_runtime_statistics(self):
         """
         Drop the timing information from every member file, keeping the advancement
