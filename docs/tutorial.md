@@ -206,7 +206,7 @@ wrf-ensembly /path/to/experiment ensemble apply-perturbations --jobs 8
 
 You can repeat the `setup` -> perturbations process as many times as you want to tune your perturbations. The `setup` command will always copy the original `wrfinput_d01` and `wrfbdy_d01` files from the `data/initial_boundary/` directory, so you can always start fresh.
 
-The `update-bc` step is crucial after applying perturbations or cycling. When you modify the initial conditions field, you might introduce inconsistencies with the boundary conditions if there are changes near the boundary. These inconsistencies can lead to unexpected behavior in the model. The `ensemble update-bc` will ensure that the edges of the domain are consistent with the boundary conditions using the `update-wrf-bc` tool from DART. You should run this command after applying perturbations or cycling the ensemble:
+The `update-bc` step is crucial after applying perturbations or cycling. When you modify the initial conditions field, you might introduce inconsistencies with the boundary conditions if there are changes near the boundary. These inconsistencies can lead to unexpected behavior in the model. `ensemble update-bc` adds the change at the edges of the domain (the modified state minus the state before the analysis or perturbations) to the boundary conditions, fading it out until the next boundary time, like DART's `update_wrf_bc`. If nothing changed at the edges, the boundary file is left as it is. You should run this command after applying perturbations or cycling the ensemble:
 
 ```bash
 wrf-ensembly /path/to/experiment ensemble update-bc

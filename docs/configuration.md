@@ -238,7 +238,8 @@ How each cycle's initial conditions are built:
   Members continue from their own WRF restart file, so the whole model state carries
   over. `ensemble cycle` writes the `state_variables` of the analysis into the restart
   file (and nothing else, so cycling the forecast is an exact no-op) and rebalances
-  pressure and density. Each member gets the boundary records of its cycle from the
+  pressure and density. `ensemble update-bc` then only changes the boundaries by the
+  increment, so after a forecast-only cycle they stay exactly as they were. Each member gets the boundary records of its cycle from the
   long `wrfbdy`. Set `sst_update = 1` in `[wrf_namelist.physics]` to keep SST,
   vegetation, albedo and sea ice up to date through `wrflowinp`, otherwise they stay at
   their first-cycle values. Needs `hypsometric_opt = 2` and `non_hydrostatic = true`

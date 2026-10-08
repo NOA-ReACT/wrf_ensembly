@@ -361,15 +361,29 @@ class Experiment:
 
     def update_bc(self, member_i: int) -> None:
         """
-        Update the boundary conditions of a member to match its initial conditions.
+        Update the boundary conditions of a member with the changes made to its initial
+        state (analysis, perturbations), see `member_reference_state`.
         """
 
         member_path = self.paths.member_path(member_i)
-        update_bc.update_wrf_bc(
+        reference = self.member_reference_state(member_i, self.current_cycle_i)
+        if not reference.exists():
+            raise FileNotFoundError(
+                f"Member {member_i}: The unmodified initial state is needed to update the "
+                f"boundary conditions, but {reference} does not exist"
+            )
+        changed = update_bc.update_wrf_bc(
             self.member_initial_state(member_i, self.current_cycle_i),
+            reference,
             member_path / "wrfbdy_d01",
         )
-        logger.info(f"Member {member_i}: Updated boundary conditions")
+        if changed:
+            logger.info(f"Member {member_i}: Updated boundary conditions")
+        else:
+            logger.info(
+                f"Member {member_i}: Initial state unchanged at the boundaries, "
+                "boundary conditions left as they are"
+            )
 
     def advance_member(self, member_idx: int, cores: int) -> bool:
         """
@@ -629,6 +643,21 @@ class Experiment:
             start = self.cycles[cycle_i].start
             return member_path / f"wrfrst_d01_{start:%Y-%m-%d_%H:%M:%S}"
         return member_path / "wrfinput_d01"
+
+    def member_reference_state(self, member_i: int, cycle_i: int) -> Path:
+        """
+        The initial state of a member at a cycle before it was modified by the analysis or
+        perturbations: real.exe's wrfinput, or in restart mode (after the first cycle) the
+        restart file WRF wrote at the end of the previous cycle. `cycle` copies the latter
+        into the member directory and keeps the original in scratch.
+        """
+
+        if self.cfg.assimilation.cycling_mode == "restart" and cycle_i > 0:
+            start = self.cycles[cycle_i].start
+            return self.paths.scratch_restart_path(cycle_i - 1, member_i) / (
+                f"wrfrst_d01_{start:%Y-%m-%d_%H:%M:%S}"
+            )
+        return self.paths.ic_path(member_i, cycle_i)
 
     def prepare_member_boundaries(self, member_i: int, cycle_i: int) -> None:
         """

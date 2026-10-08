@@ -129,56 +129,89 @@ def test_coupling_uses_hybrid_coefficients():
     np.testing.assert_array_equal(coupled["MU"], state["MU"])
 
 
-def test_unchanged_state_leaves_boundaries_unchanged(tmp_path: Path):
+def test_unchanged_state_leaves_the_file_untouched(tmp_path: Path):
     state = make_state(np.random.default_rng(0))
     path = tmp_path / "wrfbdy_d01"
     make_wrfbdy(path, state)
-    before = read_record(path, 0)
+    before = path.read_bytes()
 
+    # Mid-record, where replacing the boundary with the state would change it
+    analysis_time = START + dt.timedelta(hours=2)
     with netCDF4.Dataset(path, "r+") as bdy:
-        update_bc.update_boundaries(bdy, state, START)
+        assert not update_bc.update_boundaries(bdy, state, state, analysis_time)
 
-    after = read_record(path, 0)
-    for name in before:
-        assert_close(after[name], before[name])
+    assert path.read_bytes() == before
 
 
-def test_modified_state_keeps_the_value_at_the_end_of_the_interval(tmp_path: Path):
+def test_increment_is_added_and_the_end_of_the_interval_is_kept(tmp_path: Path):
     rng = np.random.default_rng(0)
     state = make_state(rng)
     path = tmp_path / "wrfbdy_d01"
     make_wrfbdy(path, state)
-    before = read_record(path, 1), read_record(path, 0)
+    before = read_record(path, 0), read_record(path, 1)
 
-    # Analysis in the middle of the second record
+    # Analysis in the middle of the second record. The forecast there differs from the
+    # boundary values, and only the analysis increment must reach the boundaries.
     analysis_time = START + INTERVAL + dt.timedelta(hours=2)
-    modified = dict(state)
-    modified["U"] = state["U"] + 5
-    modified["THM"] = state["THM"] - 1
+    forecast = make_state(rng)
+    analysis = dict(forecast)
+    analysis["U"] = forecast["U"] + 5
+    analysis["THM"] = forecast["THM"] - 1
     with netCDF4.Dataset(path, "r+") as bdy:
-        update_bc.update_boundaries(bdy, modified, analysis_time)
+        assert update_bc.update_boundaries(bdy, analysis, forecast, analysis_time)
 
     after = read_record(path, 1)
-    old = before[0]
-    coupled = update_bc.couple(modified)
+    old = before[1]
+    increment = {
+        name: update_bc.couple(analysis)[name] - update_bc.couple(forecast)[name]
+        for name in ("U", "T", "MU", "QVAPOR")
+    }
+    elapsed = dt.timedelta(hours=2).total_seconds()
     for name in ("U", "T", "MU", "QVAPOR"):
-        for side, slab in update_bc.edges(coupled[name], WIDTH).items():
+        for side, slab in update_bc.edges(increment[name], WIDTH).items():
             value, tend = f"{name}_B{side}", f"{name}_BT{side}"
-            assert_close(after[value], slab)
+            assert_close(after[value], old[value] + old[tend] * elapsed + slab)
 
             end_old = old[value] + old[tend] * INTERVAL.total_seconds()
             end_new = after[value] + after[tend] * dt.timedelta(hours=4).total_seconds()
             assert_close(end_new, end_old)
 
+    # MU and QVAPOR did not change, and stay on the old line through the interval
+    for side in update_bc.SIDES:
+        for name in ("MU", "QVAPOR"):
+            value, tend = f"{name}_B{side}", f"{name}_BT{side}"
+            assert_close(after[tend], old[tend])
+
     # The first record is untouched, and the record start time moves to the analysis
-    for name, value in before[1].items():
+    for name, value in before[0].items():
         np.testing.assert_array_equal(read_record(path, 0)[name], value)
     with netCDF4.Dataset(path) as bdy:
         this_times = update_bc.parse_wrf_times(bdy[update_bc.THIS_BDY_TIME])
     assert this_times == [START, analysis_time]
 
 
-def test_moisture_at_the_end_of_the_interval_is_not_negative(tmp_path: Path):
+def test_starting_from_the_boundary_state_matches_replacing_it(tmp_path: Path):
+    """
+    In wrfinput cycling mode the reference is the wrfinput the boundaries were made from,
+    so adding the increment is the same as `update_wrf_bc` replacing the boundary values.
+    """
+
+    state = make_state(np.random.default_rng(0))
+    path = tmp_path / "wrfbdy_d01"
+    make_wrfbdy(path, state)
+
+    modified = dict(state)
+    modified["V"] = state["V"] * 1.1
+    with netCDF4.Dataset(path, "r+") as bdy:
+        update_bc.update_boundaries(bdy, modified, state, START)
+
+    after = read_record(path, 0)
+    for name, field in update_bc.couple(modified).items():
+        for side, slab in update_bc.edges(field, WIDTH).items():
+            assert_close(after[f"{name}_B{side}"], slab)
+
+
+def test_moisture_is_not_negative(tmp_path: Path):
     state = make_state(np.random.default_rng(0))
     path = tmp_path / "wrfbdy_d01"
     make_wrfbdy(path, state)
@@ -189,12 +222,18 @@ def test_moisture_at_the_end_of_the_interval_is_not_negative(tmp_path: Path):
             value = bdy[f"QVAPOR_B{side}"][0]
             bdy[f"QVAPOR_BT{side}"][0] = -2 * value / INTERVAL.total_seconds()
 
+    # And remove more moisture than there is at the analysis time
+    dried = dict(state)
+    dried["QVAPOR"] = np.zeros_like(state["QVAPOR"])
+    reference = dict(state)
+    reference["QVAPOR"] = 2 * state["QVAPOR"]
     with netCDF4.Dataset(path, "r+") as bdy:
-        update_bc.update_boundaries(bdy, state, START)
+        update_bc.update_boundaries(bdy, dried, reference, START)
 
     after = read_record(path, 0)
     for side in update_bc.SIDES:
         value = after[f"QVAPOR_B{side}"]
+        assert value.min() >= 0
         end = value + after[f"QVAPOR_BT{side}"] * INTERVAL.total_seconds()
         np.testing.assert_allclose(end, 0, atol=1e-5 * np.abs(value).max())
 
@@ -206,9 +245,9 @@ def test_analysis_time_outside_the_file_is_rejected(tmp_path: Path):
 
     with netCDF4.Dataset(path, "r+") as bdy:
         with pytest.raises(ValueError, match="before the first"):
-            update_bc.update_boundaries(bdy, state, START - INTERVAL)
+            update_bc.update_boundaries(bdy, state, state, START - INTERVAL)
         with pytest.raises(ValueError, match="outside boundary record"):
-            update_bc.update_boundaries(bdy, state, START + INTERVAL)
+            update_bc.update_boundaries(bdy, state, state, START + INTERVAL)
 
 
 def test_read_state_takes_the_current_time_level_of_restart_files(tmp_path: Path):

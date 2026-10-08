@@ -2,11 +2,19 @@
 Updates the lateral boundary conditions (wrfbdy) to match modified initial conditions,
 after cycling or applying perturbations.
 
-This is a port of DART's `update_wrf_bc` (models/wrf/WRF_BC/update_wrf_bc.f90). For the
-boundary record that contains the analysis time, the boundary value becomes the analysis
-value at the domain edges, and the tendency is recomputed so that the value at the end of
-the record's interval stays what real.exe produced. In effect the analysis increment at
-the boundaries fades out linearly until the next boundary time.
+Based on DART's `update_wrf_bc` (models/wrf/WRF_BC/update_wrf_bc.f90). For the boundary
+record that contains the analysis time, the increment at the domain edges (analysis minus
+the unmodified state) is added to the boundary value at the analysis time, and the
+tendency is recomputed so that the value at the end of the record's interval stays what
+real.exe produced. In effect the increment at the boundaries fades out linearly until the
+next boundary time.
+
+`update_wrf_bc` instead replaces the boundary value with the analysis itself. In the
+relaxation zone the model state never exactly matches the boundary values, so that
+changes the boundaries even when the state did not change, e.g. when cycling a forecast
+without observations. Here an unchanged state leaves the file untouched. When the
+unmodified state is the wrfinput the boundaries were made with (`wrfinput` cycling mode),
+the two agree up to rounding, since the first boundary record holds that same state.
 
 Unlike the Fortran program, the fields are coupled with column mass the way WRF v4 does it
 (`couple` in dyn_em/module_big_step_utilities_em.F, as called by real.exe), using the
@@ -142,19 +150,25 @@ def couple(state: Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
 def update_boundaries(
     bdy: netCDF4.Dataset,
     state: Mapping[str, np.ndarray],
+    reference: Mapping[str, np.ndarray],
     analysis_time: dt.datetime,
-) -> None:
+) -> bool:
     """
-    Updates an open wrfbdy file in place so that its boundaries match `state` at
-    `analysis_time`.
+    Updates an open wrfbdy file in place with the increment `state - reference` at the
+    domain edges, at `analysis_time`.
 
     Only the boundary record that contains `analysis_time` is changed, so this works
     both with one wrfbdy per cycle and with one wrfbdy for the whole experiment.
 
     Args:
         bdy: wrfbdy file, opened for writing
-        state: Fields at `analysis_time`, without the Time dimension. See `couple`.
+        state: Modified fields at `analysis_time`, without the Time dimension. See `couple`.
+        reference: The same fields before they were modified (the forecast, or real.exe's
+                   wrfinput). Must contain the same moisture fields as `state`.
         analysis_time: The time of `state`.
+
+    Returns:
+        False if the increment is zero everywhere and the file was left untouched
     """
 
     bdy_times = parse_wrf_times(bdy["Times"])
@@ -173,24 +187,44 @@ def update_boundaries(
             f"({this_time} -> {next_time})"
         )
     interval_old = (next_time - this_time).total_seconds()
+    elapsed = (analysis_time - this_time).total_seconds()
     interval_new = (next_time - analysis_time).total_seconds()
     width = bdy.dimensions["bdy_width"].size
 
-    for name, field in couple(state).items():
-        for side, first_new in edges(field, width).items():
+    coupled_state = couple(state)
+    coupled_reference = couple(reference)
+    if coupled_state.keys() != coupled_reference.keys():
+        raise ValueError(
+            f"The state has fields {sorted(coupled_state)}, "
+            f"but the reference {sorted(coupled_reference)}"
+        )
+    increments = {
+        name: edges(coupled_state[name] - coupled_reference[name], width)
+        for name in coupled_state
+    }
+    if not any(
+        np.any(side) for sides in increments.values() for side in sides.values()
+    ):
+        return False
+
+    for name, sides in increments.items():
+        for side, increment in sides.items():
             value_var = bdy[f"{name}_B{side}"]
             tend_var = bdy[f"{name}_BT{side}"]
 
             first_old = value_var[itime].astype("f8")
             tend_old = tend_var[itime].astype("f8")
             last = first_old + tend_old * interval_old
+            first_new = first_old + tend_old * elapsed + increment
             if name in MOIST_VARIABLES:
                 last = np.maximum(last, 0.0)
+                first_new = np.maximum(first_new, 0.0)
 
             value_var[itime] = first_new
             tend_var[itime] = (last - first_new) / interval_new
 
     write_wrf_time(bdy[THIS_BDY_TIME], itime, analysis_time)
+    return True
 
 
 def read_state(ds: netCDF4.Dataset) -> tuple[dict[str, np.ndarray], dt.datetime]:
@@ -212,20 +246,32 @@ def read_state(ds: netCDF4.Dataset) -> tuple[dict[str, np.ndarray], dt.datetime]
     return state, time
 
 
-def update_wrf_bc(wrfinput: Path, wrfbdy: Path) -> None:
+def update_wrf_bc(state_path: Path, reference_path: Path, wrfbdy: Path) -> bool:
     """
-    Updates the given `wrfbdy` file to match the `wrfinput` (or restart) file.
-    Required if you have modified the `wrfinput` file.
+    Updates the given `wrfbdy` file with the changes made to a wrfinput or restart file.
+    Required if you have modified the initial state (analysis, perturbations).
 
     Args:
-        wrfinput: The wrfinput file to update from.
+        state_path: The modified wrfinput or restart file.
+        reference_path: The same file before it was modified.
         wrfbdy: The wrfbdy file to update. Will be mutated.
+
+    Returns:
+        False if nothing changed at the boundaries and the file was left untouched
     """
 
-    with netCDF4.Dataset(wrfinput, "r") as ds:  # type: ignore
+    with netCDF4.Dataset(state_path, "r") as ds:  # type: ignore
         ds.set_auto_mask(False)
         state, time = read_state(ds)
+    with netCDF4.Dataset(reference_path, "r") as ds:  # type: ignore
+        ds.set_auto_mask(False)
+        reference, reference_time = read_state(ds)
+    if reference_time != time:
+        raise ValueError(
+            f"{state_path} is at {time} but the reference {reference_path} at "
+            f"{reference_time}"
+        )
 
     with netCDF4.Dataset(wrfbdy, "r+") as bdy:  # type: ignore
         bdy.set_auto_mask(False)
-        update_boundaries(bdy, state, time)
+        return update_boundaries(bdy, state, reference, time)
