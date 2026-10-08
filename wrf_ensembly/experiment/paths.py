@@ -32,6 +32,7 @@ class ExperimentPaths:
         self.status = experiment_path / "status"
         self.status_experiment_file = self.status / "experiment.json"
         self.status_cycles = self.status / "cycles"
+        self.status_segments = self.status / "segments"
 
         self.plots = experiment_path / "plots"
 
@@ -96,6 +97,10 @@ class ExperimentPaths:
         """Directory holding all status files for a given cycle"""
         return self.status_cycles / f"cycle_{cycle:03d}"
 
+    def segment_plan_path(self, first_cycle: int) -> Path:
+        """Plan of the segment starting at a cycle, see `segments.py`"""
+        return self.status_segments / f"cycle_{first_cycle:03d}.json"
+
     def cycle_members_path(self, cycle: int) -> Path:
         """Directory holding the per-member status files for a given cycle"""
         return self.cycle_status_path(cycle) / "members"
@@ -114,6 +119,10 @@ class ExperimentPaths:
     def cycle_op_path(self, cycle: int, name: str) -> Path:
         """Marker file for a completed optional operation (e.g. `apply_perturbations`)"""
         return self.cycle_status_path(cycle) / "ops" / name
+
+    def obs_seq_path(self, cycle: int) -> Path:
+        """The observations assimilated at the end of a cycle, made by `prepare-cycles`"""
+        return self.obs / f"cycle_{cycle:03d}.obs_seq"
 
     def member_path(self, i: int) -> Path:
         """

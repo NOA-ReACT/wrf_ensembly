@@ -20,6 +20,7 @@ from wrf_ensembly import (
     perturbations,
     rebalance,
     restart,
+    segments,
     update_bc,
     utils,
     wrf,
@@ -631,6 +632,91 @@ class Experiment:
                 if f.name != keep:
                     logger.info(f"Removing unused restart file {f}")
                     f.unlink()
+
+    # Segments (see `segments.py`)
+
+    def observation_cycles(self) -> set[int]:
+        """Cycles with an observation file, i.e. where filter will run"""
+
+        return {
+            i for i in range(len(self.cycles)) if self.paths.obs_seq_path(i).exists()
+        }
+
+    def segment_rate(self) -> tuple[float, str]:
+        """
+        Wall clock seconds per simulated hour to size segments with, and where the number
+        came from
+        """
+
+        rate = self.cfg.segments.expected_walltime_per_sim_hour
+        if rate is None:
+            raise ValueError("segments.expected_walltime_per_sim_hour is not set")
+        return rate, "expected_walltime_per_sim_hour"
+
+    def plan_segment(
+        self, first: int, run_until: int | None = None
+    ) -> segments.SegmentPlan:
+        """
+        Plans the segment starting at cycle `first` and stores the plan, replacing any
+        plan starting there. Doesn't check whether that is safe, see `segment_started`.
+        """
+
+        stops = segments.find_stops(
+            len(self.cycles),
+            self.observation_cycles(),
+            set(self.cfg.assimilation.keep_restart_files_for_cycles),
+            run_until,
+        )
+        rate, rate_source = self.segment_rate()
+        plan = segments.plan_segment(
+            self.cycles,
+            first,
+            stops,
+            rate_s_per_sim_hour=rate,
+            rate_source=rate_source,
+            max_walltime_s=utils.parse_slurm_time(self.cfg.segments.max_walltime),
+            safety_factor=self.cfg.segments.safety_factor,
+            checkpoint_interval_hours=self.cfg.segments.checkpoint_interval_hours,
+            run_until=run_until,
+        )
+        self.state.set_segment_plan(plan)
+        logger.info(
+            f"Planned segment {plan}, ends because of: {plan.stop_reason}, "
+            f"estimated {utils.seconds_to_pretty_hours(plan.estimated_walltime_s)} per "
+            f"member, checkpoints every {plan.checkpoint_interval_min} min"
+        )
+        return plan
+
+    def segment_of(self, cycle_i: int) -> segments.SegmentPlan | None:
+        """
+        The planned segment covering a cycle, or None if segments are disabled or the
+        cycle has no plan
+        """
+
+        if not self.cfg.segments.enabled:
+            return None
+        covering = [p for p in self.state.get_segment_plans() if cycle_i in p]
+        # Overlapping plans only exist if files were edited by hand; the latest start wins
+        return max(covering, key=lambda p: p.first, default=None)
+
+    def segment_started(self, plan: segments.SegmentPlan) -> bool:
+        """
+        Whether any member has started running a segment: it has advanced, or has written
+        output or restart files into the first cycle's scratch directories. Once that is
+        the case, the plan can't change anymore without resetting the segment.
+        """
+
+        for cycle_i in plan.cycles:
+            if self.state.get_advanced_members(cycle_i):
+                return True
+        for member_i in range(self.cfg.assimilation.n_members):
+            for directory in (
+                self.paths.scratch_forecasts_path(plan.first, member_i),
+                self.paths.scratch_restart_path(plan.first, member_i),
+            ):
+                if directory.is_dir() and any(directory.iterdir()):
+                    return True
+        return False
 
     def member_initial_state(self, member_i: int, cycle_i: int) -> Path:
         """

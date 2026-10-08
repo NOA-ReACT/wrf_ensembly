@@ -548,6 +548,59 @@ def cycle(experiment_path: Path, jobs: int | None):
 
 @ensemble_cli.command()
 @click.option(
+    "--replan",
+    is_flag=True,
+    help="Replace the current cycle's plan, if no member has started it yet",
+)
+@click.option(
+    "--run-until",
+    type=int,
+    help="End the segment at this cycle at the latest",
+)
+@pass_experiment_path
+def plan_segment(experiment_path: Path, replan: bool, run_until: int | None):
+    """
+    Plans the segment (several cycles run as one WRF run) starting at the current cycle,
+    with `[segments]` enabled. `cycle` and `setup` do this on their own; use this to see
+    the plan, or to redo it with --replan after the observations changed.
+    """
+
+    logger.setup("ensemble-plan-segment", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    if not exp.cfg.segments.enabled:
+        logger.error("Segments are not enabled, see [segments] in the config")
+        sys.exit(1)
+
+    cycle_i = exp.current_cycle_i
+    existing = exp.segment_of(cycle_i)
+    if existing is not None and existing.first != cycle_i:
+        logger.error(
+            f"Cycle {cycle_i} is the end of segment {existing}, which has already run. "
+            "`cycle` plans the next one."
+        )
+        sys.exit(1)
+
+    if existing is not None and not replan:
+        logger.info(
+            f"Segment {existing} is planned, ends because of: {existing.stop_reason}, "
+            f"checkpoints every {existing.checkpoint_interval_min} min"
+        )
+        logger.info("Use --replan to plan it again")
+        return
+
+    if existing is not None and exp.segment_started(existing):
+        logger.error(
+            f"Members have already started segment {existing}, it can't be replanned. "
+            f"Reset it first with `ensemble reset-cycle --cycle {existing.first}`."
+        )
+        sys.exit(1)
+
+    exp.plan_segment(cycle_i, run_until)
+
+
+@ensemble_cli.command()
+@click.option(
     "--cycle",
     type=int,
     help="Which cycle to reset (defaults to current cycle)",

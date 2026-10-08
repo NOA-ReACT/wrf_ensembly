@@ -23,6 +23,7 @@ Layout::
         analysis_complete
         cycle_complete
         ops/apply_perturbations            optional operation markers
+      segments/cycle_003.json              plan of the segment starting at cycle 3
 
 Everything is plain JSON/text, so a stuck experiment can be inspected and repaired with
 `ls`, an editor and `rm`.
@@ -40,6 +41,7 @@ from typing import Any
 
 from wrf_ensembly import utils
 from wrf_ensembly.console import logger
+from wrf_ensembly.segments import SegmentPlan
 
 from .dataclasses import RuntimeStatistics
 from .paths import ExperimentPaths
@@ -48,6 +50,7 @@ STATE_VERSION = 1
 
 CYCLE_DIR_RE = re.compile(r"^cycle_(\d+)$")
 MEMBER_FILE_RE = re.compile(r"^member_(\d+)\.json$")
+SEGMENT_FILE_RE = re.compile(r"^cycle_(\d+)\.json$")
 
 
 @dataclass
@@ -382,12 +385,57 @@ class ExperimentState:
             f"{dt.datetime.now(dt.timezone.utc).isoformat()} {socket.gethostname()}\n",
         )
 
+    # Segment plans, written by serial commands only (`cycle`, `ensemble setup`,
+    # `plan-segment`, `run-experiment`)
+
+    def get_segment_plan(self, first_cycle: int) -> SegmentPlan | None:
+        """The plan of the segment starting at a cycle, or None if there is none"""
+
+        path = self.paths.segment_plan_path(first_cycle)
+        data = self._read_json(path)
+        if data is None:
+            return None
+        try:
+            return SegmentPlan.from_dict(data)
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning(f"Could not read segment plan {path} ({e}), ignoring")
+            return None
+
+    def get_segment_plans(self) -> list[SegmentPlan]:
+        """Every stored segment plan, by first cycle"""
+
+        try:
+            entries = sorted(os.listdir(self.paths.status_segments))
+        except FileNotFoundError:
+            return []
+        except OSError as e:
+            logger.warning(f"Could not list {self.paths.status_segments}: {e}")
+            return []
+
+        plans = []
+        for entry in entries:
+            match = SEGMENT_FILE_RE.match(entry)
+            if match is None:
+                continue
+            plan = self.get_segment_plan(int(match.group(1)))
+            if plan is not None:
+                plans.append(plan)
+        return plans
+
+    def set_segment_plan(self, plan: SegmentPlan):
+        self._write_json(self.paths.segment_plan_path(plan.first), plan.to_dict())
+
+    def clear_segment_plan(self, first_cycle: int):
+        self.paths.segment_plan_path(first_cycle).unlink(missing_ok=True)
+
     # Whole-experiment reset
 
     def reset(self):
-        """Reset the experiment to cycle 0, forgetting all per-cycle status"""
+        """Reset the experiment to cycle 0, forgetting all per-cycle status and plans"""
 
         if self.paths.status_cycles.exists():
             utils.rm_tree(self.paths.status_cycles)
+        if self.paths.status_segments.exists():
+            utils.rm_tree(self.paths.status_segments)
         self.paths.status_cycles.mkdir(parents=True, exist_ok=True)
         self.set_current_cycle(0)

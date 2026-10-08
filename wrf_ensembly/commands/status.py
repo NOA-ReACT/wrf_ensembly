@@ -6,7 +6,7 @@ import numpy as np
 from rich.console import Console
 from rich.table import Table
 
-from wrf_ensembly import experiment
+from wrf_ensembly import experiment, utils
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import CycleState, ExperimentStateError
@@ -45,6 +45,17 @@ def show(experiment_path: Path):
     exp_table.add_row("Filter Run", "✓" if exp.filter_run else "✗")
     exp_table.add_row("Analysis Run", "✓" if exp.analysis_run else "✗")
     exp_table.add_row("All Members Advanced", "✓" if exp.all_members_advanced else "✗")
+
+    if exp.cfg.segments.enabled:
+        segment = exp.segment_of(exp.current_cycle_i)
+        if segment is None:
+            exp_table.add_row("Segment", "not planned")
+        else:
+            exp_table.add_row(
+                "Segment",
+                f"{segment} (ends because of: {segment.stop_reason}, "
+                f"~{utils.seconds_to_pretty_hours(segment.estimated_walltime_s)})",
+            )
 
     if current_cycle:
         exp_table.add_row(
