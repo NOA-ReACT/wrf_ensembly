@@ -1,5 +1,7 @@
 import itertools
+import math
 import os
+import re
 import secrets
 import shutil
 import string
@@ -153,6 +155,37 @@ def seconds_to_pretty_hours(seconds: int | float) -> str:
     minutes = (seconds % 3600) // 60
 
     return f"{hours:.0f}h {minutes:02.0f}m"
+
+
+def parse_slurm_time(value: str) -> int:
+    """
+    Parses a SLURM time string (`--time`) into seconds. Accepts the formats sbatch does:
+    `MM`, `MM:SS`, `HH:MM:SS`, `D-HH`, `D-HH:MM` and `D-HH:MM:SS`.
+    """
+
+    match = re.fullmatch(r"(?:(\d+)-)?(\d+)(?::(\d+))?(?::(\d+))?", value.strip())
+    if match is None:
+        raise ValueError(f"Invalid SLURM time {value!r}")
+    days, a, b, c = match.groups()
+    a = int(a)
+    if days is not None:
+        # D-HH, D-HH:MM, D-HH:MM:SS
+        hours, minutes, seconds = a, int(b or 0), int(c or 0)
+        return ((int(days) * 24 + hours) * 60 + minutes) * 60 + seconds
+    if c is not None:
+        return (a * 60 + int(b)) * 60 + int(c)  # HH:MM:SS
+    if b is not None:
+        return a * 60 + int(b)  # MM:SS
+    return a * 60  # MM
+
+
+def format_slurm_time(seconds: int | float) -> str:
+    """Formats seconds as a SLURM time string, `D-HH:MM:SS`, rounding up to the minute"""
+
+    minutes = math.ceil(seconds / 60)
+    days, minutes = divmod(minutes, 24 * 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{days}-{hours:02d}:{minutes:02d}:00"
 
 
 def bool_to_console_str(b: bool):

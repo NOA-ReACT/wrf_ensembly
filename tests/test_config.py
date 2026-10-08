@@ -128,3 +128,55 @@ def test_check_rejects_restart_mode_hydrostatic():
 
     with pytest.raises(ValueError, match="non_hydrostatic = true"):
         cfg.check()
+
+
+def make_segments_config() -> config.Config:
+    cfg = make_restart_config()
+    cfg.segments.enabled = True
+    cfg.segments.expected_walltime_per_sim_hour = 150
+    return cfg
+
+
+def test_check_accepts_segments():
+    make_segments_config().check()
+
+
+def test_check_rejects_segments_in_wrfinput_mode():
+    cfg = make_segments_config()
+    cfg.assimilation.cycling_mode = "wrfinput"
+    cfg.assimilation.cycled_variables = ["U"]
+
+    with pytest.raises(ValueError, match="segments need"):
+        cfg.check()
+
+
+def test_check_rejects_segments_with_custom_cycles():
+    cfg = make_segments_config()
+    cfg.time_control.cycles = {3: config.CycleConfig(duration=120)}
+
+    with pytest.raises(ValueError, match="time_control.cycles"):
+        cfg.check()
+
+
+def test_check_rejects_segments_with_forecast_extension():
+    cfg = make_segments_config()
+    cfg.time_control.forecast_extension = 60
+
+    with pytest.raises(ValueError, match="forecast_extension"):
+        cfg.check()
+
+
+def test_check_requires_expected_walltime_for_segments():
+    cfg = make_segments_config()
+    cfg.segments.expected_walltime_per_sim_hour = None
+
+    with pytest.raises(ValueError, match="expected_walltime_per_sim_hour"):
+        cfg.check()
+
+
+def test_check_rejects_max_walltime_shorter_than_a_cycle():
+    cfg = make_segments_config()
+    cfg.segments.max_walltime = "10:00"  # 6h cycle x 150 s/h x 1.3 is ~1 h
+
+    with pytest.raises(ValueError, match="doesn't fit one cycle"):
+        cfg.check()

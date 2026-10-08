@@ -11,6 +11,7 @@ from mashumaro.config import BaseConfig
 from mashumaro.mixins.toml import DataClassTOMLMixin
 from mashumaro.types import SerializationStrategy
 
+from wrf_ensembly import utils
 from wrf_ensembly.console import console, logger
 
 
@@ -344,6 +345,47 @@ class AssimilationConfig:
     end) are never deleted, e.g. to start another experiment from there later with
     `ensemble setup-from-other-experiment`.
     """
+
+
+@dataclass
+class SegmentsConfig:
+    """
+    Running several cycles as one WRF run (a segment), in the `restart` cycling mode.
+
+    A cycle without observations doesn't change the model state, but stopping there
+    still costs minutes of restart I/O and job turnaround. With segments enabled, the
+    members only stop at cycles that need it: cycles with an observation file in `obs/`,
+    the ones in `assimilation.keep_restart_files_for_cycles`, the `--run-until` cycle
+    and the last one. Each segment is as long as fits in `max_walltime`.
+    """
+
+    enabled: bool = False
+    """Run segments of several cycles. Needs `cycling_mode = "restart"`."""
+
+    max_walltime: str = "12:00:00"
+    """Longest a member job may run, as a SLURM time string (e.g. `12:00:00`, `1-00:00:00`)"""
+
+    expected_walltime_per_sim_hour: float | None = None
+    """
+    Seconds of wall clock a member needs per simulated hour, including startup. Used to
+    size segments until the experiment has runtime statistics of its own. Required when
+    segments are enabled.
+    """
+
+    safety_factor: float = 1.3
+    """The walltime estimate of a segment is multiplied by this before it is compared to
+    `max_walltime` and used as the jobs' time limit"""
+
+    checkpoint_interval_hours: float = 24
+    """
+    How often (in simulated hours) members write a restart file during a segment, so a
+    job that dies can continue from there. The actual interval is the longest one that
+    is at most this and divides the segment evenly, since WRF needs a restart file at
+    the segment's end.
+    """
+
+    keep_checkpoints: int = 2
+    """Newest checkpoints kept per member while a segment runs (older ones are deleted)"""
 
 
 @dataclass
@@ -964,6 +1006,9 @@ class Config(DataClassTOMLMixin):
     plots: PlotsConfig = field(default_factory=PlotsConfig)
     """Configuration for diagnostic plots"""
 
+    segments: SegmentsConfig = field(default_factory=SegmentsConfig)
+    """Running several cycles as one WRF run, in the `restart` cycling mode"""
+
     def wrf_namelist_overrides_for_member(
         self, member: int
     ) -> dict[str, dict[str, Any]]:
@@ -1032,6 +1077,9 @@ class Config(DataClassTOMLMixin):
                     "albedo and sea ice stay at their initial values for the whole experiment"
                 )
 
+        if self.segments.enabled:
+            self._check_segments()
+
         # WRF v4 initialises its prognostic temperature from THM. T in wrfinput/wrfout is a
         # diagnostic (dry potential temperature) that WRF does not read back.
         for name in ("cycled_variables", "state_variables"):
@@ -1042,6 +1090,53 @@ class Config(DataClassTOMLMixin):
                     "T is a diagnostic it doesn't read, so changes to T have no effect. "
                     "Use 'THM' instead."
                 )
+
+
+    def _check_segments(self) -> None:
+        """The parts of `check` for `[segments]`, called only if they are enabled"""
+
+        segments = self.segments
+        if self.assimilation.cycling_mode != "restart":
+            raise ValueError(
+                'segments need cycling_mode = "restart": in "wrfinput" mode every cycle '
+                "starts from its own real.exe file, so cycles can't run as one"
+            )
+        # A segment's output, restart files and walltime all assume one cycle length,
+        # and its forecast would end at the segment's end only
+        if self.time_control.cycles:
+            raise ValueError(
+                "[time_control.cycles] can't be used with segments, all cycles must have "
+                "the same length and output interval"
+            )
+        if self.time_control.forecast_extension != 0:
+            raise ValueError("time_control.forecast_extension can't be used with segments")
+        if segments.expected_walltime_per_sim_hour is None:
+            raise ValueError(
+                "segments.expected_walltime_per_sim_hour is needed to size segments "
+                "before there are runtime statistics"
+            )
+        if segments.expected_walltime_per_sim_hour <= 0:
+            raise ValueError("segments.expected_walltime_per_sim_hour must be positive")
+        if segments.safety_factor < 1:
+            raise ValueError("segments.safety_factor must be at least 1")
+        if segments.checkpoint_interval_hours <= 0:
+            raise ValueError("segments.checkpoint_interval_hours must be positive")
+        if segments.keep_checkpoints < 2:
+            raise ValueError(
+                "segments.keep_checkpoints must be at least 2, the newest checkpoint may "
+                "be half-written when a job dies"
+            )
+
+        max_walltime = utils.parse_slurm_time(segments.max_walltime)
+        cycle_hours = self.time_control.analysis_interval / 60
+        one_cycle = (
+            segments.expected_walltime_per_sim_hour * cycle_hours * segments.safety_factor
+        )
+        if one_cycle > max_walltime:
+            raise ValueError(
+                f"segments.max_walltime ({segments.max_walltime}) doesn't fit one cycle "
+                f"at the expected rate ({one_cycle:.0f} s with the safety factor)"
+            )
 
 
 def wrf_namelist_differences(cfg: Config, other: Config) -> list[str]:
