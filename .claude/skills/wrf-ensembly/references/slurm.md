@@ -22,6 +22,28 @@ Consequences:
   pending. Cancel the orphaned analysis job first (ask before `scancel`).
 - Job names start with `metadata.name`, which is how to tell experiments apart in `squeue`.
 
+## Segments (`[segments] enabled = true`)
+
+In restart mode, members can run several cycles as one WRF run (a segment) and only stop
+at cycles with observations, at `keep_restart_files_for_cycles`, at `--run-until`, at the
+end, or at `segments.max_walltime`. `ensemble plan-segment` shows the current plan
+(also `status show`, row "Segment"). What changes in the chain:
+- The array runs the whole segment, with `--time` from the plan's estimate (times
+  `safety_factor`, capped at `max_walltime`), not from `[slurm.directives.advance_model]`.
+- The analysis job starts with `ensemble finish-segment`, which moves the experiment from
+  the segment's first cycle to its last. Its jobfile is named after the **last** cycle.
+- While the members run, `status show` reports the **first** cycle; the inner cycles say
+  `initialized` until the members finish, that's expected.
+- A killed member resumes from its newest confirmed checkpoint when resubmitted (the log
+  says "Resuming from ..."). Nothing to do by hand.
+- To rerun a segment from its start (e.g. after changing something), `ensemble reset-cycle
+  --cycle <first>` resets all its cycles, **deletes** their wrfouts and checkpoints, and
+  replans. Ask first.
+- "No segment is planned from cycle N": run `ensemble plan-segment` (it also re-extracts
+  the members' boundaries for the segment).
+- "Cycle(s) X got observations after segment ... was planned": observations were added
+  inside a running segment. The fix is the reset above.
+
 Resource directives come from `[slurm.directives.*]` (`default` merged with
 `advance_model` / `make_analysis` / `preprocess` / `postprocess`). The user almost always
 keeps these in `env_config.toml` (a symlink to a per-machine file), which overrides

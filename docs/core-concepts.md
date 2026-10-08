@@ -53,6 +53,36 @@ So, the global model data are used to generate initial and boundary conditions a
 
 Optionally, a cycle can use the forecast to move forward, in case the analysis doesn't exist. For example, when there aren't any data to assimilate.
 
+### Segments
+
+In the `restart` cycling mode, moving forward with the forecast changes nothing in the
+model state, yet each stop still costs restart I/O and a round trip through the queue.
+With [`[segments]`](./configuration.md#segments) enabled, the members run several cycles
+as one WRF run, a *segment*, and only stop where it's needed:
+
+- at a cycle with an observation file in `obs/` (where the filter runs), so run
+  `observations prepare-cycles` before starting the experiment;
+- at the cycles in `assimilation.keep_restart_files_for_cycles`;
+- at the `--run-until` cycle of `slurm run-experiment`;
+- at the last cycle;
+- or earlier, if the run would not fit in `segments.max_walltime`.
+
+The cycle stays the unit of everything else: each cycle still gets its own forecasts,
+status files and postprocessing, so commands that take a cycle work as before. A segment
+is planned when it is about to start (by `ensemble setup` and `ensemble cycle`) and the
+plan is stored in `status/segments/`. `ensemble plan-segment` shows it, or plans it again
+with `--replan` as long as no member has started.
+
+While a segment runs, the experiment stays at its first cycle. Afterwards, every member
+has sorted its output into the cycles it belongs to, and `ensemble finish-segment` (the
+first step of the analysis job) marks the inner cycles complete and moves the experiment
+to the last one, where filter, analysis and cycle run as usual.
+
+Members write a restart file every `checkpoint_interval_hours` along the way. If a
+member job dies, `run-experiment` resubmits it as usual and it continues from its newest
+checkpoint that WRF finished writing. `ensemble reset-cycle` on any cycle of the segment
+resets the whole segment, deleting its output and checkpoints, and plans it again.
+
 ## Experiment Directory Structure
 
 The experiment directory is the main directory where all data and configuration files are stored. It is structured as follows:
@@ -156,6 +186,9 @@ This feature allows the user to run experiments fully parallelized, with each WR
 
 If for any reason the experiment is interrupted, it can be resumed without re-running any completed steps.
 
+With [segments](#segments), each "Run model member" job runs a whole segment, and its
+time limit follows the segment's length.
+
 
 ## Experiment status tracking
 
@@ -172,6 +205,7 @@ status/
     analysis_complete
     cycle_complete
     ops/apply_perturbations             # optional operation markers
+  segments/cycle_004.json               # plan of the segment starting at cycle 4
 ```
 
 Every file has exactly one writer and is written atomically, so no locking is involved anywhere. This matters because ensemble members advance as separate jobs on separate nodes, often on a shared filesystem where the locking that a database needs is unreliable or slow. Members writing their own files in parallel cannot collide, and everything else is written by a single serial command.

@@ -66,7 +66,9 @@ the state? a broken file?).
 
 ## Rerunning a member after the fix
 
-- Locally: `wrf-ensembly EXP ensemble advance-member --member 17 [--cores N]`. It runs the current cycle.
+- Locally: `wrf-ensembly EXP ensemble advance-member --member 17 [--cores N]`. It runs the current
+  cycle, or with segments the whole segment, continuing from the newest confirmed checkpoint
+  (`scratch/restart/cycle_<first>/member_17/`, confirmed ones are listed in `checkpoints.json`).
   Do `ulimit -s unlimited` and the config's `slurm.pre_commands` first, in the same command.
 - Through SLURM: `slurm run-experiment` only queues the members that haven't advanced yet. If an
   analysis job is still in the queue waiting on the failed array, it will sit there forever
@@ -77,7 +79,9 @@ the state? a broken file?).
 - Members finished (their wrfout for the cycle end time exists in scratch) but status says they
   didn't. This happens when a job is killed between WRF finishing and the status being written.
   Run `status reconcile --dry-run` first, then without `--dry-run`.
-- To force a single member's state: `status set-member <M> <true|false>`.
+- To force a single member's state: `status set-member <M> <true|false>`. At the start of a segment it
+  sets every cycle of the segment. `status reconcile` on any cycle of a segment checks the wrfout
+  at the segment's end and applies to all its cycles.
 - The filter complains that not all members advanced, right after the array finished: on NFS the
   status files can show up late. `filter` already waits for them. If it still fails, look at
   `ls status/cycles/cycle_NNN/members/` yourself before you change anything.

@@ -168,6 +168,12 @@ Observations are first converted to the WRF-Ensembly parquet format with the sep
 
 ::: mkdocs-click
     :module: wrf_ensembly.commands.ensemble
+    :command: plan_segment
+    :prog_name: wrf-ensembly EXPERIMENT_PATH ensemble plan-segment
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.ensemble
     :command: generate_perturbations
     :prog_name: wrf-ensembly EXPERIMENT_PATH ensemble generate-perturbations
     :depth: 2
@@ -188,6 +194,12 @@ Observations are first converted to the WRF-Ensembly parquet format with the sep
     :module: wrf_ensembly.commands.ensemble
     :command: advance_member
     :prog_name: wrf-ensembly EXPERIMENT_PATH ensemble advance-member
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.ensemble
+    :command: finish_segment
+    :prog_name: wrf-ensembly EXPERIMENT_PATH ensemble finish-segment
     :depth: 2
 
 ::: mkdocs-click

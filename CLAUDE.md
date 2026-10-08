@@ -104,7 +104,8 @@ experiment_dir/
 ├── config.toml              # Single config file
 ├── status/                  # Status tracking, one file per fact
 │   ├── experiment.json      # Current cycle
-│   └── cycles/cycle_NNN/    # Member advancement + completion markers
+│   ├── cycles/cycle_NNN/    # Member advancement + completion markers
+│   └── segments/            # Segment plans (with [segments])
 ├── data/                    # Final outputs
 │   ├── analysis/
 │   ├── forecasts/
@@ -136,6 +137,12 @@ experiment_dir/
 - `restart.py`: writing into restart files (two time levels `X_1`/`X_2` for the dynamics fields)
 - `rebalance.py`: recomputes P/AL after the restart file's state changed (analysis, perturbations)
 - `update_bc.py`: Python port of DART's `update_wrf_bc` (hybrid-coordinate coupling), reads wrfinput or restart files
+
+**Segments** (`[segments]`, restart mode only): members run several cycles as one WRF run and only stop at cycles with an `obs/cycle_NNN.obs_seq`, in `keep_restart_files_for_cycles`, at `--run-until`, at the end, or when `max_walltime` is reached. The cycle stays the bookkeeping unit; the segment is an overlay read from plans in `status/segments/` (no extra cycle state).
+- `segments.py`: the pure planner (`plan_segment`, `find_stops`, `checkpoint_interval`, `shorten`)
+- `checkpoints.py`: restart files written during a segment; `CheckpointWatcher` confirms them from rsl.out.0000 (`Timing for Writing restart`) and prunes old ones while wrf.exe runs
+- In `Experiment`: `advance_member` runs the segment, `file_segment_outputs` sorts wrfouts into their cycles, `find_resume_point` continues a killed member from a confirmed checkpoint, `finish_segment` moves the pointer from the first to the last cycle (first step of the analysis job), `reset_segment`
+- Tests run `advance_member` with `tests/fake_wrf.py` instead of wrf.exe
 
 **WRF Operations (`wrf.py`)**
 - WRF-specific utilities (namelists, file operations)
@@ -203,6 +210,7 @@ wrf-ensembly $EXP_PATH preprocess real             # cycling_mode = "restart", o
 **Running a cycle** (these act on the experiment's current cycle):
 ```bash
 wrf-ensembly $EXP_PATH ensemble advance-member --member Y
+wrf-ensembly $EXP_PATH ensemble finish-segment      # with [segments], no-op otherwise
 wrf-ensembly $EXP_PATH ensemble filter
 wrf-ensembly $EXP_PATH ensemble analysis
 wrf-ensembly $EXP_PATH ensemble cycle

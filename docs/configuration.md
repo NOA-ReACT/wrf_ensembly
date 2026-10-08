@@ -51,6 +51,7 @@ The configuration file is organized into the following main sections:
 - **[validation](#validation)** - Validation and first-departure analysis
 - **[geogrid](#geogrid)** - Geographical data preprocessing
 - **[perturbations](#perturbations)** - Initial condition perturbation settings
+- **[segments](#segments)** - Running several cycles as one WRF run (restart mode)
 - **[slurm](#slurm)** - SLURM job configuration
 - **[postprocess](#postprocess)** - Post-processing and output settings
 - **[plots](#plots)** - Diagnostic plot configuration
@@ -247,6 +248,42 @@ How each cycle's initial conditions are built:
   a 280x150x60 domain with GOCART), see `keep_restart_files`.
   Accumulated fields (`RAINNC`, deposition fluxes, ...) and `XTIME` keep counting from
   the start of the experiment instead of restarting every cycle.
+
+## Segments
+
+In the `restart` cycling mode, a cycle without observations leaves the model state as
+it is, but stopping there still costs: the members write and read a restart file, their
+jobs end, the analysis job runs `cycle` and `update-bc`, and new member jobs wait in the
+queue. On an HPC that is several minutes per stop. With segments, the members run
+several cycles as one WRF run and only stop where they have to. See
+[Segments](./core-concepts.md#segments) for how this works.
+
+```toml
+[segments]
+enabled = true
+max_walltime = "12:00:00"
+expected_walltime_per_sim_hour = 150
+safety_factor = 1.3
+checkpoint_interval_hours = 24
+keep_checkpoints = 2
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | bool | Run segments. Needs `cycling_mode = "restart"`, no `[time_control.cycles]` and no `forecast_extension`. *Default: false* |
+| `max_walltime` | string | Longest a member job may run, as a SLURM time string (`12:00:00`, `1-00:00:00`). Use the cluster's limit. *Default: "12:00:00"* |
+| `expected_walltime_per_sim_hour` | float | Seconds of wall clock a member needs per simulated hour (including startup), used until the experiment has runtime statistics of its own. **Required** when enabled |
+| `safety_factor` | float | The runtime estimate is multiplied by this before comparing it to `max_walltime` and setting the member jobs' `--time`. *Default: 1.3* |
+| `checkpoint_interval_hours` | float | How often members write a restart file during a segment, so a job that dies can continue from there. The actual interval is the longest one up to this that divides the segment evenly. *Default: 24* |
+| `keep_checkpoints` | int | How many of the newest checkpoints each member keeps while a segment runs (at least 2). With `assimilation.keep_restart_files`, all are kept. *Default: 2* |
+
+With segments, a few things mean something slightly different:
+
+- `assimilation.keep_restart_files_for_cycles` always ends a segment, so the restart
+  file is there for `setup-from-other-experiment` as soon as the run reaches the cycle.
+- `perturb_every_cycle` noise is only applied where the members stop.
+- Fields WRF accumulates since the last restart (`EDUST1`-`EDUST5` and `TOT_EDUST` with
+  GOCART) add up over the whole segment instead of one cycle.
 
 ## Observations
 
