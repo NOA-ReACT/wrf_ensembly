@@ -391,3 +391,14 @@ def test_advance_jobfile_without_segments_keeps_configured_time(tmp_path: Path):
     jf, _ = jobfiles.generate_advance_array_jobfile(exp)
 
     assert "--time=0-" not in jf.read_text()
+
+
+def test_plan_replaces_plans_starting_inside_it(tmp_path: Path):
+    exp = make_experiment(tmp_path / "exp")
+    exp.plan_segment(0, run_until=1)
+    exp.plan_segment(2)
+
+    exp.plan_segment(0)  # 0-3 now
+
+    assert exp.state.get_segment_starts() == [0]
+    assert exp.segment_of(2).first == 0

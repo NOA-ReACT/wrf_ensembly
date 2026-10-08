@@ -433,26 +433,28 @@ class ExperimentState:
             logger.warning(f"Could not read segment plan {path} ({e}), ignoring")
             return None
 
-    def get_segment_plans(self) -> list[SegmentPlan]:
-        """Every stored segment plan, by first cycle"""
+    def get_segment_starts(self) -> list[int]:
+        """First cycles of all stored segment plans, sorted"""
 
         try:
-            entries = sorted(os.listdir(self.paths.status_segments))
+            entries = os.listdir(self.paths.status_segments)
         except FileNotFoundError:
             return []
         except OSError as e:
             logger.warning(f"Could not list {self.paths.status_segments}: {e}")
             return []
 
-        plans = []
-        for entry in entries:
-            match = SEGMENT_FILE_RE.match(entry)
-            if match is None:
-                continue
-            plan = self.get_segment_plan(int(match.group(1)))
-            if plan is not None:
-                plans.append(plan)
-        return plans
+        return sorted(
+            int(match.group(1))
+            for match in map(SEGMENT_FILE_RE.match, entries)
+            if match is not None
+        )
+
+    def get_segment_plans(self) -> list[SegmentPlan]:
+        """Every stored segment plan, by first cycle"""
+
+        plans = [self.get_segment_plan(first) for first in self.get_segment_starts()]
+        return [plan for plan in plans if plan is not None]
 
     def set_segment_plan(self, plan: SegmentPlan):
         self._write_json(self.paths.segment_plan_path(plan.first), plan.to_dict())

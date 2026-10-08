@@ -902,6 +902,11 @@ class Experiment:
             run_until=run_until,
         )
         self.state.set_segment_plan(plan)
+        # Plans left from before the experiment was moved back by hand
+        for start in self.state.get_segment_starts():
+            if plan.first < start <= plan.last:
+                logger.warning(f"Removing the plan of the segment from cycle {start}")
+                self.state.clear_segment_plan(start)
         logger.info(
             f"Planned segment {plan}, ends because of: {plan.stop_reason}, "
             f"estimated {utils.seconds_to_pretty_hours(plan.estimated_walltime_s)} per "
@@ -917,9 +922,13 @@ class Experiment:
 
         if not self.cfg.segments.enabled:
             return None
-        covering = [p for p in self.state.get_segment_plans() if cycle_i in p]
-        # Overlapping plans only exist if files were edited by hand; the latest start wins
-        return max(covering, key=lambda p: p.first, default=None)
+        # Segments don't overlap, so only the latest one starting at or before the cycle
+        # can cover it. Reading just that one keeps this cheap on shared filesystems.
+        starts = [first for first in self.state.get_segment_starts() if first <= cycle_i]
+        if not starts:
+            return None
+        plan = self.state.get_segment_plan(starts[-1])
+        return plan if plan is not None and cycle_i in plan else None
 
     def runnable_segment(self) -> range:
         """
