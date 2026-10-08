@@ -536,11 +536,29 @@ class PerturbationVariableConfig:
     operation: Literal["add", "multiply", "assign"]
     """Whether to add or multiply the perturbation field to the variable, or to directly assign it (overwritting the variable)"""
 
-    perturb_every_cycle: bool = False
-    """Whether to generate a perturbation field for this variable at every cycle. If false, it will be perturbed only at the first cycle."""
+    kind: Literal["state", "parameter"] = "state"
+    """
+    What the perturbation represents:
 
-    different_field_every_cycle: bool = True
-    """If `perturb_every_cycle` is true, whether to generate a different perturbation field at every cycle, or to use the same field."""
+    - `state`: a perturbation of the model state (e.g. noise on THM). Applied at the first
+      cycle, and with `perturb_every_cycle` again at every cycle with a new random field.
+    - `parameter`: a field that stays constant for the whole experiment (e.g.
+      DUST_EMIS_WEIGHT), so every member keeps its own value. It is generated once and
+      applied once to the state each member continues from. In `cycling_mode = "wrfinput"`
+      that means again to every cycle's fresh wrfinput, unless the variable is in
+      `cycled_variables` (then it is carried over, like in `restart` mode). In `restart`
+      mode the variable must be in WRF's restart files (the `r` flag in the Registry).
+    """
+
+    perturb_every_cycle: bool = False
+    """Only for `kind = "state"`: whether to apply a new random perturbation field at every cycle. If false, the variable is perturbed only at the first cycle."""
+
+    different_field_every_cycle: bool | None = None
+    """
+    Deprecated. `perturb_every_cycle = true` with `different_field_every_cycle = false`
+    reapplied the same field every cycle, to keep a constant field in each new wrfinput.
+    That is `kind = "parameter"` now, and such configs are read as one.
+    """
 
     midcycle_taper_width: int = 0
     """
@@ -584,6 +602,36 @@ class PerturbationsConfig:
 
     seed: int | None = None
     """RNG seed to use when generating perturbation fields. If none, it will be randomly generated."""
+
+    def __post_init__(self):
+        for name, var in self.variables.items():
+            if var.different_field_every_cycle is not None:
+                if var.perturb_every_cycle and not var.different_field_every_cycle:
+                    logger.warning(
+                        f"[perturbations.variables.{name}]: different_field_every_cycle "
+                        'is deprecated, reading this variable as kind = "parameter". '
+                        'Replace both settings with kind = "parameter".'
+                    )
+                    var.kind = "parameter"
+                    var.perturb_every_cycle = False
+                else:
+                    logger.warning(
+                        f"[perturbations.variables.{name}]: different_field_every_cycle "
+                        "is deprecated and has no effect here, remove it"
+                    )
+                var.different_field_every_cycle = None
+
+            if var.kind == "parameter":
+                if var.perturb_every_cycle:
+                    raise ValueError(
+                        f'[perturbations.variables.{name}]: kind = "parameter" is a '
+                        "constant field, perturb_every_cycle doesn't apply to it"
+                    )
+                if var.midcycle_taper_width > 0:
+                    raise ValueError(
+                        f'[perturbations.variables.{name}]: kind = "parameter" is a '
+                        "constant field, midcycle_taper_width doesn't apply to it"
+                    )
 
 
 @dataclass

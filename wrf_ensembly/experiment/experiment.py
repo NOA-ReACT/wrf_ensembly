@@ -210,6 +210,7 @@ class Experiment:
 
         return {
             "perturbations_cfg": self.cfg.perturbations,
+            "reapplied_parameters": perturbations.reapplied_parameters(self.cfg),
             "n_members": self.cfg.assimilation.n_members,
             "experiment_name": self.cfg.metadata.name,
             "ic_path": self.paths.ic_path(0, 0),
@@ -259,9 +260,13 @@ class Experiment:
         You should call this function once for every member, after the initial conditions
         are copied in the member directory (either during `ensemble setup` or `ensemble cycle`).
 
-        This function will not check the configuration, rather it will assume that the
-        contents of the perturbation files are correct. This allows you to modify them
-        outside of this program if needed.
+        This function will mostly not check the configuration, rather it will assume that
+        the contents of the perturbation files are correct. This allows you to modify them
+        outside of this program if needed. The exception is variables in the config that
+        are not perturbed at this cycle (see `perturbations.applied_at_cycle`), which are
+        skipped even if the file has them. Files generated before `kind = "parameter"`
+        existed repeat the first cycle's field in every cycle, and in restart mode
+        applying it again would compound it.
         """
 
         if member_i >= self.cfg.assimilation.n_members:
@@ -287,9 +292,19 @@ class Experiment:
         is_restart = initial_state.name.startswith("wrfrst")
 
         perts = xr.open_dataset(pert_file).sel(member=member_i)
-        pert_config = {
-            name: json.loads(var.attrs["cfg"]) for name, var in perts.data_vars.items()
-        }
+        applied = perturbations.applied_at_cycle(self.cfg, self.current_cycle_i)
+        pert_config = {}
+        for name, var in perts.data_vars.items():
+            if name in self.cfg.perturbations.variables and name not in applied:
+                logger.info(
+                    f"Member {member_i}: Not perturbing {name}, it is not perturbed at "
+                    f"cycle {self.current_cycle_i}"
+                )
+                continue
+            pert_config[name] = json.loads(var.attrs["cfg"])
+        if not pert_config:
+            logger.info(f"Member {member_i}: Nothing to perturb")
+            return
 
         with netCDF4.Dataset(initial_state, "r+") as member_icbc:  # type: ignore
             before = rebalance.balanced_fields(member_icbc) if is_restart else None
@@ -751,6 +766,27 @@ class Experiment:
 
         initial_state = self.member_initial_state(member_i, next_cycle_i)
         utils.copy(source, initial_state)
+
+        # Parameter perturbations are applied once and then only carried over in the
+        # restart file. WRF only writes the fields its Registry marks for restart, so
+        # without that a parameter would silently go back to its default.
+        parameters = [
+            name
+            for name, var in self.cfg.perturbations.variables.items()
+            if var.kind == "parameter"
+        ]
+        if parameters:
+            with netCDF4.Dataset(initial_state, "r") as nc_restart:  # type: ignore
+                missing = [
+                    p for p in parameters if not restart.field_names(nc_restart, p)
+                ]
+            if missing:
+                raise ValueError(
+                    f'{", ".join(missing)} (perturbed with kind = "parameter") not in '
+                    f"{source}. WRF only writes fields with the `r` flag in its Registry "
+                    "to restart files, so the perturbation would be lost after the first "
+                    "cycle. Add the flag and rebuild WRF."
+                )
 
         if not use_forecast:
             analysis_file = (

@@ -162,7 +162,14 @@ def check(exp: Path, cfg: dict, r: Report):
     desc = []
     for name, p in pv.items():
         every = p.get("perturb_every_cycle", False)
-        desc.append(f"{name}:{p.get('operation')} sd={p.get('sd', 1.0)}{' every-cycle' if every else ''}")
+        kind = p.get("kind", "state")
+        if "different_field_every_cycle" in p:
+            r.add("WARN", f"perturbation {name}: different_field_every_cycle is deprecated"
+                          + (', read as kind = "parameter"' if every and not p["different_field_every_cycle"] else ""))
+            if every and not p["different_field_every_cycle"]:
+                kind, every = "parameter", False
+        desc.append(f"{name}:{p.get('operation')} sd={p.get('sd', 1.0)}"
+                    f"{' parameter' if kind == 'parameter' else ''}{' every-cycle' if every else ''}")
         if every and p.get("operation") == "assign" and p.get("midcycle_taper_width", 0):
             r.add("WARN", f"perturbation {name}: midcycle_taper_width has no effect with operation=assign")
     if not pv:

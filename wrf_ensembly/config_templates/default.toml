@@ -105,12 +105,12 @@ boundary_error_width = 1.0
 # seed =                       # Optional RNG seed; random if not set
 # [perturbations.variables.U]
 # operation = "add"            # "add", "multiply", or "assign"
+# kind = "state"               # "state", or "parameter" for a constant field (e.g. DUST_EMIS_WEIGHT)
 # mean = 1.0
 # sd = 1.0
 # gaussian_sigma = 2.5
 # boundary = 0
-# perturb_every_cycle = false
-# different_field_every_cycle = true
+# perturb_every_cycle = false  # state only: a new field at every cycle
 # midcycle_taper_width = 0
 
 [slurm]

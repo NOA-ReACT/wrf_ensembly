@@ -160,9 +160,43 @@ def edge_taper(ny: int, nx: int, border_width: int):
     return taper
 
 
+def reapplied_parameters(cfg: config.Config) -> list[str]:
+    """
+    The `kind = "parameter"` variables that must be perturbed again at every cycle after
+    the first. That is only in `wrfinput` cycling mode, where each cycle starts from a
+    fresh wrfinput, and only if they are not in `cycled_variables` (then the perturbed
+    value is carried over). In `restart` mode, the restart file carries them over.
+    """
+
+    if cfg.assimilation.cycling_mode != "wrfinput":
+        return []
+    return [
+        name
+        for name, var in cfg.perturbations.variables.items()
+        if var.kind == "parameter" and name not in cfg.assimilation.cycled_variables
+    ]
+
+
+def applied_at_cycle(cfg: config.Config, cycle_i: int) -> list[str]:
+    """
+    The variables perturbed at the start of a cycle: all of them at the first cycle, and
+    later the `perturb_every_cycle` state variables and `reapplied_parameters`.
+    """
+
+    if cycle_i == 0:
+        return list(cfg.perturbations.variables)
+    every_cycle = [
+        name
+        for name, var in cfg.perturbations.variables.items()
+        if var.kind == "state" and var.perturb_every_cycle
+    ]
+    return every_cycle + reapplied_parameters(cfg)
+
+
 def generate_perturbations_for_cycle(
     cycle_i: int,
     perturbations_cfg: config.PerturbationsConfig,
+    reapplied_parameters: list[str],
     n_members: int,
     experiment_name: str,
     ic_path: Path,
@@ -173,8 +207,10 @@ def generate_perturbations_for_cycle(
     This is a module-level function taking plain arguments so that it can be pickled and
     dispatched to a worker process (see `Experiment.generate_perturbations_for_cycles`).
 
-    For cycles > 0 where all reused variables have `different_field_every_cycle=False`
-    and no new fields need generating, a symlink to cycle 0's file is created instead.
+    After the first cycle, `perturb_every_cycle` state variables get a new field and
+    `reapplied_parameters` (see the function of that name) reuse the first cycle's. If
+    only the latter are needed, a symlink to cycle 0's file is created instead. If neither
+    is, no file is written and `apply-perturbations` is skipped for that cycle.
     The midcycle taper is applied at perturbation application time rather than here.
     """
 
@@ -183,51 +219,54 @@ def generate_perturbations_for_cycle(
         return
 
     if perturbations_cfg.seed is not None:
-        logger.warning(f"Setting random seed to {perturbations_cfg.seed}")
-        np.random.seed(perturbations_cfg.seed)
+        # Every cycle needs its own fields. The first cycle keeps the plain seed, so its
+        # ensemble is the same as before later cycles got their own seeds.
+        seed = perturbations_cfg.seed
+        if cycle_i > 0:
+            seed = [perturbations_cfg.seed, cycle_i]
+        logger.warning(f"Setting random seed to {seed}")
+        np.random.seed(seed)
 
     pert_dir = diag_dir / "perturbations"
     pert_dir.mkdir(parents=True, exist_ok=True)
     pert_file = pert_dir / f"perts_cycle_{cycle_i}.nc"
     pert_file.unlink(missing_ok=True)
 
-    if cycle_i > 0:
-        # Check which variables need new fields vs reusing cycle 0
-        needs_new_field = any(
-            pert_config.perturb_every_cycle and pert_config.different_field_every_cycle
-            for pert_config in perturbations_cfg.variables.values()
-        )
-        needs_reuse = any(
-            pert_config.perturb_every_cycle
-            and not pert_config.different_field_every_cycle
-            for pert_config in perturbations_cfg.variables.values()
-        )
+    if cycle_i == 0:
+        new_variables = list(perturbations_cfg.variables)
+        reused_variables = []
+    else:
+        new_variables = [
+            name
+            for name, var in perturbations_cfg.variables.items()
+            if var.kind == "state" and var.perturb_every_cycle
+        ]
+        reused_variables = reapplied_parameters
 
-        if needs_reuse and not needs_new_field:
-            # All reused variables come from cycle 0 — symlink instead of copying
-            first_cycle_pert_file = pert_dir / "perts_cycle_0.nc"
-            if not first_cycle_pert_file.exists():
-                raise FileNotFoundError(
-                    f"Perturbation file for first cycle not found at {first_cycle_pert_file}"
-                )
-            pert_file.symlink_to(first_cycle_pert_file.name)
-            logger.info(
-                f"Symlinked perturbations for cycle {cycle_i} to cycle 0 (same fields)"
-            )
-            return
+    if not new_variables and not reused_variables:
+        logger.info(f"Nothing to perturb at cycle {cycle_i}")
+        return
+
+    first_cycle_pert_file = pert_dir / "perts_cycle_0.nc"
+    if reused_variables and not first_cycle_pert_file.exists():
+        raise FileNotFoundError(
+            f"Perturbation file for first cycle not found at {first_cycle_pert_file}"
+        )
+    if not new_variables:
+        # Everything comes from cycle 0, symlink instead of copying
+        pert_file.symlink_to(first_cycle_pert_file.name)
+        logger.info(
+            f"Symlinked perturbations for cycle {cycle_i} to cycle 0 (same fields)"
+        )
+        return
 
     # Open the first wrfinput file to get the shape of each variable
     wrfinput = xr.open_dataset(ic_path)
 
     # Generate the perturbation fields
     perts = xr.Dataset()
-    for var, pert_config in perturbations_cfg.variables.items():
-        if cycle_i > 0 and (
-            not pert_config.perturb_every_cycle
-            or not pert_config.different_field_every_cycle
-        ):
-            continue
-
+    for var in new_variables:
+        pert_config = perturbations_cfg.variables[var]
         logger.debug(f"\tVariable: {var}, config: {pert_config}")
         arr = generate_perturbation_ensemble(
             n_members=n_members,
@@ -246,21 +285,9 @@ def generate_perturbations_for_cycle(
             attrs={"cfg": json.dumps(pert_config.__dict__)},
         )
 
-    # For cycles > 0, also include reused variables from cycle 0
-    if cycle_i > 0:
-        first_cycle_pert_file = pert_dir / "perts_cycle_0.nc"
-        if not first_cycle_pert_file.exists():
-            raise FileNotFoundError(
-                f"Perturbation file for first cycle not found at {first_cycle_pert_file}"
-            )
+    if reused_variables:
         first_cycle_perts = xr.open_dataset(first_cycle_pert_file)
-        for var, pert_config in perturbations_cfg.variables.items():
-            if (
-                not pert_config.perturb_every_cycle
-                or pert_config.different_field_every_cycle
-            ):
-                continue
-
+        for var in reused_variables:
             logger.info(f"Reusing perturbation field from first cycle for {var}")
             if var not in first_cycle_perts:
                 raise ValueError(

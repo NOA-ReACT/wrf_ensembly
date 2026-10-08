@@ -6,7 +6,7 @@ from pathlib import Path
 import click
 import netCDF4
 
-from wrf_ensembly import config, experiment, utils
+from wrf_ensembly import config, experiment, perturbations, utils
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import ExperimentStateError, StateTransition
@@ -226,23 +226,33 @@ def generate_perturbations(experiment_path: Path, jobs: int | None, force: bool)
         logger.warning("Forcing regeneration of perturbations")
 
     # First, generate the perturbations for the first cycle, because they might be needed
-    # for the other cycles too (if `perturb_every_cycle` is True and
-    # `different_field_every_cycle` is False)
+    # for the other cycles too (`kind = "parameter"` in wrfinput cycling mode)
     logger.info("Generating perturbations for first cycle...")
     exp.generate_perturbations(0)
 
     # Mark cycle 0 as done
     exp.state.mark_optional_operation_complete(0, operation_name)
 
-    # Now, if required, generate perturbations for all cycles
-    if len(exp.cycles) > 1 and any(
-        [var.perturb_every_cycle for var in exp.cfg.perturbations.variables.values()]
-    ):
+    # Now, if required, generate perturbations for all cycles. Every cycle after the first
+    # perturbs the same variables.
+    if len(exp.cycles) > 1 and perturbations.applied_at_cycle(exp.cfg, 1):
         logger.info("Generating perturbations for all cycles...")
         for cycle_i in exp.generate_perturbations_for_cycles(
             range(1, len(exp.cycles)), jobs
         ):
             exp.state.mark_optional_operation_complete(cycle_i, operation_name)
+    else:
+        # Nothing is perturbed after the first cycle. Remove files left from an earlier
+        # configuration, since `apply-perturbations` runs whenever a cycle has one.
+        for cycle_i in range(1, len(exp.cycles)):
+            pert_file = (
+                exp.paths.data_diag / "perturbations" / f"perts_cycle_{cycle_i}.nc"
+            )
+            if pert_file.exists() or pert_file.is_symlink():
+                logger.info(
+                    f"Removing {pert_file}, nothing is perturbed at cycle {cycle_i}"
+                )
+                pert_file.unlink()
 
     logger.info("Perturbation generation complete")
 

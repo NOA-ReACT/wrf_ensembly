@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any
 
-from wrf_ensembly import experiment, templates
+from wrf_ensembly import experiment, perturbations, templates
 from wrf_ensembly.console import logger
 
 
@@ -240,11 +240,17 @@ def generate_make_analysis_jobfile(
             f"Observation file {obs_file} does not exist! Filter won't run if it is not created for cycle {cycle}"
         )
 
-    pert_file = exp.paths.data_diag / "perturbations" / f"perts_cycle_{cycle}.nc"
+    # `apply-perturbations` runs after `cycle`, so it perturbs the next cycle
+    next_cycle = cycle + 1
+    pert_file = exp.paths.data_diag / "perturbations" / f"perts_cycle_{next_cycle}.nc"
     pert_file = pert_file.resolve()
-    if not pert_file.exists():
+    if (
+        next_cycle < len(exp.cycles)
+        and perturbations.applied_at_cycle(exp.cfg, next_cycle)
+        and not pert_file.exists()
+    ):
         logger.warning(
-            f"Perturbation file {pert_file} does not exist! Apply perturbations won't run if it is not created for cycle {cycle}"
+            f"Perturbation file {pert_file} does not exist! Apply perturbations won't run if it is not created for cycle {next_cycle}"
         )
 
     jobfile = exp.paths.jobfiles / f"cycle_{cycle}_make_analysis.job.sh"

@@ -375,8 +375,17 @@ Initial condition perturbation settings for ensemble generation.
 [perturbations]
 seed = 42
 
-# Per-variable perturbation settings
+# Noise on the model state, a new field at every cycle
+[perturbations.variables.THM]
+operation = "add"
+mean = 0.0
+sd = 0.5
+perturb_every_cycle = true
+midcycle_taper_width = 0
+
+# A constant field, every member keeps its own value for the whole experiment
 [perturbations.variables.DUST_EMIS_WEIGHT]
+kind = "parameter"
 operation = "multiply"
 mean = 1.0
 sd = 0.5
@@ -384,14 +393,28 @@ gaussian_sigma = 2.5
 boundary = 0
 min_value = 0.1
 max_value = 3.0
-perturb_every_cycle = false
-different_field_every_cycle = true
-midcycle_taper_width = 0
 ```
+
+Each variable is one of two kinds:
+
+- **`state`** (default): a perturbation of the model state. Applied at the first cycle,
+  and with `perturb_every_cycle` again at every later cycle, each time with a new random
+  field (like additive inflation).
+- **`parameter`**: a field that should stay constant, like an emission scaling factor. It
+  is generated once and applied once to the state each member continues from, so it is
+  never compounded. With `cycling_mode = "wrfinput"` every cycle starts from a fresh
+  wrfinput, so it is applied again to each one with the first cycle's field, unless the
+  variable is in `cycled_variables`. With `cycling_mode = "restart"` it is applied at the
+  first cycle only and carried over in the restart files, so the variable must be in
+  WRF's restart stream (the `r` flag in the Registry). `ensemble cycle` stops with an
+  error if it isn't.
+
+`generate-perturbations` only writes `perts_cycle_N.nc` for cycles that perturb
+something, and the SLURM jobs skip `apply-perturbations` for cycles without one.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `seed` | int | Random seed for perturbation generation. If not set, randomly generated |
+| `seed` | int | Random seed for perturbation generation. If not set, randomly generated. Cycles after the first are seeded with `(seed, cycle)`, so each gets its own fields |
 | `variables` | dict | Per-variable perturbation configuration |
 
 ### Per-Variable Perturbation Settings
@@ -405,8 +428,9 @@ midcycle_taper_width = 0
 | `boundary` | int | Size of perturbation boundary in grid points. If > 0, edges won't be perturbed (with a smoothing filter). *Default: 0* |
 | `min_value` | float | Minimum value for the perturbation field |
 | `max_value` | float | Maximum value for the perturbation field |
-| `perturb_every_cycle` | bool | Whether to generate a new perturbation at every cycle. If false, only perturbed at the first cycle. *Default: false* |
-| `different_field_every_cycle` | bool | If `perturb_every_cycle` is true, whether to use a different random field each cycle. *Default: true* |
+| `kind` | "state" or "parameter" | What the perturbation represents, see above. *Default: "state"* |
+| `perturb_every_cycle` | bool | Only for `kind = "state"`. Whether to apply a new perturbation at every cycle. If false, only perturbed at the first cycle. *Default: false* |
+| `different_field_every_cycle` | bool | Deprecated. `perturb_every_cycle = true` with `different_field_every_cycle = false` is read as `kind = "parameter"` |
 | `midcycle_taper_width` | int | Width of the tapering region at domain edges during mid-cycles. Only applies when `perturb_every_cycle` is true. Tapers the perturbation from full weight at the edge to 0 over this many grid points. Does not work with `operation = "assign"`. *Default: 0* |
 
 ## SLURM
