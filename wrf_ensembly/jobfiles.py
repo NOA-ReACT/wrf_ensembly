@@ -61,8 +61,9 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
                 for real_args in real_runs
             ]
         )
-        commands.append(_build_command(base_cmd, "interpolate-chem", member="$MEMBER"))
         commands.append("done")
+        # Interpolates the chemistry for all members at once, in parallel
+        commands.append(_build_command(base_cmd, "interpolate-chem"))
     else:
         commands.extend(
             [
