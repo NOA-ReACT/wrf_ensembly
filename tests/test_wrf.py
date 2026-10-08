@@ -213,3 +213,32 @@ def test_extract_boundary_records_outside_the_file(tmp_path: Path):
             times[1],
             times[2] + dt.timedelta(hours=1),
         )
+
+
+def test_segment_namelist(tmp_path: Path):
+    cfg = make_restart_config()
+    cycles = cycling.get_cycle_information(cfg)
+    period = cycling.get_segment_period(cycles, 2, 5)
+    paths = ExperimentPaths(tmp_path / "experiment", cfg)
+    path = tmp_path / "namelist.input"
+
+    wrf.generate_wrf_namelist(
+        cfg, period, True, path, member=0, paths=paths, restart_interval=720
+    )
+    text = path.read_text()
+
+    # 2026-03-02 00:00 (cycle 2 start) -> 2026-03-03 00:00 (cycle 5 end)
+    assert "start_day = 2" in text and "start_hour = 0" in text
+    assert "end_day = 3" in text and "end_hour = 0" in text
+    assert "run_hours = 0" in text or "run_days = 1" in text
+    assert "restart = .true." in text
+    assert "restart_interval = 720" in text
+    assert "scratch/restart/cycle_002/member_00/wrfrst_d<domain>_<date>" in text
+    assert "scratch/forecasts/cycle_002/member_00/wrfout_d<domain>_<date>" in text
+
+
+def test_wrfout_time():
+    assert wrf.wrfout_time("wrfout_d01_2021-01-02_06:00:00") == dt.datetime(
+        2021, 1, 2, 6, tzinfo=dt.timezone.utc
+    )
+    assert wrf.wrfout_time("wrfrst_d01_2021-01-02_06:30:00").minute == 30

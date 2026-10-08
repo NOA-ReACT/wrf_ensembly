@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -145,6 +145,7 @@ def generate_wrf_namelist(
     member: int | None = None,
     paths: ExperimentPaths | None = None,
     add_iofields: bool = True,
+    restart_interval: int | None = None,
 ):
     """
     Generates the WRF namelist for the experiment and a specific cycle, at the given path.
@@ -162,6 +163,8 @@ def generate_wrf_namelist(
                 will be applied. Omit this parameter when generating a namelist for preprocessing/real.exe.
         paths: Paths of the experiment, required if member is set.
         add_iofields: If True, the iofields.txt file will be generated if the config has runtime_io set. Use only for wrf.exe, not real.exe.
+        restart_interval: In restart mode, minutes between restart files. Defaults to the
+            cycle's length, so the only restart file is the one at its end.
     """
 
     if member is not None and paths is None:
@@ -253,8 +256,10 @@ def generate_wrf_namelist(
         if member is not None and paths is not None:
             rst_dest = paths.scratch_restart_path(cycle.index, member)
             rst_dest.mkdir(parents=True, exist_ok=True)
-            time_control["restart_interval"] = int(
-                (cycle.end - cycle.start).total_seconds() // 60
+            time_control["restart_interval"] = (
+                restart_interval
+                if restart_interval is not None
+                else int((cycle.end - cycle.start).total_seconds() // 60)
             )
             time_control["rst_outname"] = f"{rst_dest}/wrfrst_d<domain>_<date>"
             # Take history_interval etc. from the namelist, not from the restart file
@@ -284,6 +289,14 @@ def generate_wrf_namelist(
         path = path / "namelist.input"
     fortran_namelists.write_namelist(wrf_namelist, path)
     logger.info(f"Wrote namelist to {path}")
+
+
+def wrfout_time(name: str) -> datetime:
+    """The (UTC) time of a WRF output or restart file from its name, e.g. `wrfout_d01_2021-01-01_06:00:00`"""
+
+    return datetime.strptime(name[-19:], "%Y-%m-%d_%H:%M:%S").replace(
+        tzinfo=timezone.utc
+    )
 
 
 def extract_boundary_records(

@@ -112,3 +112,22 @@ def get_full_period(cfg: config.Config) -> CycleInformation:
         output_interval=None,
         forecast_end=cfg.time_control.end,
     )
+
+
+def get_segment_period(
+    cycles: list[CycleInformation], first: int, last: int
+) -> CycleInformation:
+    """
+    A pseudo-cycle spanning cycles `first` to `last` (inclusive), for running them as one
+    WRF run (a segment, see `segments.py`). It has the first cycle's index, so outputs
+    and restart files go to that cycle's directories.
+    """
+
+    return CycleInformation(
+        start=cycles[first].start,
+        end=cycles[last].end,
+        cycle_offset=cycles[first].cycle_offset,
+        index=first,
+        output_interval=None,
+        forecast_end=cycles[last].end,
+    )
