@@ -146,6 +146,7 @@ def generate_wrf_namelist(
     paths: ExperimentPaths | None = None,
     add_iofields: bool = True,
     restart_interval: int | None = None,
+    restart: bool | None = None,
 ):
     """
     Generates the WRF namelist for the experiment and a specific cycle, at the given path.
@@ -165,6 +166,8 @@ def generate_wrf_namelist(
         add_iofields: If True, the iofields.txt file will be generated if the config has runtime_io set. Use only for wrf.exe, not real.exe.
         restart_interval: In restart mode, minutes between restart files. Defaults to the
             cycle's length, so the only restart file is the one at its end.
+        restart: In restart mode, whether wrf.exe starts from a restart file. Defaults to
+            every cycle but the first; a run resumed from a checkpoint always does.
     """
 
     if member is not None and paths is None:
@@ -252,7 +255,9 @@ def generate_wrf_namelist(
     # overrides any restart settings in the config, which can't work here.
     if cfg.assimilation.cycling_mode == "restart":
         time_control = wrf_namelist["time_control"]
-        time_control["restart"] = member is not None and cycle.index > 0
+        time_control["restart"] = (
+            restart if restart is not None else member is not None and cycle.index > 0
+        )
         if member is not None and paths is not None:
             rst_dest = paths.scratch_restart_path(cycle.index, member)
             rst_dest.mkdir(parents=True, exist_ok=True)

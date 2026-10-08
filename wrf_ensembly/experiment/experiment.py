@@ -1,3 +1,5 @@
+import contextlib
+import dataclasses
 import datetime as dt
 import json
 import os
@@ -13,6 +15,7 @@ import numpy as np
 import xarray as xr
 
 from wrf_ensembly import (
+    checkpoints,
     config,
     cycling,
     external,
@@ -434,6 +437,87 @@ class Experiment:
             )
             return False
 
+        # With segments, continue from the newest checkpoint of an earlier attempt, if
+        # there is one. The member keeps its wrfbdy, which has the boundary increment of
+        # the segment's start.
+        restart_interval = None
+        resume: tuple[dt.datetime, Path] | None = None
+        plan = self.segment_of(segment[0])
+        if plan is not None:
+            restart_interval = plan.checkpoint_interval_min
+            resume = self.find_resume_point(member_idx, segment)
+
+        if resume is not None and resume[0] == cycle.end:
+            logger.info(
+                f"Member {member_idx}: An earlier attempt already ran to the end, "
+                "only filing its output"
+            )
+            start_time = end_time = None
+        else:
+            if resume is not None:
+                resume_time, checkpoint = resume
+                logger.info(f"Member {member_idx}: Resuming from {checkpoint}")
+                # Copies left by earlier resumes, not the segment's initial state
+                for f in member_path.glob("wrfrst_d01_*"):
+                    if f != self.member_initial_state(member_idx, segment[0]):
+                        f.unlink()
+                utils.copy(checkpoint, member_path / checkpoint.name)
+                cycle = dataclasses.replace(cycle, start=resume_time)
+
+            ok, start_time, end_time = self._run_wrf(
+                member_idx,
+                cycle,
+                cores,
+                restart_interval,
+                restart=True if resume is not None else None,
+                watch_checkpoints=plan is not None,
+            )
+            if not ok:
+                return False
+
+        self.file_segment_outputs(member_idx, segment)
+
+        # Every cycle of the segment gets its own status file. The first cycle's is what
+        # decides whether the member is advanced (`can_advance_member`, the job array),
+        # so it is written last: a job that dies in between counts as not advanced.
+        # The runtime goes on the last cycle's file only, since it is one run.
+        for cycle_i in reversed(segment):
+            if cycle_i == segment[-1] and start_time is not None and end_time is not None:
+                self.state.set_member_advanced(
+                    cycle_i,
+                    member_idx,
+                    start=start_time,
+                    end=end_time,
+                    duration_s=int((end_time - start_time).total_seconds()),
+                    simulated_s=int((cycle.end - cycle.start).total_seconds()),
+                )
+            else:
+                self.state.set_member_advanced(cycle_i, member_idx)
+        self.members[member_idx].advanced = True
+
+        return True
+
+    def _run_wrf(
+        self,
+        member_idx: int,
+        cycle: cycling.CycleInformation,
+        cores: int,
+        restart_interval: int | None,
+        restart: bool | None,
+        watch_checkpoints: bool,
+    ) -> tuple[bool, dt.datetime, dt.datetime]:
+        """
+        Writes the namelist and runs wrf.exe for a member from `cycle.start` to
+        `cycle.forecast_end`. With `watch_checkpoints`, confirms and prunes the restart
+        files it writes on the way (see `checkpoints.py`).
+
+        Returns:
+            Whether WRF succeeded, and when it started and ended
+        """
+
+        member_path = self.paths.member_path(member_idx)
+        wrf_exe_path = (member_path / "wrf.exe").resolve()
+
         # Generate namelist
         wrf_namelist_path = member_path / "namelist.input"
         wrf.generate_wrf_namelist(
@@ -443,6 +527,8 @@ class Experiment:
             wrf_namelist_path,
             member_idx,
             self.paths,
+            restart_interval=restart_interval,
+            restart=restart,
         )
 
         # Clean old log files
@@ -458,15 +544,35 @@ class Experiment:
             str(wrf_exe_path),
         ]
 
+        rsl_file = member_path / "rsl.out.0000"
+        watcher = contextlib.nullcontext()
+        if watch_checkpoints:
+            interval = (
+                restart_interval
+                if restart_interval is not None
+                else int((cycle.end - cycle.start).total_seconds() // 60)
+            )
+            watcher = checkpoints.CheckpointWatcher(
+                self.paths.scratch_restart_path(cycle.index, member_idx),
+                rsl_file,
+                cycle.start,
+                dt.timedelta(minutes=interval),
+                keep=(
+                    None
+                    if self.cfg.assimilation.keep_restart_files
+                    else self.cfg.segments.keep_checkpoints
+                ),
+            )
+
         start_time = dt.datetime.now()
-        res = external.runc(cmd, cwd=member_path)
+        with watcher:
+            res = external.runc(cmd, cwd=member_path)
         end_time = dt.datetime.now()
 
         # Check output logs
-        rsl_file = member_path / "rsl.out.0000"
         if not rsl_file.exists():
             logger.error(f"Member {member_idx}: RSL file not found at {rsl_file}")
-            return False
+            return False, start_time, end_time
 
         logger.add_log_file(rsl_file)
         rsl_content = rsl_file.read_text()
@@ -475,34 +581,50 @@ class Experiment:
             logger.error(
                 f"Member {member_idx}: wrf.exe failed with exit code {res.returncode}"
             )
-            return False
+            return False, start_time, end_time
 
         # Store logs in a zip file
         if logger.log_dir is not None:
             rsl_files = sorted(member_path.glob("rsl.*"))
             utils.zip_files(rsl_files, logger.log_dir / "rsl.zip")
 
-        self.file_segment_outputs(member_idx, segment)
+        return True, start_time, end_time
 
-        # Every cycle of the segment gets its own status file. The first cycle's is what
-        # decides whether the member is advanced (`can_advance_member`, the job array),
-        # so it is written last: a job that dies in between counts as not advanced.
-        # The runtime goes on the last cycle's file only, since it is one run.
-        for cycle_i in reversed(segment):
-            if cycle_i == segment[-1]:
-                self.state.set_member_advanced(
-                    cycle_i,
-                    member_idx,
-                    start=start_time,
-                    end=end_time,
-                    duration_s=int((end_time - start_time).total_seconds()),
-                    simulated_s=int((cycle.end - cycle.start).total_seconds()),
+    def find_resume_point(
+        self, member_i: int, segment: range
+    ) -> tuple[dt.datetime, Path] | None:
+        """
+        The newest checkpoint of an earlier attempt at a segment that the member can
+        continue from, with its time: confirmed (WRF finished writing it), readable, and
+        inside the segment. If it is at the segment's end, the earlier attempt finished
+        and only its output needs filing. None to start from the beginning.
+        """
+
+        first, last = segment[0], segment[-1]
+        start, end = self.cycles[first].start, self.cycles[last].end
+
+        # Moved there only after an earlier attempt succeeded
+        end_name = f"wrfrst_d01_{end:%Y-%m-%d_%H:%M:%S}"
+        moved = self.paths.scratch_restart_path(last, member_i) / end_name
+        if last != first and moved.exists():
+            return end, moved
+
+        directory = self.paths.scratch_restart_path(first, member_i)
+        confirmed = checkpoints.confirmed_times(directory)
+        for time, f in reversed(checkpoints.list_checkpoints(directory)):
+            if not start < time <= end:
+                continue
+            if time not in confirmed:
+                logger.info(
+                    f"Member {member_i}: Not resuming from {f.name}, WRF didn't confirm "
+                    "writing it"
                 )
-            else:
-                self.state.set_member_advanced(cycle_i, member_idx)
-        self.members[member_idx].advanced = True
-
-        return True
+                continue
+            if not checkpoints.is_complete(f, time):
+                logger.warning(f"Member {member_i}: Not resuming from unreadable {f}")
+                continue
+            return time, f
+        return None
 
     def file_segment_outputs(self, member_i: int, segment: range):
         """
@@ -888,10 +1010,12 @@ class Experiment:
                     "wrfout_*"
                 ):
                     f.unlink()
-                for f in self.paths.scratch_restart_path(cycle_i, member_i).glob(
-                    "wrfrst_*"
-                ):
-                    f.unlink()
+                # Checkpoints and their confirmations
+                restart_dir = self.paths.scratch_restart_path(cycle_i, member_i)
+                if restart_dir.is_dir():
+                    for f in restart_dir.iterdir():
+                        if f.is_file():
+                            f.unlink()
         logger.info(f"Reset the status of {plan} and deleted its output and restart files")
 
         self.state.clear_segment_plan(plan.first)
