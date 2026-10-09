@@ -106,32 +106,28 @@ Additional instruments used by converters but not yet in `INSTRUMENT_REGISTRY` (
 | Quantity | Label | Units | WRF Equivalent | DART Quantity |
 |----------|-------|-------|----------------|---------------|
 | `LIDAR_EXTINCTION_355nm` | Lidar Extinction @ 355nm | 1/m | `EXT355` | `LIDAR_EXTINCTION_355nm` |
+| `LIDAR_EXTINCTION_532nm` | Lidar Extinction @ 532nm | 1/m | `EXT532` | `LIDAR_EXTINCTION_532nm` |
+| `LIDAR_EXTINCTION_1064nm` | Lidar Extinction @ 1064nm | 1/m | `EXT1064` | `LIDAR_EXTINCTION_1064nm` |
 | `HLOS_WIND` | HLOS Wind | m/s | operator (see below) | `SAT_HLOS_WIND` |
 | `BT_WV62` | Brightness Temp WV 6.2 µm | K | `WV62` | — |
 | `BT_WV73` | Brightness Temp WV 7.3 µm | K | `WV73` | — |
 | `BT_IR87` | Brightness Temp IR 8.7 µm | K | `IR87` | — |
 | `BT_IR108` | Brightness Temp IR 10.8 µm | K | `IR108` | — |
 | `BT_IR120` | Brightness Temp IR 12.0 µm | K | `IR120` | — |
-| `AOD_355nm` | AOD @ 355nm | — | `AOD_355` | `AIRSENSE_AOD` |
-| `AOD_Fine_355nm` | Fine mode AOD @ 355nm | — | `AOD_FINE_355` | `AIRSENSE_AOD_FINE` |
-| `AOD_Coarse_355nm` | Coarse mode AOD @ 355nm | — | `AOD_COARSE_355` | `AIRSENSE_AOD_COARSE` |
-| `DOD_355nm` | Dust Optical Depth @ 355nm | — | `AOD_DUST_355` | — |
-| `AOD_440nm` | AOD @ 440nm | — | `AOD_440` | — |
-| `AOD_Fine_440nm` | Fine mode AOD @ 440nm | — | `AOD_FINE_440` | — |
-| `AOD_Coarse_440nm` | Coarse mode AOD @ 440nm | — | `AOD_COARSE_440` | — |
-| `AOD_500nm` | AOD @ 500nm | — | `AOD_500` | `AIRSENSE_AOD` |
-| `AOD_Fine_500nm` | Fine mode AOD @ 500nm | — | `AOD_FINE_500` | `AIRSENSE_AOD_FINE` |
-| `AOD_Coarse_500nm` | Coarse mode AOD @ 500nm | — | `AOD_COARSE_500` | `AIRSENSE_AOD_COARSE` |
-| `AOD_550nm` | AOD @ 550nm | — | `AOD_550` | `AIRSENSE_AOD` |
-| `AOD_Fine_550nm` | Fine mode AOD @ 550nm | — | `AOD_FINE_550` | `AIRSENSE_AOD_FINE` |
-| `AOD_Coarse_550nm` | Coarse mode AOD @ 550nm | — | `AOD_COARSE_550` | `AIRSENSE_AOD_COARSE` |
-| `AOD_665nm` | AOD @ 665nm | — | `AOD_665` | — |
-| `AOD_Fine_665nm` | Fine mode AOD @ 665nm | — | `AOD_FINE_665` | — |
-| `AOD_Coarse_665nm` | Coarse mode AOD @ 665nm | — | `AOD_COARSE_665` | — |
-| `AOD_870nm` | AOD @ 870nm | — | `AOD_870` | — |
-| `AOD_Fine_870nm` | Fine mode AOD @ 870nm | — | `AOD_FINE_870` | — |
-| `AOD_Coarse_870nm` | Coarse mode AOD @ 870nm | — | `AOD_COARSE_870` | — |
-| `AOD_1064nm` | AOD @ 1064nm | — | `AOD_1064` | — |
+| `AOD_$WVnm`, `AOD_Fine_$WVnm`, `AOD_Coarse_$WVnm` | (Fine/Coarse mode) AOD @ $WV nm | — | `AOD_$WV`, `AOD_FINE_$WV`, `AOD_COARSE_$WV` | `GOCART_AOD_$WVnm`, `GOCART_AOD_FINE_$WVnm`, `GOCART_AOD_COARSE_$WVnm` † |
+| `DOD_$WVnm`, `DOD_Fine_$WVnm`, `DOD_Coarse_$WVnm` | (Fine/Coarse mode) Dust Optical Depth @ $WV nm | — | `AOD_DUST_$WV`, `AOD_DUST_FINE_$WV`, `AOD_DUST_COARSE_$WV` | `GOCART_DOD_$WVnm`, `GOCART_DOD_FINE_$WVnm`, `GOCART_DOD_COARSE_$WVnm` † |
+| `SSOD_$WVnm`, `SSOD_Fine_$WVnm`, `SSOD_Coarse_$WVnm` | (Fine/Coarse mode) Sea Salt Optical Depth @ $WV nm | — | `AOD_SEAS_$WV`, `AOD_SEAS_FINE_$WV`, `AOD_SEAS_COARSE_$WV` | `GOCART_SSOD_$WVnm`, `GOCART_SSOD_FINE_$WVnm`, `GOCART_SSOD_COARSE_$WVnm` † |
+
+The optical depths exist for every wavelength `$WV` in `OPTICAL_DEPTH_WAVELENGTHS`
+(355, 440, 500, 532, 550, 665, 870 and 1064nm), e.g. `DOD_Fine_532nm`. Their WRF
+equivalents are the outputs of the extinction operator (the fine/coarse ones need its
+`compute_size_modes`), which computes them for every wavelength of its optical
+properties table: 355, 500, 532, 550 and 1064nm for the shipped tables, so the 440, 665
+and 870nm quantities (retrieved by GRASP) have no model equivalent with those tables.
+
+† Only at the wavelengths of DART's GOCART optical properties table (`GOCART_WAVELENGTHS`
+in `dart.py`: 355, 500, 532, 550 and 1064nm, the same table the extinction operator
+ships); the rest are passed to DART under their own name.
 
 The DART Quantity column reflects `dart.py`'s `OBS_TYPE_TABLE`, which is what
 `to-obs-seq` actually uses. Quantities marked — are passed to DART under their own name,
@@ -410,24 +406,20 @@ half_window_length_minutes = 30  # ±30 minutes around cycle end time
 Most WRF-Ensembly quantities map directly to DART by their quantity name (e.g., `LIDAR_EXTINCTION_355nm`, `SAT_HLOS_WIND`). A small lookup table handles cases where the names differ:
 
 ```python
+GOCART_WAVELENGTHS = (355, 500, 532, 550, 1064)
+
 OBS_TYPE_TABLE = {
-    "AOD_355nm": "AIRSENSE_AOD",
-    "AOD_Fine_355nm": "AIRSENSE_AOD_FINE",
-    "AOD_Coarse_355nm": "AIRSENSE_AOD_COARSE",
-    "AOD_500nm": "AIRSENSE_AOD",
-    "AOD_Fine_500nm": "AIRSENSE_AOD_FINE",
-    "AOD_Coarse_500nm": "AIRSENSE_AOD_COARSE",
-    "AOD_550nm": "AIRSENSE_AOD",
-    "AOD_Fine_550nm": "AIRSENSE_AOD_FINE",
-    "AOD_Coarse_550nm": "AIRSENSE_AOD_COARSE",
+    f"{prefix}{mode}_{wavelength}nm": f"GOCART_{prefix}{mode.upper()}_{wavelength}nm"
+    for wavelength in GOCART_WAVELENGTHS
+    for prefix in ("AOD", "DOD", "SSOD")
+    for mode in ("", "_Fine", "_Coarse")
 }
 ```
 
-The `AIRSENSE_AOD*` types carry no wavelength: DART's GOCART AOD forward operator computes
-AOD at the single wavelength set by `obs_def_GOCART_AOD_nml: wavelength` (default 532nm),
-which must also be present in its optical properties table. Set it to match the
-observations being assimilated; AODs at different wavelengths cannot be assimilated in the
-same experiment.
+i.e. `AOD_355nm` -> `GOCART_AOD_355nm`, `DOD_Fine_532nm` -> `GOCART_DOD_FINE_532nm`, `SSOD_Coarse_1064nm` -> `GOCART_SSOD_COARSE_1064nm` and so on.
+
+DART has one `GOCART_*` type per wavelength of its optical properties table, so optical
+depths at several wavelengths can be assimilated in the same experiment.
 
 ### Building the DART Converter
 
@@ -692,8 +684,7 @@ If your quantity's `dart_quantity` string (from `QuantitySpec`) differs from wha
 
 ```python
 OBS_TYPE_TABLE = {
-    "AOD_500nm": "AIRSENSE_AOD",
-    "AOD_550nm": "AIRSENSE_AOD",
+    ...,  # the GOCART optical depths
     "MY_QUANTITY": "DART_TYPE_NAME",  # add here if names differ
 }
 ```

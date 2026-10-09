@@ -184,6 +184,50 @@ INSTRUMENT_REGISTRY: dict[str, InstrumentSpec] = {
 }
 
 
+# Wavelengths [nm] of the column optical depth quantities. The extinction operator
+# computes the model equivalents for every wavelength of its optical properties table
+# (355, 500, 532, 550 and 1064nm for the shipped ones); the others are only retrieved
+# by some instruments (GRASP) and need a table that covers them.
+OPTICAL_DEPTH_WAVELENGTHS = (355, 440, 500, 532, 550, 665, 870, 1064)
+
+
+def _optical_depth_quantities() -> dict[str, QuantitySpec]:
+    """
+    The aerosol (AOD), dust (DOD) and sea salt (SSOD) optical depths at every
+    wavelength, each in total and for the fine and coarse modes, e.g. `AOD_355nm`,
+    `DOD_Fine_355nm`, `SSOD_Coarse_355nm`. Their model equivalents are named after the
+    extinction operator's outputs, e.g. `AOD_355`, `AOD_DUST_FINE_355`,
+    `AOD_SEAS_COARSE_355`.
+    """
+
+    # (key prefix, label, extinction operator subset)
+    species = (
+        ("AOD", "Aerosol", None),
+        ("DOD", "Dust", "DUST"),
+        ("SSOD", "Sea Salt", "SEAS"),
+    )
+    modes = (
+        ("", "", None),
+        ("_Fine", "Fine mode ", "FINE"),
+        ("_Coarse", "Coarse mode ", "COARSE"),
+    )
+
+    quantities = {}
+    for wavelength in OPTICAL_DEPTH_WAVELENGTHS:
+        for prefix, species_label, species_subset in species:
+            for suffix, mode_label, mode_subset in modes:
+                subsets = [s for s in (species_subset, mode_subset) if s is not None]
+                quantities[f"{prefix}{suffix}_{wavelength}nm"] = QuantitySpec(
+                    label=f"{mode_label}{species_label} Optical Depth @ {wavelength}nm",
+                    units="",
+                    cmap="Oranges",
+                    vmin=0,
+                    vmax=2,
+                    model_equivalent="_".join(["AOD", *subsets, str(wavelength)]),
+                )
+    return quantities
+
+
 QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
     "LIDAR_EXTINCTION_355nm": QuantitySpec(
         label="Lidar Extinction Coefficient @ 355nm",
@@ -191,6 +235,24 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         vmin=0,
         model_equivalent="EXT355",
         dart_quantity="LIDAR_EXTINCTION_355nm",
+        display_units="1/Mm",
+        display_scale=1e6,
+    ),
+    "LIDAR_EXTINCTION_532nm": QuantitySpec(
+        label="Lidar Extinction Coefficient @ 532nm",
+        units="1/m",
+        vmin=0,
+        model_equivalent="EXT532",
+        dart_quantity="LIDAR_EXTINCTION_532nm",
+        display_units="1/Mm",
+        display_scale=1e6,
+    ),
+    "LIDAR_EXTINCTION_1064nm": QuantitySpec(
+        label="Lidar Extinction Coefficient @ 1064nm",
+        units="1/m",
+        vmin=0,
+        model_equivalent="EXT1064",
+        dart_quantity="LIDAR_EXTINCTION_1064nm",
         display_units="1/Mm",
         display_scale=1e6,
     ),
@@ -251,166 +313,7 @@ QUANTITY_REGISTRY: dict[str, QuantitySpec] = {
         ),
         dart_quantity="SAT_HLOS_WIND",
     ),
-    "AOD_355nm": QuantitySpec(
-        label="Aerosol Optical Depth @ 355nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_355",
-    ),
-    "AOD_Fine_355nm": QuantitySpec(
-        label="Fine mode Aerosol Optical Depth @ 355nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_FINE_355",
-    ),
-    "AOD_Coarse_355nm": QuantitySpec(
-        label="Coarse mode Aerosol Optical Depth @ 355nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_COARSE_355",
-    ),
-    "DOD_355nm": QuantitySpec(
-        label="Dust Optical Depth @ 355nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_DUST_355",
-    ),
-    "AOD_440nm": QuantitySpec(
-        label="Aerosol Optical Depth @ 440nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_440",
-    ),
-    "AOD_Fine_440nm": QuantitySpec(
-        label="Fine mode Aerosol Optical Depth @ 440nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_FINE_440",
-    ),
-    "AOD_Coarse_440nm": QuantitySpec(
-        label="Coarse mode Aerosol Optical Depth @ 440nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_COARSE_440",
-    ),
-    "AOD_500nm": QuantitySpec(
-        label="Aerosol Optical Depth @ 500nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_500",
-    ),
-    "AOD_Fine_500nm": QuantitySpec(
-        label="Fine mode Aerosol Optical Depth @ 500nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_FINE_500",
-    ),
-    "AOD_Coarse_500nm": QuantitySpec(
-        label="Coarse mode Aerosol Optical Depth @ 500nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_COARSE_500",
-    ),
-    "AOD_550nm": QuantitySpec(
-        label="Aerosol Optical Depth @ 550nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_550",
-    ),
-    "AOD_Fine_550nm": QuantitySpec(
-        label="Fine mode Aerosol Optical Depth @ 550nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_FINE_550",
-    ),
-    "AOD_Coarse_550nm": QuantitySpec(
-        label="Coarse mode Aerosol Optical Depth @ 550nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_COARSE_550",
-    ),
-    "AOD_665nm": QuantitySpec(
-        label="Aerosol Optical Depth @ 665nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_665",
-    ),
-    "AOD_Fine_665nm": QuantitySpec(
-        label="Fine mode Aerosol Optical Depth @ 665nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_FINE_665",
-    ),
-    "AOD_Coarse_665nm": QuantitySpec(
-        label="Coarse mode Aerosol Optical Depth @ 665nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_COARSE_665",
-    ),
-    "AOD_870nm": QuantitySpec(
-        label="Aerosol Optical Depth @ 870nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_870",
-    ),
-    "AOD_Fine_870nm": QuantitySpec(
-        label="Fine mode Aerosol Optical Depth @ 870nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_FINE_870",
-    ),
-    "AOD_Coarse_870nm": QuantitySpec(
-        label="Coarse mode Aerosol Optical Depth @ 870nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_COARSE_870",
-    ),
-    "AOD_1064nm": QuantitySpec(
-        label="Aerosol Optical Depth @ 1064nm",
-        units="",
-        cmap="Oranges",
-        vmin=0,
-        vmax=2,
-        model_equivalent="AOD_1064",
-    ),
+    **_optical_depth_quantities(),
 }
 
 

@@ -7,16 +7,17 @@ import pandas as pd
 
 from wrf_ensembly.external import ExternalProcess
 
+# Wavelengths [nm] of DART's GOCART optical properties table, which DART has one
+# GOCART_* observation type for each of
+GOCART_WAVELENGTHS = (355, 500, 532, 550, 1064)
+
+# Maps WRF-Ensembly quantities to DART observation types where the names differ, e.g.
+# AOD_355nm -> GOCART_AOD_355nm, DOD_Fine_532nm -> GOCART_DOD_FINE_532nm
 OBS_TYPE_TABLE = {
-    "AOD_355nm": "AIRSENSE_AOD",
-    "AOD_Fine_355nm": "AIRSENSE_AOD_FINE",
-    "AOD_Coarse_355nm": "AIRSENSE_AOD_COARSE",
-    "AOD_500nm": "AIRSENSE_AOD",
-    "AOD_Fine_500nm": "AIRSENSE_AOD_FINE",
-    "AOD_Coarse_500nm": "AIRSENSE_AOD_COARSE",
-    "AOD_550nm": "AIRSENSE_AOD",
-    "AOD_Fine_550nm": "AIRSENSE_AOD_FINE",
-    "AOD_Coarse_550nm": "AIRSENSE_AOD_COARSE",
+    f"{prefix}{mode}_{wavelength}nm": f"GOCART_{prefix}{mode.upper()}_{wavelength}nm"
+    for wavelength in GOCART_WAVELENGTHS
+    for prefix in ("AOD", "DOD", "SSOD")
+    for mode in ("", "_Fine", "_Coarse")
 }
 
 
