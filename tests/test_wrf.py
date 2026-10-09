@@ -148,7 +148,7 @@ def test_wrfinput_mode_keeps_restart_settings(tmp_path: Path):
 
 
 def make_long_wrfbdy(
-    path: Path, n_records: int, interval_h: int = 6
+    path: Path, n_records: int, interval_h: int = 6, record_chunk: int = 1
 ) -> list[dt.datetime]:
     """A minimal wrfbdy with `n_records` records starting at 2026-03-01 12:00"""
 
@@ -167,7 +167,13 @@ def make_long_wrfbdy(
             var = ds.createVariable(name, "S1", ("Time", "DateStrLen"))
             for i, t in enumerate(values):
                 update_bc.write_wrf_time(var, i, t)
-        mu = ds.createVariable("MU_BXS", "f4", ("Time", "bdy_width"), zlib=True)
+        mu = ds.createVariable(
+            "MU_BXS",
+            "f4",
+            ("Time", "bdy_width"),
+            zlib=True,
+            chunksizes=(record_chunk, 1),
+        )
         mu.units = "Pa"
         mu[:] = np.arange(n_records * 2).reshape(n_records, 2)
     return times
@@ -187,6 +193,34 @@ def test_extract_boundary_records_for_a_cycle(tmp_path: Path):
         assert ds["MU_BXS"].units == "Pa"
         assert ds["MU_BXS"].filters()["zlib"]
         assert ds.START_DATE == "2026-03-02_00:00:00"
+
+
+@pytest.mark.parametrize("record_chunk", [1, 4])
+def test_extract_boundary_records_copies_chunks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, record_chunk: int
+):
+    # One record per chunk: the compressed chunks are copied. Otherwise the records are
+    # recompressed, with the same result.
+    times = make_long_wrfbdy(tmp_path / "long", 6, record_chunk=record_chunk)
+    copied = []
+    copy_record_chunks = wrf._copy_record_chunks
+    monkeypatch.setattr(
+        wrf,
+        "_copy_record_chunks",
+        lambda *args: copied.append(copy_record_chunks(*args)) or copied[-1],
+    )
+
+    n = wrf.extract_boundary_records(
+        tmp_path / "long", tmp_path / "out", times[1], times[4]
+    )
+
+    assert n == 3
+    assert copied == [record_chunk == 1]
+    with netCDF4.Dataset(tmp_path / "out") as ds:
+        assert len(ds.dimensions["Time"]) == 3
+        assert update_bc.parse_wrf_times(ds[update_bc.THIS_BDY_TIME]) == times[1:4]
+        np.testing.assert_array_equal(ds["MU_BXS"][:], [[2, 3], [4, 5], [6, 7]])
+        assert ds["MU_BXS"].chunking() == [record_chunk, 1]
 
 
 def test_extract_boundary_records_partial_intervals(tmp_path: Path):

@@ -1,9 +1,12 @@
+import itertools
+import math
 import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import cartopy.crs as ccrs
+import h5py
 import netCDF4
 import pyproj
 import xarray as xr
@@ -354,6 +357,7 @@ def extract_boundary_records(
             shutil.copy(src, dest)
             return last - first
 
+        record_vars = []
         with netCDF4.Dataset(dest, "w", format=ds_src.data_model) as ds_dest:  # type: ignore
             ds_dest.setncatts({a: ds_src.getncattr(a) for a in ds_src.ncattrs()})
             ds_dest.START_DATE = this_times[first].strftime("%Y-%m-%d_%H:%M:%S")
@@ -375,9 +379,87 @@ def extract_boundary_records(
                     chunksizes=None if chunking == "contiguous" else chunking,
                 )
                 out.setncatts({a: var.getncattr(a) for a in var.ncattrs()})
-                out[:] = var[first:last]
+                if (
+                    var.dimensions
+                    and ds_src.dimensions[var.dimensions[0]].isunlimited()
+                ):
+                    record_vars.append(name)
+                else:
+                    out[:] = var[:]
+
+        # Copying the compressed chunks is much faster than recompressing the records
+        if not _copy_record_chunks(src, dest, record_vars, first, last):
+            logger.debug(f"Can't copy the chunks of {src}, recompressing the records")
+            with netCDF4.Dataset(dest, "a") as ds_dest:  # type: ignore
+                for name in record_vars:
+                    ds_dest[name][:] = ds_src[name][first:last]
 
     return last - first
+
+
+def _copy_record_chunks(
+    src: Path, dest: Path, names: list[str], first: int, last: int
+) -> bool:
+    """
+    Copies records `first:last` of the variables `names` from `src` into `dest` as
+    compressed chunks, without decompressing them. `dest` must have the variables
+    already, without any records.
+
+    Only possible for netCDF4 files where each chunk holds one record and the variables
+    have the same chunking and filters in both files. Returns False, before changing
+    `dest`, if that's not the case.
+    """
+
+    if not names:
+        return True
+    if not (h5py.is_hdf5(src) and h5py.is_hdf5(dest)):
+        return False
+
+    with h5py.File(src, "r") as h_src, h5py.File(dest, "r+") as h_dest:
+        pairs = []
+        for name in names:
+            var_src, var_dest = h_src.get(name), h_dest.get(name)
+            if not (
+                isinstance(var_src, h5py.Dataset)
+                and isinstance(var_dest, h5py.Dataset)
+                and var_src.chunks is not None
+                and var_src.chunks[0] == 1
+                and var_src.chunks == var_dest.chunks
+                and var_src.shape[1:] == var_dest.shape[1:]
+                and var_src.dtype == var_dest.dtype
+                and _hdf5_filters(var_src) == _hdf5_filters(var_dest)
+            ):
+                return False
+            # Chunks that were never written read as the fill value, but can't be copied
+            n_chunks = math.prod(
+                math.ceil(size / chunk)
+                for size, chunk in zip(var_src.shape, var_src.chunks)
+            )
+            if var_src.id.get_num_chunks() != n_chunks:
+                return False
+            pairs.append((var_src, var_dest))
+
+        for var_src, var_dest in pairs:
+            var_dest.resize(last - first, axis=0)
+            offsets = itertools.product(
+                range(first, last),
+                *(
+                    range(0, size, chunk)
+                    for size, chunk in zip(var_src.shape[1:], var_src.chunks[1:])
+                ),
+            )
+            for t, *rest in offsets:
+                mask, data = var_src.id.read_direct_chunk((t, *rest))
+                var_dest.id.write_direct_chunk((t - first, *rest), data, mask)
+
+    return True
+
+
+def _hdf5_filters(var: h5py.Dataset) -> list[tuple]:
+    """The filter pipeline of an HDF5 dataset, as (id, flags, parameters) per filter"""
+
+    plist = var.id.get_create_plist()
+    return [plist.get_filter(i)[:3] for i in range(plist.get_nfilters())]
 
 
 def _create_proj_crs(domain: DomainControlConfig):
@@ -453,6 +535,7 @@ def get_wrf_cartopy_crs(domain: DomainControlConfig):
         central_latitude=domain.ref_lat,
         standard_parallels=(domain.truelat1, domain.truelat2),
     )
+
 
 def get_wrf_cartopy_crs_from_ds_attrs(ds: xr.Dataset):
     """
