@@ -203,6 +203,17 @@ def test_extract_boundary_records_partial_intervals(tmp_path: Path):
         assert update_bc.parse_wrf_times(ds[update_bc.THIS_BDY_TIME]) == times[1:3]
 
 
+def test_extract_boundary_records_all_records_copies_the_file(tmp_path: Path):
+    times = make_long_wrfbdy(tmp_path / "long", 4)
+
+    n = wrf.extract_boundary_records(
+        tmp_path / "long", tmp_path / "out", times[0], times[-1]
+    )
+
+    assert n == 4
+    assert (tmp_path / "out").read_bytes() == (tmp_path / "long").read_bytes()
+
+
 def test_extract_boundary_records_outside_the_file(tmp_path: Path):
     times = make_long_wrfbdy(tmp_path / "long", 2)
 

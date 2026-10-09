@@ -1,3 +1,4 @@
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -314,7 +315,7 @@ def extract_boundary_records(
 
     Used in the restart cycling mode, where real.exe makes one wrfbdy for the whole
     experiment and each member gets the part its cycle needs. `update_bc` then modifies
-    the member's copy.
+    the member's copy. If all records are needed, the file is copied as is.
 
     Args:
         src: The wrfbdy to read from
@@ -347,6 +348,12 @@ def extract_boundary_records(
         first, last = records[0], records[-1] + 1
 
         dest.unlink(missing_ok=True)
+        if first == 0 and last == len(this_times):
+            # All records are needed (e.g. a segment covering the whole experiment), so
+            # copy the file instead of decompressing and recompressing every variable
+            shutil.copy(src, dest)
+            return last - first
+
         with netCDF4.Dataset(dest, "w", format=ds_src.data_model) as ds_dest:  # type: ignore
             ds_dest.setncatts({a: ds_src.getncattr(a) for a in ds_src.ncattrs()})
             ds_dest.START_DATE = this_times[first].strftime("%Y-%m-%d_%H:%M:%S")
