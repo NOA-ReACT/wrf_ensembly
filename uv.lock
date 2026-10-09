@@ -2819,7 +2819,7 @@ wheels = [
 
 [[package]]
 name = "wrf-ensembly"
-version = "1.10.0"
+version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "cartopy" },
@@ -2878,7 +2878,7 @@ requires-dist = [
     { name = "dask", specifier = ">=2025.9.1" },
     { name = "dataclass-binder", specifier = ">=0.3.4" },
     { name = "duckdb", specifier = ">=1.4.0" },
-    { name = "interpolator-for-wrfchem", specifier = "==1.11.0" },
+    { name = "interpolator-for-wrfchem", specifier = "==1.12.0" },
     { name = "ipykernel", marker = "extra == 'dev'", specifier = ">=6.29.5" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "mashumaro", extras = ["toml"], specifier = ">=3.15" },
