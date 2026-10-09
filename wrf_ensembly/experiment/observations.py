@@ -360,7 +360,10 @@ class ExperimentObservations:
             ]
             df = pd.concat(parts)
 
-        # Apply thinning (after superobbing): spatial lattice first, then time stride
+        # Apply thinning (after superobbing): spatial lattice first, then time stride.
+        # Superobs and time bins are new rows without the helper column, so rebuild it,
+        # or thinning would silently skip every binned pair.
+        df["instrument_quantity"] = df["instrument"] + "." + df["quantity"]
         thinning_keys = set(df["instrument_quantity"].unique()) & set(
             self.cfg.observations.thinning.keys()
         )

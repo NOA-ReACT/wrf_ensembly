@@ -30,7 +30,7 @@ def gridded_obs(ny: int, nx: int, filename: str = "slot_1200.parquet") -> pd.Dat
                 for a, b in zip(iy, ix)
             ],
             "orig_filename": filename,
-            "metadata": [{} for _ in iy],
+            "metadata": [{"model_id": "test"} for _ in iy],
         }
     )
 
@@ -94,3 +94,33 @@ def test_config_validation():
         ThinningConfig(hoz_strides={"x_bin": 4}, hoz_offsets={"x_bin": 4})
     with pytest.raises(ValueError, match="keep_every_n"):
         ThinningConfig(keep_every_n=0)
+
+
+def test_add_thins_superobs(tmp_path):
+    """Superobbing builds new rows, thinning must still find their pair (regression)"""
+    from types import SimpleNamespace
+
+    import duckdb
+
+    from wrf_ensembly.config import ObservationsConfig, SuperObsConfig
+    from wrf_ensembly.experiment.observations import ExperimentObservations
+    from wrf_ensembly.observations import io
+
+    path = tmp_path / "slot_1200.parquet"
+    io.write_obs(gridded_obs(20, 30), path)
+    cfg = SimpleNamespace(
+        observations=ObservationsConfig(
+            superobs={"MTG_REACT.DOD_355nm": SuperObsConfig({"y": 5, "x": 5}, {}, False)},
+            thinning={"MTG_REACT.DOD_355nm": ThinningConfig(hoz_strides={"y_bin": 2, "x_bin": 3})},
+        )
+    )
+    paths = SimpleNamespace(obs_db=tmp_path / "observations.duckdb")
+
+    assert ExperimentObservations(cfg, [], paths).add_observation_file(path) == 24
+
+    con = duckdb.connect(str(paths.obs_db), read_only=True)
+    kept = con.execute(
+        "SELECT orig_coords.indices[1], orig_coords.indices[2] FROM observations "
+        "WHERE qc_flag = 0 ORDER BY 1, 2"
+    ).fetchall()
+    assert kept == [(0, 0), (0, 3), (2, 0), (2, 3)]
