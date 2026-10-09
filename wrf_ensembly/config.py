@@ -434,6 +434,19 @@ class SuperObsConfig:
     stays at rms(individual errors) — averaging correlated errors does not reduce them.
     """
 
+    valid_fraction: float = 0.0
+    """
+    Minimum share of a full bin (the product of the bin sizes) that must hold valid
+    observations. Superobs from fewer are kept but flagged qc_flag=1, so partly filled
+    bins (coasts, swath edges, domain edges) don't enter the DA as full ones. 0 keeps all.
+    """
+
+    def __post_init__(self):
+        if not 0.0 <= self.valid_fraction <= 1.0:
+            raise ValueError(
+                f"superobs valid_fraction must be in [0, 1], got {self.valid_fraction}"
+            )
+
 
 @dataclass
 class ThinningConfig:

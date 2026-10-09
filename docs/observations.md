@@ -341,11 +341,14 @@ Groups observations into spatial bins defined by their original array dimensions
 
 The sqrt(n) reduction assumes the errors of the observations inside a bin are independent. For products where they are correlated — e.g. retrievals that are horizontally smoothed at scales larger than the bin, like EarthCARE ATLID EBD — set `reduce_instrument_error = false`: averaging correlated errors does not reduce them, so the superob keeps the rms of the individual errors as its instrument error component.
 
+Observations without a value (e.g. those outside the domain, which trimming sets to NaN) are left out of the superob: they don't count towards `n` or move its location, and a bin with none makes no superob. `valid_fraction` sets the minimum share of a full bin (the product of the bin sizes) that must hold valid observations. Superobs below it are kept but flagged `qc_flag = 1`, so partly filled bins at coasts or swath and domain edges don't enter the DA as full ones.
+
 ```toml
 [observations.superobs."AEOLUS_L2A_MLE.LIDAR_EXTINCTION_355nm"]
 hoz_bin_sizes = {profile = 5}       # Bin every 5 profiles together
 vert_bin_sizes = {height_bin = 2}   # Bin every 2 height levels together
 reduce_instrument_error = false     # In-bin errors are correlated: no sqrt(n) reduction
+valid_fraction = 0.6                # At least 6 of the 10 observations, or qc_flag = 1
 ```
 
 ### Temporal Binning (`temporal_binning`)
@@ -374,6 +377,7 @@ keep_every_n = 3    # Keep 1 in 3 observations for assimilation
 hoz_bin_sizes = { y = 5, x = 5 }
 vert_bin_sizes = {}
 reduce_instrument_error = false
+valid_fraction = 0.6
 
 [observations.thinning."MTG_REACT.DOD_355nm"]
 hoz_strides = { y_bin = 4, x_bin = 4 }

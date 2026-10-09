@@ -37,9 +37,15 @@ def _aggregate_group(
     bin_indices: tuple[int, ...],
     dim_names: tuple[str, ...],
     reduce_instrument_error: bool = True,
+    bin_capacity: int = 1,
+    valid_fraction: float = 0.0,
 ) -> pd.Series | None:
     """
     Collapse one bin group into a single superob row, preserving the full schema.
+
+    Observations without a value (e.g. the ones outside the domain, which trimming sets
+    to NaN) don't take part: they would otherwise move the superob's location and time
+    away from where its value comes from, and inflate `n`.
 
     Params:
         group: Should contain all observations inside the bin
@@ -52,6 +58,12 @@ def _aggregate_group(
             instrument error by sqrt(n). True assumes independent in-bin errors;
             set False when they are correlated (e.g. horizontally smoothed
             retrievals), in which case averaging does not reduce the error.
+        bin_capacity: How many observations a full bin holds (the product of the
+            bin sizes).
+        valid_fraction: Minimum share of `bin_capacity` that must be aggregated
+            observations. Below it, the superob is kept but flagged qc_flag=1, so a
+            bin with a few pixels (e.g. at a coast) doesn't enter the DA with the same
+            weight as a full one.
 
     Uncertainty model:
         instrument_err = rms(individual errors) / sqrt(n)   [reduce_instrument_error]
@@ -60,11 +72,15 @@ def _aggregate_group(
         total_err      = sqrt(instrument_err^2 + repr_err^2)
 
     Return:
-        One row representing the superob or None if the given group has no data that pass the QC check
+        One row representing the superob, or None if no observation in the bin has a value
     """
 
     # Sanity check
     assert len(bin_indices) == len(new_shape)
+
+    group = group[group["value"].notna()]
+    if group.empty:
+        return None
 
     # Prefer good-QC observations; fall back to all observations with qc_flag=1
     good = group[group["qc_flag"] == 0]
@@ -76,6 +92,8 @@ def _aggregate_group(
         qc = 1
 
     n = len(agg_group)
+    if n < valid_fraction * bin_capacity:
+        qc = max(qc, 1)
     first = agg_group.iloc[0]
 
     # Deal with value and uncertainty
@@ -141,6 +159,7 @@ def grid_bin(
     hoz_bins: dict[str, int],
     vert_bins: dict[str, int],
     reduce_instrument_error: bool = True,
+    valid_fraction: float = 0.0,
 ) -> pd.DataFrame:
     """
     Bin a dataframe along its native instrument grid dimensions.
@@ -160,9 +179,12 @@ def grid_bin(
         reduce_instrument_error: Whether the superob instrument error is reduced
             by sqrt(n). Set False when in-bin errors are correlated (e.g.
             smoothed retrievals); see `_aggregate_group`.
+        valid_fraction: Superobs built from fewer than this share of a full bin's
+            observations are flagged qc_flag=1; see `_aggregate_group`.
 
     Returns:
-        pd.DataFrame with the same schema as the input, one row per superob.
+        pd.DataFrame with the same schema as the input, one row per superob. Bins in
+        which no observation has a value produce no superob.
 
     Raises:
         ValueError: If the observations have already been binned.
@@ -205,6 +227,7 @@ def grid_bin(
         group_cols.append(label)
 
     dim_names = tuple(hoz_dim_names + vert_dim_names)
+    bin_capacity = int(np.prod([*hoz_bins.values(), *vert_bins.values()]))
 
     # Each source file describes its own grid, so the binned extent is per file.
     new_shapes = {
@@ -225,6 +248,8 @@ def grid_bin(
             bin_indices,
             dim_names,
             reduce_instrument_error,
+            bin_capacity,
+            valid_fraction,
         )
         if superob is not None:
             rows.append(superob)

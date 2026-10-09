@@ -124,3 +124,47 @@ def test_add_thins_superobs(tmp_path):
         "WHERE qc_flag = 0 ORDER BY 1, 2"
     ).fetchall()
     assert kept == [(0, 0), (0, 3), (2, 0), (2, 3)]
+
+
+def test_superobs_ignore_observations_without_a_value():
+    """Trimming sets out-of-domain pixels to NaN; they must not shape the superob"""
+    obs = gridded_obs(5, 10)  # two 5x5 bins
+    first_bin = obs["orig_coords"].map(lambda oc: oc["indices"][1] < 5)
+    outside = first_bin & obs["orig_coords"].map(lambda oc: oc["indices"][0] >= 2)
+    obs.loc[outside, ["value", "value_uncertainty"]] = np.nan
+    obs.loc[~first_bin, ["value", "value_uncertainty"]] = np.nan  # second bin all NaN
+
+    superobs = grid_bin(obs, {"y": 5, "x": 5}, {}, False)
+
+    assert len(superobs) == 1  # the all-NaN bin makes no superob
+    so = superobs.iloc[0]
+    valid = obs[first_bin & ~outside]
+    assert so["metadata"]["superob"]["n_contributing"] == len(valid) == 10
+    assert so["latitude"] == pytest.approx(valid["latitude"].mean())
+    assert so["value"] == pytest.approx(valid["value"].mean())
+    assert np.isfinite(so["value_uncertainty"])
+
+
+def test_single_valid_observation_keeps_an_error():
+    obs = gridded_obs(5, 5)
+    obs.loc[obs.index[1:], ["value", "value_uncertainty"]] = np.nan
+    so = grid_bin(obs, {"y": 5, "x": 5}, {}, False).iloc[0]
+    assert so["metadata"]["superob"]["n_contributing"] == 1
+    assert np.isfinite(so["value_uncertainty"])
+
+
+@pytest.mark.parametrize("n_valid, qc", [(14, 1), (15, 0), (25, 0)])
+def test_valid_fraction_flags_partly_filled_bins(n_valid, qc):
+    obs = gridded_obs(5, 5)
+    obs.loc[obs.index[n_valid:], ["value", "value_uncertainty"]] = np.nan
+    so = grid_bin(obs, {"y": 5, "x": 5}, {}, False, valid_fraction=0.6).iloc[0]
+    assert so["qc_flag"] == qc
+    assert so["metadata"]["superob"]["n_contributing"] == n_valid
+
+
+def test_valid_fraction_config_validation():
+    from wrf_ensembly.config import SuperObsConfig
+
+    assert SuperObsConfig({"y": 5}, {}, valid_fraction=0.6).valid_fraction == 0.6
+    with pytest.raises(ValueError, match="valid_fraction"):
+        SuperObsConfig({"y": 5}, {}, valid_fraction=1.5)

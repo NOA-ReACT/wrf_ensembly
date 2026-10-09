@@ -307,6 +307,7 @@ class ExperimentObservations:
                     superob_options.hoz_bin_sizes,
                     superob_options.vert_bin_sizes,
                     superob_options.reduce_instrument_error,
+                    superob_options.valid_fraction,
                 )
                 print(
                     f"{iq}: Generated {len(group)} superobs from {before_n} observations."

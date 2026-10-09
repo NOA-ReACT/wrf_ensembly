@@ -332,6 +332,8 @@ Superobbing merges nearby observations into one. Configure per `instrument.quant
 |-------|------|-------------|
 | `hoz_bin_sizes` | dict | Horizontal dimension bin sizes (dimension name → bin length) |
 | `vert_bin_sizes` | dict | Vertical dimension bin sizes (dimension name → bin length) |
+| `reduce_instrument_error` | bool | Reduce the instrument error by √n; false for correlated in-bin errors. *Default: true* |
+| `valid_fraction` | float | Minimum share of a full bin with valid observations; superobs below it get `qc_flag = 1`. *Default: 0* |
 
 ### Thinning
 
