@@ -375,3 +375,52 @@ def stride_thin(df: pd.DataFrame, n: int) -> pd.DataFrame:
     df.loc[holdout_idx, "qc_flag"] = QC_VALIDATION_HOLDOUT
 
     return df
+
+
+def spatial_thin(
+    df: pd.DataFrame, strides: dict[str, int], offsets: dict[str, int] | None = None
+) -> pd.DataFrame:
+    """
+    Thin observations to a regular lattice on their native grid.
+
+    A good-QC observation stays for DA only when, along every dimension in `strides`,
+    its `orig_coords` index minus the offset is a multiple of the stride. The rest are
+    marked qc_flag = QC_VALIDATION_HOLDOUT, so they remain available for validation.
+    Bad-QC observations are left unchanged. Native indices restart in every source
+    file, so the lattice is per file.
+
+    Unlike `stride_thin`, this guarantees a minimum spacing of `stride` grid steps
+    between the kept observations, which is what matters when their errors are
+    spatially correlated.
+
+    Parameters:
+        df: Observations for a single (instrument, quantity) pair.
+        strides: Stride per dimension name in `orig_coords` (e.g. `{"y_bin": 4}`).
+        offsets: Offset per dimension, in [0, stride). Missing dimensions use 0.
+
+    Returns:
+        pd.DataFrame with same schema, same number of rows.
+
+    Raises:
+        ValueError: If an observation's `orig_coords` lack one of the dimensions.
+    """
+    df = df.copy()
+    if df.empty or not strides:
+        return df
+    offsets = offsets or {}
+
+    keep = np.ones(len(df), dtype=bool)
+    for dim, stride in strides.items():
+        idx = np.empty(len(df), dtype=np.int64)
+        for i, oc in enumerate(df["orig_coords"]):
+            names = list(oc["names"])
+            if dim not in names:
+                raise ValueError(
+                    f"Cannot thin along '{dim}': observations have dimensions {names}"
+                )
+            idx[i] = oc["indices"][names.index(dim)]
+        keep &= (idx - offsets.get(dim, 0)) % stride == 0
+
+    holdout = (df["qc_flag"] == 0).to_numpy() & ~keep
+    df.loc[holdout, "qc_flag"] = QC_VALIDATION_HOLDOUT
+    return df

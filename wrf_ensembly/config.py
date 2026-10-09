@@ -437,10 +437,40 @@ class SuperObsConfig:
 
 @dataclass
 class ThinningConfig:
-    """Configuration for stride thinning of one instrument/quantity pair."""
+    """
+    Configuration for thinning one instrument/quantity pair. Observations not kept for
+    DA become validation hold-outs (qc_flag = -1). With both options set, the spatial
+    stride is applied first and `keep_every_n` to what it kept.
+    """
 
-    keep_every_n: int
-    """Keep every N-th good-QC observation for DA; the rest become validation hold-outs (qc_flag = -1)."""
+    keep_every_n: int = 1
+    """Keep every N-th good-QC observation, in time order. 1 keeps all."""
+
+    hoz_strides: dict[str, int] = field(default_factory=dict)
+    """
+    Spatial stride per native grid dimension, i.e. the names in `orig_coords`. After
+    superobbing these carry a `_bin` suffix (e.g. `{ y_bin = 4, x_bin = 4 }`). An
+    observation is kept only when its index along every listed dimension is a multiple
+    of the stride (plus the offset), so the kept ones form a regular lattice with a
+    minimum spacing of `stride` grid steps.
+    """
+
+    hoz_offsets: dict[str, int] = field(default_factory=dict)
+    """Offset of the kept lattice per dimension, in [0, stride). Defaults to 0."""
+
+    def __post_init__(self):
+        if self.keep_every_n < 1:
+            raise ValueError(f"thinning keep_every_n must be >= 1, got {self.keep_every_n}")
+        for dim, stride in self.hoz_strides.items():
+            if stride < 1:
+                raise ValueError(f"thinning hoz_strides.{dim} must be >= 1, got {stride}")
+        for dim, offset in self.hoz_offsets.items():
+            if dim not in self.hoz_strides:
+                raise ValueError(f"thinning hoz_offsets.{dim} has no matching hoz_strides entry")
+            if not 0 <= offset < self.hoz_strides[dim]:
+                raise ValueError(
+                    f"thinning hoz_offsets.{dim} must be in [0, {self.hoz_strides[dim]}), got {offset}"
+                )
 
 
 @dataclass
@@ -477,7 +507,7 @@ class ObservationsConfig:
 
     thinning: dict[str, ThinningConfig] = field(default_factory=dict)
     """
-    Stride thinning configuration per instrument and quantity.
+    Thinning configuration (time-order and/or spatial stride) per instrument and quantity.
     The key is the `instrument.quantity` string, e.g. `AEOLUS_L2B_MIE.HLOS_WIND`.
     The value is a `ThinningConfig` instance.
     Thinning is applied after superobbing. Good-QC observations not selected for DA

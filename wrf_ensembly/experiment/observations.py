@@ -13,7 +13,7 @@ from wrf_ensembly.config import Config
 from wrf_ensembly.console import logger
 from wrf_ensembly.cycling import CycleInformation, cycles_to_dataframe
 from wrf_ensembly.experiment.paths import ExperimentPaths
-from wrf_ensembly.superobs import grid_bin, stride_thin, time_bin
+from wrf_ensembly.superobs import grid_bin, spatial_thin, stride_thin, time_bin
 
 
 @dataclass
@@ -360,7 +360,7 @@ class ExperimentObservations:
             ]
             df = pd.concat(parts)
 
-        # Apply stride thinning (after superobbing)
+        # Apply thinning (after superobbing): spatial lattice first, then time stride
         thinning_keys = set(df["instrument_quantity"].unique()) & set(
             self.cfg.observations.thinning.keys()
         )
@@ -370,11 +370,17 @@ class ExperimentObservations:
                 group = df.loc[df["instrument_quantity"] == iq].copy()
                 thin_opts = self.cfg.observations.thinning[iq]
                 before_good = (group["qc_flag"] == 0).sum()
-                group = stride_thin(group, thin_opts.keep_every_n)
+                if thin_opts.hoz_strides:
+                    group = spatial_thin(
+                        group, thin_opts.hoz_strides, thin_opts.hoz_offsets
+                    )
+                if thin_opts.keep_every_n > 1:
+                    group = stride_thin(group, thin_opts.keep_every_n)
                 after_good = (group["qc_flag"] == 0).sum()
                 print(
                     f"{iq}: Thinned to {after_good} DA obs from {before_good} good-QC obs "
-                    f"(keep_every_n={thin_opts.keep_every_n})."
+                    f"(hoz_strides={thin_opts.hoz_strides}, "
+                    f"keep_every_n={thin_opts.keep_every_n})."
                 )
                 parts.append(group)
             df = pd.concat(parts)

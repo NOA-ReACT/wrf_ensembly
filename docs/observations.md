@@ -358,13 +358,26 @@ bin_minutes = 60        # 60-minute windows
 offset_minutes = -30    # Shift bins to be centered on full hours (:30 to :30)
 ```
 
-### Stride Thinning (`thinning`)
+### Thinning (`thinning`)
 
-Keeps every N-th good-QC observation for DA; the others are marked `qc_flag = -1` (validation hold-out) and remain in the database. Applied after superobbing.
+Selects which good-QC observations go to DA; the others are marked `qc_flag = -1` (validation hold-out) and remain in the database. Applied after superobbing. Two options, which can be combined (spatial first):
+
+- `keep_every_n`: keeps every N-th good-QC observation in time order. Good for profiles or along-track data.
+- `hoz_strides`: keeps the observations whose native grid index along each listed dimension is a multiple of the stride, i.e. a regular lattice with a guaranteed minimum spacing. Use it for gridded products with spatially correlated errors, where nearby observations would be double-counted by a diagonal R. The dimension names are those in `orig_coords`; after superobbing they carry a `_bin` suffix. `hoz_offsets` shifts the lattice (each in `[0, stride)`). The lattice restarts in every source file, since native indices do.
 
 ```toml
 [observations.thinning."AEOLUS_L2B_MIE.HLOS_WIND"]
 keep_every_n = 3    # Keep 1 in 3 observations for assimilation
+
+# 5x5 superobs of a 0.05 deg grid (~25 km), keeping one every 4 bins (~100 km)
+[observations.superobs."MTG_REACT.DOD_355nm"]
+hoz_bin_sizes = { y = 5, x = 5 }
+vert_bin_sizes = {}
+reduce_instrument_error = false
+
+[observations.thinning."MTG_REACT.DOD_355nm"]
+hoz_strides = { y_bin = 4, x_bin = 4 }
+hoz_offsets = { y_bin = 0, x_bin = 0 }   # optional
 ```
 
 ## Cycle Preparation
@@ -465,7 +478,7 @@ keep_every_n = 3
 | `error_inflation_factor` | `{str: float}` | `{}` | Per-instrument.quantity error multiplier |
 | `superobs` | `{str: SuperObsConfig}` | `{}` | Spatial superobbing per instrument.quantity |
 | `temporal_binning` | `{str: TemporalBinConfig}` | `{}` | Temporal binning per instrument.quantity |
-| `thinning` | `{str: ThinningConfig}` | `{}` | Stride thinning per instrument.quantity |
+| `thinning` | `{str: ThinningConfig}` | `{}` | Time-order and/or spatial stride thinning per instrument.quantity |
 
 ## Validation
 

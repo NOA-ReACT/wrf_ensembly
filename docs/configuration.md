@@ -321,7 +321,7 @@ offset_minutes = -30
 | `boundary_error_factor` | float | Factor to inflate observation errors near the boundary. *Default: 2.5* |
 | `boundary_error_width` | float | Width in grid points where boundary error inflation is applied. Set to 0 to disable. *Default: 1.0* |
 | `superobs` | dict | Superobservation configuration per `instrument.quantity` pair |
-| `thinning` | dict | Stride thinning configuration per `instrument.quantity` pair |
+| `thinning` | dict | Thinning configuration (time-order or spatial stride) per `instrument.quantity` pair |
 | `temporal_binning` | dict | Temporal binning configuration per `instrument.quantity` pair |
 
 ### Superobservations
@@ -333,13 +333,15 @@ Superobbing merges nearby observations into one. Configure per `instrument.quant
 | `hoz_bin_sizes` | dict | Horizontal dimension bin sizes (dimension name → bin length) |
 | `vert_bin_sizes` | dict | Vertical dimension bin sizes (dimension name → bin length) |
 
-### Stride Thinning
+### Thinning
 
-Keeps every N-th good-QC observation; the rest become validation hold-outs (`qc_flag = -1`). Applied after superobbing.
+Selects the good-QC observations used for DA; the rest become validation hold-outs (`qc_flag = -1`). Applied after superobbing; with both options set, the spatial stride is applied first.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `keep_every_n` | int | Keep every N-th good-QC observation |
+| `keep_every_n` | int | Keep every N-th good-QC observation, in time order. *Default: 1* |
+| `hoz_strides` | dict | Native grid dimension (as in `orig_coords`, `_bin` suffix after superobbing) → stride. Keeps a regular lattice with a minimum spacing of `stride` grid steps. *Default: {}* |
+| `hoz_offsets` | dict | Dimension → lattice offset in `[0, stride)`. *Default: 0* |
 
 ### Temporal Binning
 
