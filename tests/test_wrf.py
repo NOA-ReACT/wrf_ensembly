@@ -287,3 +287,18 @@ def test_wrfout_time():
         2021, 1, 2, 6, tzinfo=dt.timezone.utc
     )
     assert wrf.wrfout_time("wrfrst_d01_2021-01-02_06:30:00").minute == 30
+
+
+def test_cartopy_crs_matches_the_observation_projection():
+    """Map plots draw obs x/y in the cartopy CRS, so both must use WRF's sphere"""
+    import cartopy.crs as ccrs
+
+    domain = config.DomainControlConfig(
+        xy_resolution=(27, 27), xy_size=(280, 150), projection="lambert",
+        ref_lat=31.67, ref_lon=5.15, truelat1=34, truelat2=34, stand_lon=8.0,
+    )
+    lon, lat = np.meshgrid(np.linspace(-30, 50, 9), np.linspace(10, 50, 9))
+    x, y = wrf.get_wrf_proj_transformer(domain).transform(lon, lat)
+    p = wrf.get_wrf_cartopy_crs(domain).transform_points(ccrs.PlateCarree(), lon, lat)
+    np.testing.assert_allclose(p[..., 0], x, atol=1.0)
+    np.testing.assert_allclose(p[..., 1], y, atol=1.0)

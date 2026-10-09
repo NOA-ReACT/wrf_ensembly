@@ -10,6 +10,8 @@ import pandas as pd
 import xarray as xr
 from matplotlib.axes import Axes
 from matplotlib.collections import PolyCollection
+from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.lines import Line2D
 from matplotlib.figure import Figure
 
 from wrf_ensembly.observations.utils import reconstruct_array
@@ -508,9 +510,114 @@ def plot_observation_locations_on_map(
         )
 
     if domain_bounds is not None:
-        ax.set_extent(domain_bounds, crs=ccrs.PlateCarree())
+        ax.set_extent(domain_bounds, crs=proj or ccrs.PlateCarree())
 
     return fig
+
+
+# Status of an observation in a cycle, by qc_flag: what the filter gets, what thinning
+# held out for validation, and what QC (or a missing error) rejected
+_STATUS = [
+    ("assimilated", lambda qc: qc == 0, "#2a78d6"),
+    ("held out (thinning)", lambda qc: qc == -1, "#a8a7a1"),
+    ("rejected (QC)", lambda qc: qc > 0, "#eb6834"),
+]
+_SEQUENTIAL = LinearSegmentedColormap.from_list(
+    "seq_blue", ["#cde2fb", "#86b6ef", "#3987e5", "#256abf", "#184f95", "#0d366b"]
+)
+_DIVERGING = LinearSegmentedColormap.from_list(
+    "div_blue_red", ["#184f95", "#6da7ec", "#f0efec", "#ec8a85", "#b42a2a"]
+)
+
+
+def _marker_size(n: int) -> float:
+    """Smaller markers for denser fields, so a full swath still reads as a field"""
+    return float(np.clip(4e4 / max(n, 1), 0.5, 25))
+
+
+def plot_cycle_observations(
+    observations: pd.DataFrame,
+    proj: ccrs.Projection,
+    domain_bounds: tuple[float, float, float, float] | None = None,
+    title: str = "",
+) -> Figure:
+    """
+    Quick look at one instrument/quantity in one cycle, on the WRF domain.
+
+    Panels: (a) values and (b) errors of the assimilated observations (qc_flag = 0),
+    (c) the status of every observation in the window (assimilated, held out by
+    thinning, rejected by QC), and (d) O - B of the assimilated ones when the DB has
+    `model_forecast` for them.
+
+    Points are drawn at their projected `x`/`y`, so `proj` must be the domain's CRS
+    from `wrf.get_wrf_cartopy_crs` and `domain_bounds` in its units.
+    """
+
+    df = observations
+    qc = df["qc_flag"].to_numpy()
+    da = df[qc == 0]
+    has_model = "model_forecast" in da.columns and da["model_forecast"].notna().any()
+
+    fig, axes = plt.subplots(
+        2, 2, figsize=(12, 7.5), subplot_kw={"projection": proj}, layout="constrained"
+    )
+    axes = axes.ravel()
+    for ax in axes:
+        ax.add_feature(cfeature.LAND, facecolor="#e9e8e4", zorder=0)
+        ax.add_feature(cfeature.OCEAN, facecolor="#fcfcfb", zorder=0)
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.4, edgecolor="#6b6a63", zorder=1)
+        ax.add_feature(cfeature.BORDERS, linewidth=0.2, edgecolor="#a8a7a1", zorder=1)
+        if domain_bounds is not None:
+            ax.set_extent(domain_bounds, crs=proj)
+
+    def field(ax, values, cmap, label, vmin=None, vmax=None):
+        if da.empty:
+            _no_data(ax, "no assimilated observations")
+            return
+        sc = ax.scatter(da["x"], da["y"], c=values, cmap=cmap, vmin=vmin, vmax=vmax,
+                        s=_marker_size(len(da)), linewidths=0, transform=proj, zorder=2)
+        fig.colorbar(sc, ax=ax, shrink=0.8, label=label)
+
+    lo, hi = (np.nanpercentile(da["value"], [1, 99]) if not da.empty else (0, 1))
+    field(axes[0], da["value"], _SEQUENTIAL, "value", lo, hi)
+    axes[0].set_title(f"(a) Assimilated values, N = {len(da):,}", loc="left")
+
+    field(axes[1], da["value_uncertainty"], _SEQUENTIAL, "observation error")
+    axes[1].set_title("(b) Observation error of the assimilated", loc="left")
+
+    # Status: the held-out ones first, so the assimilated stay on top
+    handles = []
+    for name, select, color in sorted(_STATUS, key=lambda s: s[0] != "held out (thinning)"):
+        part = df[select(qc)]
+        if part.empty:
+            continue
+        # The assimilated are the sparse ones after thinning, so draw them larger
+        size = min(_marker_size(len(da)), 6) if name == "assimilated" else _marker_size(len(df))
+        axes[2].scatter(part["x"], part["y"], color=color, s=size,
+                        linewidths=0, transform=proj, zorder=2)
+        handles.append(Line2D([], [], marker="o", ls="", color=color, markersize=6,
+                              label=f"{name}: {len(part):,}"))
+    axes[2].legend(handles=handles, loc="lower left", fontsize=8, framealpha=0.9)
+    axes[2].set_title(f"(c) Status of all {len(df):,} observations", loc="left")
+
+    if has_model:
+        omb = da["value"] - da["model_forecast"]
+        lim = float(np.nanpercentile(np.abs(omb), 99)) or 1.0
+        field(axes[3], omb, _DIVERGING, "O − B", -lim, lim)
+        axes[3].set_title(
+            f"(d) O − B, mean {omb.mean():+.3f}, sd {omb.std():.3f}", loc="left"
+        )
+    else:
+        _no_data(axes[3], "no model_forecast yet\n(validation interpolate-model)")
+        axes[3].set_title("(d) O − B", loc="left")
+
+    fig.suptitle(title)
+    return fig
+
+
+def _no_data(ax, message: str) -> None:
+    ax.text(0.5, 0.5, message, transform=ax.transAxes, ha="center", va="center",
+            color="#6b6a63", fontsize=9)
 
 
 def plot_obs_vs_grid(

@@ -142,6 +142,12 @@ Observations are first converted to the WRF-Ensembly parquet format with the sep
 
 ::: mkdocs-click
     :module: wrf_ensembly.commands.observations
+    :command: plot_cycle
+    :prog_name: wrf-ensembly EXPERIMENT_PATH observations plot-cycle
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.observations
     :command: plot_cycle_locations
     :prog_name: wrf-ensembly EXPERIMENT_PATH observations plot-cycle-locations
     :depth: 2

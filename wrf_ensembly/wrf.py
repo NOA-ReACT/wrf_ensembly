@@ -462,6 +462,18 @@ def _hdf5_filters(var: h5py.Dataset) -> list[tuple]:
     return [plist.get_filter(i)[:3] for i in range(plist.get_nfilters())]
 
 
+# WRF works on a sphere of this radius, not on the WGS84 ellipsoid
+WRF_EARTH_RADIUS = 6370000
+
+
+def _wrf_globe() -> ccrs.Globe:
+    return ccrs.Globe(
+        ellipse=None,
+        semimajor_axis=WRF_EARTH_RADIUS,
+        semiminor_axis=WRF_EARTH_RADIUS,
+    )
+
+
 def _create_proj_crs(domain: DomainControlConfig):
     if domain.projection.lower() != "lambert":
         raise NotImplementedError(
@@ -475,8 +487,8 @@ def _create_proj_crs(domain: DomainControlConfig):
         {
             "x_0": 0,
             "y_0": 0,
-            "a": 6370000,
-            "b": 6370000,
+            "a": WRF_EARTH_RADIUS,
+            "b": WRF_EARTH_RADIUS,
             "proj": "lcc",
             "lat_1": domain.truelat1,
             "lat_2": domain.truelat2,
@@ -518,7 +530,8 @@ def get_wrf_reverse_proj_transformer(domain: DomainControlConfig):
 
 def get_wrf_cartopy_crs(domain: DomainControlConfig):
     """
-    Returns a cartopy CRS for the given WRF domain.
+    Returns a cartopy CRS for the given WRF domain, on WRF's spherical earth, so its
+    (x, y) are the same as those of `get_wrf_proj_transformer` (and of the observations).
 
     Only works for Lambert Conformal Conic projections!
     """
@@ -534,6 +547,7 @@ def get_wrf_cartopy_crs(domain: DomainControlConfig):
         central_longitude=domain.stand_lon,
         central_latitude=domain.ref_lat,
         standard_parallels=(domain.truelat1, domain.truelat2),
+        globe=_wrf_globe(),
     )
 
 
@@ -553,6 +567,7 @@ def get_wrf_cartopy_crs_from_ds_attrs(ds: xr.Dataset):
         central_longitude=ds.attrs["STAND_LON"],
         central_latitude=ds.attrs["CEN_LAT"],
         standard_parallels=(ds.attrs["TRUELAT1"], ds.attrs["TRUELAT2"]),
+        globe=_wrf_globe(),
     )
 
 

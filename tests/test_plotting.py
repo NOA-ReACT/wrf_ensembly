@@ -52,3 +52,33 @@ def test_sparse_grid_is_fully_filled():
     assert np.isfinite(filled).all()
     observed = np.isfinite(holed.to_numpy())
     assert np.allclose(filled[observed], full.to_numpy()[observed])
+
+
+def test_cycle_plot_counts_every_status():
+    """The status panel sorts obs by qc_flag: 0 assimilated, -1 held out, >0 rejected"""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import cartopy.crs as ccrs
+    import pandas as pd
+
+    from wrf_ensembly.observations.plotting import plot_cycle_observations
+
+    qc = np.array([0] * 3 + [-1] * 5 + [1, 99])
+    df = pd.DataFrame(
+        {
+            "x": np.arange(len(qc)) * 1e4,
+            "y": np.zeros(len(qc)),
+            "value": np.linspace(0.1, 0.5, len(qc)),
+            "value_uncertainty": 0.1,
+            "qc_flag": qc,
+            "model_forecast": 0.2,
+        }
+    )
+    fig = plot_cycle_observations(df, ccrs.LambertConformal(), title="test")
+    titles = [ax.get_title(loc="left") for ax in fig.axes if ax.get_title(loc="left")]
+    legend = [t.get_text() for t in fig.axes[2].get_legend().get_texts()]
+
+    assert titles[0] == "(a) Assimilated values, N = 3"
+    assert titles[3].startswith("(d) O − B, mean")
+    assert legend == ["held out (thinning): 5", "assimilated: 3", "rejected (QC): 2"]

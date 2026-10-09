@@ -400,6 +400,64 @@ def cycle_info(experiment_path: Path, cycle: int, as_json: bool):
     console.print(files_table)
 
 
+def _domain_bounds(exp) -> tuple[float, float, float, float] | None:
+    """Domain extent in the WRF projection, from the cycle-0 wrfinput if it exists"""
+    if not exp.cfg.data.per_member_meteorology:
+        wrfinput_path = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
+    else:
+        wrfinput_path = (
+            exp.paths.data_icbc / "member_00" / "wrfinput_d01_member_00_cycle_0"
+        )
+    if not wrfinput_path.exists():
+        logger.warning(f"No wrfinput file at {wrfinput_path}, cannot set map bounds")
+        return None
+    return wrf.get_spatial_domain_bounds(wrfinput_path)
+
+
+@observations_cli.command()
+@click.argument("cycle", type=int, required=True)
+@click.option("--dpi", type=int, default=150, help="DPI for output files")
+@pass_experiment_path
+def plot_cycle(experiment_path: Path, cycle: int, dpi: int):
+    """
+    Quick-look maps of the observations in one cycle's assimilation window.
+
+    Reads the database directly, so it works before `prepare-cycles`, and shows what
+    the filter would get: one figure per instrument.quantity with the assimilated
+    values, their errors, the status of every observation (assimilated, held out by
+    thinning, rejected by QC) and, once `validation interpolate-model` has run, O - B.
+    Uses the same window, instrument list and error inflation as `prepare-cycles`.
+
+    Saved to the experiment's plots directory as `obs_cycle_XXX_<instrument.quantity>.png`.
+    """
+
+    logger.setup("observations-plot-cycle", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+    cycle_info = exp.cycles[cycle]
+
+    df = exp.obs.get_observations_for_cycle(cycle_info)
+    if df is None or df.empty:
+        logger.error(f"Cycle {cycle_info.index} has no observations in its window")
+        return
+
+    proj = wrf.get_wrf_cartopy_crs(exp.cfg.domain_control)
+    bounds = _domain_bounds(exp)
+    half = exp.cfg.assimilation.half_window_length_minutes
+    exp.paths.plots.mkdir(exist_ok=True, parents=True)
+
+    for (instrument, quantity), group in df.groupby(["instrument", "quantity"]):
+        iq = f"{instrument}.{quantity}"
+        title = (
+            f"Cycle {cycle_info.index}, {iq}: observations within ±{half} min of "
+            f"{cycle_info.end:%Y-%m-%d %H:%M} UTC"
+        )
+        fig = observations.plotting.plot_cycle_observations(group, proj, bounds, title)
+        output_path = exp.paths.plots / f"obs_cycle_{cycle_info.index:03d}_{iq}.png"
+        fig.savefig(output_path, dpi=dpi)
+        plt.close(fig)
+        logger.info(f"Saved {output_path}")
+
+
 @observations_cli.command()
 @click.argument("cycle", type=int, required=True, default=None)
 @pass_experiment_path
@@ -430,18 +488,7 @@ def plot_cycle_locations(experiment_path: Path, cycle: int):
         logger.error(f"Cycle {cycle_info.index} has no observations, cannot plot")
         return
 
-    # Find a wrfinput file
-    if not exp.cfg.data.per_member_meteorology:
-        wrfinput_path = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
-    else:
-        wrfinput_path = exp.paths.data_icbc / "member_00" / "wrfinput_d01_cycle_0"
-
-    if wrfinput_path.exists():
-        bounds = wrf.get_spatial_domain_bounds(wrfinput_path)
-    else:
-        logger.warning("No wrfinput file found, cannot set map bounds")
-        bounds = None
-
+    bounds = _domain_bounds(exp)
     fig = observations.plotting.plot_observation_locations_on_map(
         obs,
         proj=wrf.get_wrf_cartopy_crs(exp.cfg.domain_control),

@@ -546,6 +546,7 @@ spatial_resolution = 1.0
 | `prepare-cycles [--cycle N] [--jobs N] [--skip-dart]` | Prepare obs_seq files for each cycle |
 | `cycle-summary` | Print observation counts per cycle |
 | `cycle-info CYCLE [--as-json]` | Detailed per-file stats for a specific cycle |
+| `plot-cycle CYCLE [--dpi]` | Quick-look maps per instrument.quantity of a cycle's window, straight from the DB: assimilated values and errors, status of every obs (assimilated / held out / rejected), O-B once interpolated |
 | `plot-cycle-locations CYCLE` | Plot observation locations for a cycle on a map |
 | `plot-compare-obs-to-grid CYCLE [--center-lat] [--center-lon] [--window-size] [--instrument] [--quantity] [--keep-only-good-qc]` | Plot observations overlaid on the WRF grid (useful for tuning superobbing) |
 | `plot FILENAME [--dpi] [--vmin] [--vmax] [--ylim] [--qc] [--no-robust] [--with-model]` | Plot observations from a specific file; `--with-model` produces O-B panels |
