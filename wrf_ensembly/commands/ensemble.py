@@ -18,8 +18,13 @@ def ensemble_cli():
 
 
 @ensemble_cli.command()
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    help="How many members to set up in parallel",
+)
 @pass_experiment_path
-def setup(experiment_path: Path):
+def setup(experiment_path: Path, jobs: int | None):
     """
     Copies initial/boundary conditions for each member.
     """
@@ -35,13 +40,22 @@ def setup(experiment_path: Path):
     if exp.cfg.segments.enabled and exp.segment_of(0) is None:
         exp.plan_segment(0)
 
-    for i in range(exp.cfg.assimilation.n_members):
-        member_dir = exp.paths.member_path(i)
+    jobs = utils.determine_jobs(jobs)
+    logger.info(f"Using {jobs} jobs")
 
-        # Copy initial and boundary conditions
-        utils.copy(exp.paths.ic_path(i, 0), member_dir / "wrfinput_d01")
-        exp.prepare_member_boundaries(i, 0)
-        logger.info(f"Member {i}: Copied initial and boundary conditions")
+    # Each member copies a wrfinput and extracts its wrfbdy, independently of the others
+    n_members = exp.cfg.assimilation.n_members
+    with ProcessPoolExecutor(max_workers=jobs) as executor:
+        for _ in executor.map(_setup_member, [exp] * n_members, range(n_members)):
+            pass
+
+
+def _setup_member(exp: experiment.Experiment, member_i: int) -> None:
+    utils.copy(
+        exp.paths.ic_path(member_i, 0), exp.paths.member_path(member_i) / "wrfinput_d01"
+    )
+    exp.prepare_member_boundaries(member_i, 0)
+    logger.info(f"Member {member_i}: Copied initial and boundary conditions")
 
 
 @ensemble_cli.command()
