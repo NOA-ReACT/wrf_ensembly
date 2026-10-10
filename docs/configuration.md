@@ -92,7 +92,7 @@ scratch_root = "./scratch"
 | `wrf_root` | Path | **Required.** Root directory of the WRF model. Should contain the `run` directory with `real.exe` compiled |
 | `wps_root` | Path | **Required.** Root directory of WPS. Should contain the `geogrid.exe`, `metgrid.exe` and `ungrib.exe` executables |
 | `dart_root` | Path | **Required.** Root directory of DART. Should contain a `models/wrf` directory, compiled |
-| `scratch_root` | Path | Scratch directory for temporarily storing model output files before post-processing. If relative, will be inside the experiment directory. *Default: `./scratch`* |
+| `scratch_root` | Path | Scratch directory for temporarily storing model output files before post-processing. If relative, will be inside the experiment directory. `{{exp}}` is replaced by `metadata.name`, so an env config shared between experiments can say `/scratch/me/{{exp}}` and still give each its own scratch. *Default: `./scratch`* |
 
 ## Domain Control
 

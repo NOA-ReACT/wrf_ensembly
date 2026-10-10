@@ -2,6 +2,20 @@ from pathlib import Path
 
 from wrf_ensembly.config import Config
 
+EXPERIMENT_PLACEHOLDER = "{{exp}}"
+
+
+def expand_scratch_root(scratch_root: Path, experiment_name: str) -> Path:
+    """Replaces `{{exp}}` in `scratch_root` with the experiment's `metadata.name`"""
+    if EXPERIMENT_PLACEHOLDER not in str(scratch_root):
+        return scratch_root
+    if not experiment_name or "/" in experiment_name or experiment_name in (".", ".."):
+        raise ValueError(
+            f"directories.scratch_root uses {EXPERIMENT_PLACEHOLDER}, so metadata.name "
+            f"must be a plain directory name, got {experiment_name!r}"
+        )
+    return Path(str(scratch_root).replace(EXPERIMENT_PLACEHOLDER, experiment_name))
+
 
 class ExperimentPaths:
     """
@@ -57,8 +71,9 @@ class ExperimentPaths:
         # DART working directory
         self.dart_work_dir = cfg.directories.dart_root / "models" / "wrf" / "work"
 
-        # Scratch
-        self.scratch = cfg.directories.scratch_root
+        # Scratch. `{{exp}}` lets a shared env config give every experiment its own
+        # scratch tree, e.g. scratch_root = "/lus/.../scratch/{{exp}}"
+        self.scratch = expand_scratch_root(cfg.directories.scratch_root, cfg.metadata.name)
         if not self.scratch.is_absolute():
             self.scratch = experiment_path / self.scratch
         self.scratch_forecasts = self.scratch / "forecasts"

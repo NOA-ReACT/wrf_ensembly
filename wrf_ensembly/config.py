@@ -75,7 +75,9 @@ class DirectoriesConfig:
     scratch_root: Path = Path("./scratch")
     """
     Scratch directory used for temporarily storing model output files before post-processing them.
-    If relative, will be inside the experiment directory
+    If relative, will be inside the experiment directory. `{{exp}}` is replaced by
+    `metadata.name`, so a machine's env config can hold one scratch_root for all
+    experiments, e.g. `/scratch/me/{{exp}}`.
     """
 
 
