@@ -842,45 +842,39 @@ class ExperimentObservations:
         cycles_df["window_end"] = cycles_df["end_time"] + half_window_td
 
         instruments = self.cfg.observations.instruments_to_assimilate
+        instrument_filter, params = "TRUE", []
+        if instruments is not None:
+            instrument_filter = f"o.instrument IN ({', '.join('?' * len(instruments))})"
+            params = [*instruments]
 
+        # `total` counts the cycle's own period. `to_assimilate` counts what
+        # prepare-cycles sends to the filter: inside the assimilation window (which
+        # reaches past the cycle's end), good QC and a usable error.
         with self._get_duckdb(read_only=True) as con:
             con.register("cycles_view", cycles_df)
-
-            if instruments is not None:
-                placeholders = ", ".join("?" * len(instruments))
-                result = con.execute(
-                    f"""
-                    SELECT
-                        cw.cycle_index,
-                        COUNT(o.time) AS total,
-                        COUNT(o.time) FILTER (
-                            WHERE o.time >= cw.window_start
-                              AND o.time <= cw.window_end
-                              AND o.instrument IN ({placeholders})
-                        ) AS to_assimilate
-                    FROM cycles_view cw
-                    LEFT JOIN observations o ON o.time >= cw.start_time AND o.time <= cw.end_time
-                    GROUP BY cw.cycle_index
-                    ORDER BY cw.cycle_index
-                    """,
-                    [*instruments],
-                ).fetchdf()
-            else:
-                result = con.execute(
-                    """
-                    SELECT
-                        cw.cycle_index,
-                        COUNT(o.time) AS total,
-                        COUNT(o.time) FILTER (
-                            WHERE o.time >= cw.window_start
-                              AND o.time <= cw.window_end
-                        ) AS to_assimilate
-                    FROM cycles_view cw
-                    LEFT JOIN observations o ON o.time >= cw.start_time AND o.time <= cw.end_time
-                    GROUP BY cw.cycle_index
-                    ORDER BY cw.cycle_index
-                    """
-                ).fetchdf()
+            result = con.execute(
+                f"""
+                SELECT
+                    cw.cycle_index,
+                    COUNT(o.time) FILTER (
+                        WHERE o.time >= cw.start_time AND o.time <= cw.end_time
+                    ) AS total,
+                    COUNT(o.time) FILTER (
+                        WHERE o.time >= cw.window_start
+                          AND o.time <= cw.window_end
+                          AND {instrument_filter}
+                          AND o.qc_flag = 0
+                          AND o.value_uncertainty > 0
+                    ) AS to_assimilate
+                FROM cycles_view cw
+                LEFT JOIN observations o
+                  ON o.time >= least(cw.start_time, cw.window_start)
+                 AND o.time <= greatest(cw.end_time, cw.window_end)
+                GROUP BY cw.cycle_index
+                ORDER BY cw.cycle_index
+                """,
+                params,
+            ).fetchdf()
 
         result["total"] = result["total"].astype(int)
         result["to_assimilate"] = result["to_assimilate"].astype(int)
