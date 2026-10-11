@@ -107,7 +107,7 @@ class Experiment:
 
         self.obs = ExperimentObservations(self.cfg, self.cycles, self.paths)
         self.inflation = InflationConfig.from_config(
-            self.cfg, self.paths.data_inflation, self.paths.dart_work_dir
+            self.cfg, self.paths.data_inflation, self.paths.dart_work_dir, self.state
         )
 
     def load_status(self):

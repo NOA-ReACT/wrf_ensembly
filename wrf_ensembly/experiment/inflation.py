@@ -6,6 +6,9 @@ from typing import Any
 from wrf_ensembly import config, utils
 from wrf_ensembly.console import logger
 
+from .state_machine import StateTransition
+from .state_store import ExperimentState
+
 INFLATION_FILES = [
     "output_priorinf_mean.nc",
     "output_priorinf_sd.nc",
@@ -31,10 +34,15 @@ class InflationConfig:
     posterior_enabled: bool
     dart_work_dir: Path
     data_inflation_dir: Path
+    state: ExperimentState
 
     @classmethod
     def from_config(
-        cls, cfg: config.Config, data_inflation_dir: Path, dart_work_dir: Path
+        cls,
+        cfg: config.Config,
+        data_inflation_dir: Path,
+        dart_work_dir: Path,
+        state: ExperimentState,
     ) -> "InflationConfig":
         if not cfg.assimilation.use_inflation:
             return cls(
@@ -43,6 +51,7 @@ class InflationConfig:
                 posterior_enabled=False,
                 dart_work_dir=dart_work_dir,
                 data_inflation_dir=data_inflation_dir,
+                state=state,
             )
 
         inf_flavor = cfg.dart_namelist.get("filter_nml", {}).get("inf_flavor")
@@ -70,6 +79,7 @@ class InflationConfig:
             posterior_enabled=posterior_enabled,
             dart_work_dir=dart_work_dir,
             data_inflation_dir=data_inflation_dir,
+            state=state,
         )
 
     @property
@@ -174,6 +184,10 @@ class InflationConfig:
         Searches backwards through cycles to find the most recent one with
         complete inflation files. Returns the cycle index used, or None if no
         files were found (including cycle 0 where no prior cycles exist).
+
+        Only cycles marked as filter complete count, so the files of an earlier run
+        (before `status reset`) are not picked up when this run filters at different
+        cycles, e.g. with another segment layout or other observations.
         """
 
         if not self.enabled:
@@ -187,6 +201,10 @@ class InflationConfig:
 
         # Search backwards to find the most recent cycle with inflation files
         for source_cycle in range(cycle_i - 1, -1, -1):
+            if not self.state.is_marker_set(
+                source_cycle, StateTransition.FILTER_COMPLETE.value
+            ):
+                continue
             all_exist = all(
                 self._stashed_path(source_cycle, f).exists() for f in self.active_files
             )
