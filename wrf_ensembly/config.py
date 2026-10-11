@@ -786,7 +786,7 @@ class PostprocessConfig:
     Optionally, filter the variables stored in the per-member ensemble file by a list of regular
     expressions. If None, all variables (after applying `variables_to_keep`) are kept. Use this
     to limit the size of the ensemble file, which can become large with many members.
-    Only used when `keep_per_member = true`.
+    Only used when `keep_per_member` is enabled.
     """
 
     compression: str = "zlib"
@@ -879,12 +879,24 @@ class PostprocessConfig:
     Has no effect when `assimilation.n_members == 1`, since no spread exists.
     """
 
-    keep_per_member: bool = False
+    keep_per_member: Literal[False, True, "analysis_cycles"] = False
     """
     Set to true to also write a per-member file, `{forecast,analysis}_ensemble_cycle_XXX.nc`,
     holding every member along a `member` dimension. Use `variables_to_keep_ensemble` to
     limit its size. Ignored for single-member experiments.
+
+    Set to "analysis_cycles" to write them only for cycles that have an analysis, i.e.
+    where `ensemble analysis` wrote its wrfout files to `scratch/analysis/`. Both the
+    forecast (prior) and analysis files are written for those cycles. Useful with
+    `[segments]` or sparse observations, where most cycles have no analysis.
     """
+
+    def keep_per_member_for(self, has_analysis: bool) -> bool:
+        """Whether to write the per-member files for a cycle, given if it has an analysis."""
+
+        if self.keep_per_member == "analysis_cycles":
+            return has_analysis
+        return self.keep_per_member
 
 
 @dataclass

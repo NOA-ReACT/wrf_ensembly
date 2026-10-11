@@ -235,6 +235,17 @@ def _build_ensemble_template(
     return add_member_dimension(filtered_template, n_members)
 
 
+def cycle_has_analysis(exp: Experiment, cycle: int) -> bool:
+    """
+    Whether a cycle has an analysis, judged by the cycle-end wrfout that `ensemble
+    analysis` writes for member_00. Cycles without a filter run (no observations, or the
+    middle of a segment) never get one.
+    """
+
+    wrfout_name = f"wrfout_d01_{exp.cycles[cycle].end:%Y-%m-%d_%H:%M:%S}"
+    return (exp.paths.scratch_analysis_path(cycle) / "member_00" / wrfout_name).exists()
+
+
 def process_cycle_streaming(
     exp: Experiment,
     cycle: int,
@@ -253,7 +264,9 @@ def process_cycle_streaming(
     Which outputs are written is controlled by the ``compute_ensemble_mean``,
     ``compute_ensemble_sd`` and ``keep_per_member`` config options. Statistics that are
     not requested are never computed, not just skipped when writing. The per-member
-    ensemble file has shape ``(t, member, ...)`` for all data variables.
+    ensemble file has shape ``(t, member, ...)`` for all data variables. With
+    ``keep_per_member = "analysis_cycles"`` it is only written when the cycle has an
+    analysis (see `cycle_has_analysis`), for both sources.
 
     Args:
         exp: Experiment object with configuration and paths.
@@ -321,7 +334,9 @@ def process_cycle_streaming(
     # Decide which outputs to produce
     compute_mean = exp.cfg.postprocess.compute_ensemble_mean
     compute_sd = exp.cfg.postprocess.compute_ensemble_sd
-    keep_per_member = exp.cfg.postprocess.keep_per_member
+    keep_per_member = exp.cfg.postprocess.keep_per_member_for(
+        cycle_has_analysis(exp, cycle)
+    )
 
     mean_path: Path | None = None
     sd_path: Path | None = None

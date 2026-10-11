@@ -37,7 +37,7 @@ gets written:
 | More memory per job (`mem`/`mem-per-cpu` in `[slurm.directives.postprocess]`, usually in `env_config.toml`) | No change to outputs |
 | `variables_to_keep` / `variables_to_keep_ensemble` | Fewer variables means smaller accumulators and buffers |
 | `compute_ensemble_sd = false` | Roughly halves the statistics memory, but loses the spread files that plots and validation spread columns use |
-| `keep_per_member = false` | Drops the biggest buffer, but loses per-member validation |
+| `keep_per_member = false` | Drops the biggest buffer, but loses per-member validation. `"analysis_cycles"` keeps it only for cycles with an analysis |
 | `--only-last-timestep` | Only for quick checks. Not a real postprocess |
 | Custom processors (`[[postprocess.processors]]`) | Check whether one of them `.load()`s or makes big intermediate arrays |
 

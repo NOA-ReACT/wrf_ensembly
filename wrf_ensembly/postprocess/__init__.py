@@ -15,6 +15,7 @@ from wrf_ensembly.postprocess.compression import (
     validate_compression_config,
 )
 from wrf_ensembly.postprocess.streaming_pipeline import (
+    cycle_has_analysis,
     process_cycle_single_member,
     process_cycle_streaming,
     process_members_for_timestep,
@@ -23,6 +24,7 @@ from wrf_ensembly.postprocess.streaming_writer import StreamingNetCDFWriter
 
 __all__ = [
     "StreamingNetCDFWriter",
+    "cycle_has_analysis",
     "process_cycle_streaming",
     "process_cycle_single_member",
     "process_members_for_timestep",

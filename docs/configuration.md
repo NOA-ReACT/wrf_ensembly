@@ -561,7 +561,7 @@ params = { custom_param = "value" }
 | Field | Type | Description |
 |-------|------|-------------|
 | `variables_to_keep` | [string] | Regular expressions for variables to keep in output. If not set, all variables are kept |
-| `variables_to_keep_ensemble` | [string] | Subset of variables to keep in per-member ensemble files. If not set, uses `variables_to_keep`. Only applies when `keep_per_member = true` |
+| `variables_to_keep_ensemble` | [string] | Subset of variables to keep in per-member ensemble files. If not set, uses `variables_to_keep`. Only applies when `keep_per_member` is enabled |
 | `compression` | string | Compression algorithm: `"zlib"`, `"zstd"`, `"bzip2"`, `"szip"`, or `"none"`. Note: `zstd` and `bzip2` require HDF5 plugins. *Default: `"zlib"`* |
 | `compression_level` | int | Compression level (0–9). 0 disables compression. *Default: 4* |
 | `shuffle` | bool | Apply the shuffle filter before compression (improves compression ratios). *Default: true* |
@@ -570,11 +570,13 @@ params = { custom_param = "value" }
 | `quantize_mode` | string | Quantization algorithm: `"BitGroom"`, `"BitRound"`, or `"GranularBitRound"`. *Default: `"GranularBitRound"`* |
 | `compute_ensemble_mean` | bool | Whether to write the `{forecast,analysis}_mean_cycle_XXX.nc` files. *Default: true* |
 | `compute_ensemble_sd` | bool | Whether to write the `{forecast,analysis}_sd_cycle_XXX.nc` files. Disabling also skips the variance accumulation. No effect when `n_members = 1`. *Default: true* |
-| `keep_per_member` | bool | Whether to also write a per-member `{forecast,analysis}_ensemble_cycle_XXX.nc` file. *Default: false* |
+| `keep_per_member` | bool or `"analysis_cycles"` | Whether to also write a per-member `{forecast,analysis}_ensemble_cycle_XXX.nc` file. `"analysis_cycles"` writes both only for cycles that have an analysis (analysis wrfout files in `scratch/analysis/`), which saves a lot of disk with `[segments]` or sparse observations. *Default: false* |
 | `processors` | [ProcessorConfig] | List of custom data processors to apply |
 
 At least one of `compute_ensemble_mean`, `compute_ensemble_sd` or `keep_per_member` must be
 enabled — `postprocess run` exits with an error otherwise, since it would produce no output.
+If `keep_per_member = "analysis_cycles"` is the only enabled output, cycles without an analysis
+are skipped without an error.
 
 Turning off the statistics is meant for sensitivity studies, where each member runs with
 different parameters and the across-member mean and spread are not meaningful. Be aware of

@@ -84,7 +84,7 @@ class PerMemberModelInterpolation:
         if not matched:
             logger.warning(
                 f"No {source} ensemble files matched {glob_pattern}. "
-                "Is postprocess.keep_per_member = true in config?"
+                "Is postprocess.keep_per_member enabled in config?"
             )
             return 0
 

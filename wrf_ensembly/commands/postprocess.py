@@ -18,6 +18,7 @@ from wrf_ensembly.postprocess.compression import (
     validate_compression_config,
 )
 from wrf_ensembly.postprocess.streaming_pipeline import (
+    cycle_has_analysis,
     process_cycle_single_member,
     process_cycle_streaming,
 )
@@ -108,7 +109,8 @@ def run(
     the final output files directly, without intermediate files. Which files are produced
     depends on the `compute_ensemble_mean`, `compute_ensemble_sd` and `keep_per_member`
     options of the `[postprocess]` config section; statistics that are turned off are
-    never computed.
+    never computed. With `keep_per_member = "analysis_cycles"`, the per-member files are
+    only written for cycles that have analysis wrfout files in scratch.
 
     This command processes ONE cycle at a time with no side effects, making it
     safe to run multiple instances in parallel for different cycles:
@@ -157,6 +159,17 @@ def run(
         )
         sys.exit(1)
 
+    # With per-member files only for analysis cycles and no statistics, a cycle without
+    # an analysis has nothing to write. That is expected, so it is not an error.
+    has_analysis = cycle_has_analysis(exp, cycle)
+    keep_per_member = pp.keep_per_member_for(has_analysis)
+    if not (pp.compute_ensemble_mean or pp.compute_ensemble_sd or keep_per_member):
+        logger.info(
+            f"Cycle {cycle} has no analysis and keep_per_member = 'analysis_cycles' is "
+            "the only enabled output, nothing to do"
+        )
+        return
+
     # Create processor pipeline
     try:
         pipeline = processors.create_pipeline_from_config(
@@ -187,7 +200,7 @@ def run(
     else:
         logger.info(
             f"Outputs: mean={pp.compute_ensemble_mean}, sd={pp.compute_ensemble_sd}, "
-            f"per-member={pp.keep_per_member}"
+            f"per-member={keep_per_member} (has analysis: {has_analysis})"
         )
         process_func = process_cycle_streaming
 
