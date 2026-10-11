@@ -6,6 +6,14 @@ from typing import Any
 from wrf_ensembly import config, utils
 from wrf_ensembly.console import logger
 
+INFLATION_FILES = [
+    "output_priorinf_mean.nc",
+    "output_priorinf_sd.nc",
+    "output_postinf_mean.nc",
+    "output_postinf_sd.nc",
+]
+"""Every inflation restart file filter can write, for a single domain"""
+
 
 @dataclass
 class InflationConfig:
@@ -89,6 +97,9 @@ class InflationConfig:
 
         dart_namelist = copy.deepcopy(dart_namelist)
 
+        # Done even with inflation off: the DART work dir is shared between experiments
+        self.unlink_input_links()
+
         if not self.enabled:
             return dart_namelist
 
@@ -112,6 +123,20 @@ class InflationConfig:
             ]
 
         return dart_namelist
+
+    def unlink_input_links(self):
+        """
+        Remove the inflation input links a previous filter run left in the DART work
+        directory. When DART does not read inflation from restart and `stages_to_write`
+        includes "input", it writes `input_*inf_*.nc` itself, and through a leftover link
+        that would overwrite the stashed file it points to, possibly another experiment's.
+        Only links are removed, files put there by hand or `extra_dart_files` are kept.
+        """
+
+        for filename in INFLATION_FILES:
+            path = self.dart_work_dir / filename.replace("output", "input")
+            if path.is_symlink():
+                path.unlink()
 
     def _stashed_path(self, cycle_i: int, filename: str) -> Path:
         """Path where an inflation file is stored between cycles."""
