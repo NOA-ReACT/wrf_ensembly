@@ -745,7 +745,7 @@ class Experiment:
         dart_output_txt.write_text("\n".join(str(post.resolve()) for post in posterior))
         logger.info(f"Wrote {dart_output_txt}")
 
-        self.paths.scratch_dart_path(self.current_cycle_i).mkdir(exist_ok=True)
+        self.paths.scratch_dart_path(self.current_cycle_i).mkdir(exist_ok=True, parents=True)
 
         # Link wrfinput, required by filter to read coordinates
         wrfinput_path = dart_dir / "wrfinput_d01"
