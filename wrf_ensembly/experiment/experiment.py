@@ -71,9 +71,6 @@ SEGMENT_RATE_CYCLES = 5
 SEGMENT_RATE_MIN_RUNS = 3
 """Fewer member runs than this, and segments are sized by `expected_walltime_per_sim_hour`"""
 
-SEGMENT_RATE_PERCENTILE = 90
-"""Which percentile of the recent runs' seconds per simulated hour sizes segments"""
-
 
 # Groups that filter cannot run without. `[dart_namelist]` is the complete input.nml, so
 # these are only a sanity check; DART reports any other missing group itself.
@@ -846,8 +843,10 @@ class Experiment:
     def segment_rate(self, before_cycle: int) -> tuple[float, str]:
         """
         Wall clock seconds per simulated hour to size segments with, and where the number
-        came from: a high percentile over the member runs of the recent cycles before
-        `before_cycle`, or `expected_walltime_per_sim_hour` while there are too few.
+        came from: the slowest of the member runs of the recent cycles before
+        `before_cycle`, or `expected_walltime_per_sim_hour` while there are too few. The
+        slowest, since the rate also sets the job array's time limit and every member has
+        to finish within it.
 
         The runs include WRF's startup, so short runs look slower per hour than long
         ones, which errs on the safe side for long segments.
@@ -866,9 +865,7 @@ class Experiment:
                 rates.append(stats.duration_s / (simulated_s / 3600))
 
         if len(rates) >= SEGMENT_RATE_MIN_RUNS:
-            return float(np.percentile(rates, SEGMENT_RATE_PERCENTILE)), (
-                f"p{SEGMENT_RATE_PERCENTILE} of {len(rates)} recent runs"
-            )
+            return max(rates), f"max of {len(rates)} recent runs"
 
         rate = self.cfg.segments.expected_walltime_per_sim_hour
         if rate is None:

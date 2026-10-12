@@ -2,7 +2,6 @@ import datetime as dt
 from importlib import resources
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 from wrf_ensembly import experiment, jobfiles, segments
@@ -357,14 +356,14 @@ def test_segment_rate_from_recent_runs(tmp_path: Path):
     exp = make_experiment(tmp_path / "exp")
     # Old runs without simulated_s (the run was the 6 h cycle): 600 s/h
     record_runs(exp, 0, [3600] * 5, None)
-    # A segment of 24 h, recorded on its last cycle: 100-190 s/h
-    record_runs(exp, 4, [2400 + 240 * k for k in range(10)], 24)
+    # A segment of 24 h, recorded on its last cycle: 100-180 s/h and one member at 900
+    record_runs(exp, 4, [2400 + 240 * k for k in range(9)] + [21600], 24)
 
     rate, source = exp.segment_rate(5)
 
-    rates = [600] * 5 + [100 + 10 * k for k in range(10)]
-    assert rate == pytest.approx(float(np.percentile(rates, 90)))
-    assert source == "p90 of 15 recent runs"
+    # The slowest member, not a percentile: the job array waits for it
+    assert rate == pytest.approx(900)
+    assert source == "max of 15 recent runs"
     # Only runs before the cycle being planned count
     assert exp.segment_rate(1)[0] == pytest.approx(600)
     assert exp.segment_rate(0)[1] == "expected_walltime_per_sim_hour"

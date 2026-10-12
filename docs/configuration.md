@@ -276,7 +276,7 @@ keep_checkpoints = 2
 |-------|------|-------------|
 | `enabled` | bool | Run segments. Needs `cycling_mode = "restart"`, no `[time_control.cycles]` and no `forecast_extension`. *Default: false* |
 | `max_walltime` | string | Longest a member job may run, as a SLURM time string (`12:00:00`, `1-00:00:00`). Use the cluster's limit. *Default: "12:00:00"* |
-| `expected_walltime_per_sim_hour` | float | Seconds of wall clock a member needs per simulated hour (including startup), used until the experiment has runtime statistics of its own. **Required** when enabled |
+| `expected_walltime_per_sim_hour` | float | Seconds of wall clock a member needs per simulated hour (including startup), used until the experiment has runtime statistics of its own. After that, the slowest member run of the last 5 cycles with runs is used. **Required** when enabled |
 | `safety_factor` | float | The runtime estimate is multiplied by this before comparing it to `max_walltime` and setting the member jobs' `--time`. *Default: 1.3* |
 | `checkpoint_interval_hours` | float | How often members write a restart file during a segment, so a job that dies can continue from there. The actual interval is the longest one up to this that divides the segment evenly. *Default: 24* |
 | `keep_checkpoints` | int | How many of the newest checkpoints each member keeps while a segment runs (at least 2). With `assimilation.keep_restart_files`, all are kept. *Default: 2* |
