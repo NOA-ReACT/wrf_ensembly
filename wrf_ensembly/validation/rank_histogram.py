@@ -32,6 +32,11 @@ class RankHistogramSummary:
     """The observations' QC flag, or 'all' when several were pooled."""
     n_obs: int
     n_members: int
+    sigma_o_factor: float
+    """Factor applied to the database's value_uncertainty, the experiment's
+    `observations.error_inflation_factor` for this pair (1 when not set)."""
+    n_negative_uncertainty: int
+    """Observations whose value_uncertainty was negative; its absolute value was used."""
     frac_below: float
     """Share of observations below every (perturbed) member."""
     frac_above: float
@@ -67,6 +72,10 @@ class RankHistogramAnalysis:
         self.instrument = instrument
         self.quantity = quantity
         self.source = source
+        # Rank against the error the filter assumed, as the DART diagnostics do
+        self.sigma_o_factor = float(
+            experiment.cfg.observations.error_inflation_factor.get(f"{instrument}.{quantity}", 1.0)
+        )
         self.output_dir = (
             experiment.paths.data_validation / "rank_histograms" / instrument / quantity
         )
@@ -87,12 +96,18 @@ class RankHistogramAnalysis:
         perturbed: dict[str, RankHistogramAccumulator] = {}
         raw: dict[str, RankHistogramAccumulator] = {}
         flags: set[str] = set()
+        n_negative: dict[str, int] = {}
         rng = np.random.default_rng(0)
         for obs, members in chunks:
             n_members = members.shape[1]
             qc = obs["qc_flag"].to_numpy()
             values = obs["value"].to_numpy(dtype=float)
             sigma = obs["value_uncertainty"].fillna(0.0).to_numpy(dtype=float)
+            negative = sigma < 0
+            for f in np.unique(qc):
+                n_negative[str(f)] = n_negative.get(str(f), 0) + int(negative[qc == f].sum())
+            n_negative["all"] = n_negative.get("all", 0) + int(negative.sum())
+            sigma = np.abs(sigma) * self.sigma_o_factor
             for label, sel in [("all", slice(None))] + [(str(f), qc == f) for f in np.unique(qc)]:
                 if label != "all":
                     flags.add(label)
@@ -103,6 +118,13 @@ class RankHistogramAnalysis:
 
         if not perturbed:
             return None
+        if n_negative["all"]:
+            logger.warning(
+                f"  {n_negative['all']} observations have a negative value_uncertainty; "
+                "using its absolute value"
+            )
+        if self.sigma_o_factor != 1.0:
+            logger.info(f"  value_uncertainty scaled by the error inflation factor {self.sigma_o_factor:g}")
 
         # "all" only adds information when several flags were pooled
         labels = sorted(flags, key=int) + (["all"] if len(flags) > 1 else [])
@@ -116,6 +138,8 @@ class RankHistogramAnalysis:
                     qc_flag=label,
                     n_obs=diag["n_obs"],
                     n_members=diag["n_ensemble"],
+                    sigma_o_factor=self.sigma_o_factor,
+                    n_negative_uncertainty=n_negative.get(label, 0),
                     frac_below=diag["frac_below"],
                     frac_above=diag["frac_above"],
                     frac_outside_expected=diag["frac_outside_expected"],

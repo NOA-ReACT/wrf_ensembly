@@ -1205,7 +1205,7 @@ def plot_rank_histogram(
         expected_count + ci_95,
         color="red",
         alpha=0.1,
-        label="95% CI",
+        label="95% range if the obs were independent",
     )
     ax1.set_xlabel("Rank", fontsize=12)
     ax1.set_ylabel("Frequency", fontsize=12)

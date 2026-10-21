@@ -517,14 +517,24 @@ def rank_histogram(
     Uses the per-member values from `validation interpolate-model-per-member`, so it
     covers every observation in the database, not only the assimilated ones: held-out
     observations and instruments that were never assimilated are an independent check
-    of the ensemble's reliability. With `postprocess.keep_per_member =
-    "analysis_cycles"` the forecast members exist at the DA cycles only, so the
-    forecast histogram is that of the DA prior.
+    of the ensemble's reliability.
 
-    Each member is perturbed with N(0, sigma_o^2) before ranking (Hamill 2001), using
-    the observation's own uncertainty; the ranking against the raw members is kept
-    alongside. Flat is reliable, a U shape under-dispersive (lopsided: biased), a
-    dome over-dispersive.
+    The forecast source pools every output frame the per-member forecast files hold.
+    With `postprocess.keep_per_member = "analysis_cycles"` those are the files of the
+    DA cycles, so this is the DA prior, but over all of that cycle's frames (e.g. 10,
+    11 and 12 UTC for a 3 h cycle ending at 12 UTC with hourly output), not just the
+    analysis time.
+
+    Each member is perturbed with N(0, sigma_o^2) before ranking (Hamill 2001), where
+    sigma_o is the observation's value_uncertainty times the experiment's
+    `observations.error_inflation_factor` for the pair, i.e. the error the filter
+    assumed. Negative uncertainties are used as their absolute value and counted in
+    the summary. The ranking against the raw members is kept alongside. Flat is
+    reliable, a U shape under-dispersive (lopsided: biased), a dome over-dispersive.
+    When sigma_o is much larger than the spread, the perturbation dominates and the
+    histogram says little about the spread itself; compare the Desroziers estimates
+    from `plots cycle-consistency`. The 95% band in the plots assumes independent
+    observations, so it is too narrow for spatially correlated ones such as superobs.
 
     Results are saved to data/validation/rank_histograms/{instrument}/{quantity}/
     """

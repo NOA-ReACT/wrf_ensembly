@@ -13,6 +13,7 @@ from wrf_ensembly.diagnostics import (
 )
 from wrf_ensembly.experiment.observations import ExperimentObservations
 from wrf_ensembly.observations import io
+from wrf_ensembly.validation.rank_histogram import RankHistogramAnalysis
 
 
 def _reliable(n=100_000, n_members=20, sigma_o=0.5, seed=1):
@@ -163,3 +164,25 @@ def test_iter_member_ensemble_packs_hours_into_chunks(tmp_path):
 
     # hours 12 (2 obs, one of them incomplete), 13 (1, incomplete) and 15 (1): 12 alone, 13+15 together
     assert sizes == [1, 1]
+
+
+def test_analysis_scales_sigma_by_the_inflation_factor_and_uses_abs(tmp_path):
+    """The filter assumed factor x |value_uncertainty|; the histogram must too."""
+    obs, members, sigma_o = _reliable(n=20_000, n_members=10, sigma_o=0.5)
+    frame = pd.DataFrame({"value": obs, "value_uncertainty": sigma_o / 2, "qc_flag": 0})
+    frame.loc[::10, "value_uncertainty"] *= -1  # a few negative ones, as VIIRS has
+    exp = SimpleNamespace(
+        cfg=SimpleNamespace(observations=SimpleNamespace(error_inflation_factor={"INSTR.Q": 2.0})),
+        paths=SimpleNamespace(data_validation=tmp_path),
+    )
+
+    res = RankHistogramAnalysis(exp, "INSTR", "Q", "forecast").run(
+        [(frame.iloc[:7000], members[:7000]), (frame.iloc[7000:], members[7000:])]
+    )
+    row = res["summary"].iloc[0]
+
+    _, _, direct = rank_histogram(obs, members, sigma_o)
+    assert row.sigma_o_factor == 2.0
+    assert row.n_negative_uncertainty == 2000
+    assert row.spread_skill == pytest.approx(direct["spread_skill"], rel=1e-9)
+    assert (tmp_path / "rank_histograms" / "INSTR" / "Q" / "summary_forecast.csv").exists()
