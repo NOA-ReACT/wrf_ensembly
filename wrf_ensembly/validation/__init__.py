@@ -7,6 +7,7 @@ from wrf_ensembly.validation.lead_time import assign_forecast_lead, bin_by_lead
 from wrf_ensembly.validation.ensemble_spread import EnsembleSpreadAnalysis
 from wrf_ensembly.validation.obs_curtain import ObsCurtainAnalysis
 from wrf_ensembly.validation.lead_time_skill import LeadTimeSkillAnalysis
+from wrf_ensembly.validation.rank_histogram import RankHistogramAnalysis
 
 __all__ = [
     "ModelInterpolation",
@@ -15,6 +16,7 @@ __all__ = [
     "EnsembleSpreadAnalysis",
     "ObsCurtainAnalysis",
     "LeadTimeSkillAnalysis",
+    "RankHistogramAnalysis",
     "assign_forecast_lead",
     "bin_by_lead",
 ]

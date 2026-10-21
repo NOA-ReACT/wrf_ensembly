@@ -12,6 +12,7 @@ from wrf_ensembly.validation import (
     ModelInterpolation,
     ObsCurtainAnalysis,
     PerMemberModelInterpolation,
+    RankHistogramAnalysis,
 )
 from wrf_ensembly.wrf import get_wrf_cartopy_crs
 
@@ -464,3 +465,116 @@ def analyze_lead_time_skill(
 
     logger.info(f"\n{'=' * 60}")
     logger.info("Lead-time skill analysis complete!")
+
+
+@validation_cli.command()
+@click.option(
+    "--instrument-quantity",
+    multiple=True,
+    help="Instrument-quantity pair in dot notation (e.g. MTG_REACT.DOD_355nm). Can be "
+    "specified multiple times. Defaults to every pair in the per-member interpolation.",
+)
+@click.option(
+    "--source",
+    "sources",
+    type=click.Choice(["forecast", "analysis"]),
+    multiple=True,
+    help="Which member values to rank against. Defaults to every source that has a "
+    "per-member parquet.",
+)
+@click.option(
+    "--qc-flag",
+    "qc_flags",
+    type=int,
+    multiple=True,
+    default=(0, -1),
+    show_default=True,
+    help="QC flags to include, each scored separately (and pooled). -1 is the usual "
+    "flag for observations held out by thinning.",
+)
+@click.option(
+    "--start-time",
+    type=click.DateTime(),
+    help="First timestamp to consider in the analysis (ISO format)",
+)
+@click.option(
+    "--end-time",
+    type=click.DateTime(),
+    help="Last timestamp to consider in the analysis (ISO format)",
+)
+@pass_experiment_path
+def rank_histogram(
+    experiment_path: Path,
+    instrument_quantity: tuple[str, ...],
+    sources: tuple[str, ...],
+    qc_flags: tuple[int, ...],
+    start_time: dt.datetime | None = None,
+    end_time: dt.datetime | None = None,
+):
+    """
+    Rank histograms of the observations against the ensemble members.
+
+    Uses the per-member values from `validation interpolate-model-per-member`, so it
+    covers every observation in the database, not only the assimilated ones: held-out
+    observations and instruments that were never assimilated are an independent check
+    of the ensemble's reliability. With `postprocess.keep_per_member =
+    "analysis_cycles"` the forecast members exist at the DA cycles only, so the
+    forecast histogram is that of the DA prior.
+
+    Each member is perturbed with N(0, sigma_o^2) before ranking (Hamill 2001), using
+    the observation's own uncertainty; the ranking against the raw members is kept
+    alongside. Flat is reliable, a U shape under-dispersive (lopsided: biased), a
+    dome over-dispersive.
+
+    Results are saved to data/validation/rank_histograms/{instrument}/{quantity}/
+    """
+
+    logger.setup("validation-rank-histogram", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    available = {
+        s: exp.paths.data_validation / f"model_member_{s}.parquet"
+        for s in ("forecast", "analysis")
+    }
+    available = {s: p for s, p in available.items() if p.exists()}
+    sources = tuple(s for s in (sources or available) if s in available)
+    if not sources:
+        logger.error(
+            f"No per-member interpolation found in {exp.paths.data_validation}. "
+            "Run `wrf-ensembly validation interpolate-model-per-member` first."
+        )
+        return
+
+    import duckdb
+
+    for source in sources:
+        if instrument_quantity:
+            pairs = [tuple(p.split(".", 1)) for p in instrument_quantity]
+        else:
+            pairs = duckdb.execute(
+                "SELECT DISTINCT instrument, quantity FROM read_parquet(?) ORDER BY 1, 2",
+                [str(available[source])],
+            ).fetchall()
+
+        for instrument, quantity in pairs:
+            logger.info(f"\n{'-' * 60}")
+            logger.info(f"{instrument}.{quantity}, {source}")
+            chunks = exp.obs.iter_member_ensemble(
+                instrument,
+                quantity,
+                source=source,
+                qc_flags=list(qc_flags) if qc_flags else None,
+                start_date=start_time,
+                end_date=end_time,
+            )
+            results = RankHistogramAnalysis(exp, instrument, quantity, source).run(chunks)
+            if results is None:
+                logger.warning("  no observations with a value for every member, skipping")
+                continue
+            logger.info(f"  Output directory: {results['output_dir']}")
+            cols = ["qc_flag", "n_obs", "frac_below", "frac_above", "frac_outside_expected",
+                    "innovation_mean", "rmse", "mean_spread", "spread_skill"]
+            for line in results["summary"][cols].to_string(
+                index=False, float_format=lambda x: f"{x:.4g}"
+            ).splitlines():
+                logger.info(line)

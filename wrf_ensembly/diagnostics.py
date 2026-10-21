@@ -109,19 +109,203 @@ def read_obs_seq_nc(path: Path) -> pd.DataFrame:
     return pd.DataFrame(result)
 
 
-def compute_rank_histogram(
-    df: pd.DataFrame, use_posterior: bool = False
+def rank_in_ensemble(
+    obs: np.ndarray,
+    ensemble: np.ndarray,
+    obs_std: np.ndarray | float = 0.0,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
+    """
+    Rank of each observation among its ensemble, accounting for observation error.
+
+    Each member is perturbed with N(0, obs_std^2) before ranking (Hamill 2001). An
+    ensemble that is a sample from the same distribution as the truth then ranks the
+    observation (truth + observation error) uniformly. Perturbing the observation
+    instead would give it the observation error twice, so even a perfect ensemble
+    would look under-dispersive. Remaining ties (e.g. obs_std = 0 with
+    bit-rounded members) are broken at random.
+
+    Args:
+        obs: Observations, shape (n,).
+        ensemble: Member values at the observations, shape (n, n_members).
+        obs_std: Observation error standard deviation, scalar or shape (n,).
+        rng: Random generator. Defaults to a fixed seed, so the result is reproducible.
+
+    Returns:
+        Integer ranks 0 ... n_members, shape (n,).
+    """
+    rng = np.random.default_rng(0) if rng is None else rng
+    obs = np.asarray(obs, dtype=float)
+    ensemble = np.asarray(ensemble, dtype=float)
+    obs_std = np.broadcast_to(np.asarray(obs_std, dtype=float), obs.shape)
+    perturbed = ensemble + rng.normal(size=ensemble.shape) * obs_std[:, np.newaxis]
+    below = np.sum(perturbed < obs[:, np.newaxis], axis=1)
+    ties = np.sum(perturbed == obs[:, np.newaxis], axis=1)
+    return below + rng.integers(0, ties + 1)
+
+
+class RankHistogramAccumulator:
+    """
+    Rank histogram and its diagnostics, accumulated over chunks of observations.
+
+    Only counts and sums are kept, so memory does not grow with the number of
+    observations: feed it one chunk at a time with `add`, then read `histogram` and
+    `diagnostics()`. Ranks come from `rank_in_ensemble`, so observation error is
+    accounted for by perturbing the members.
+    """
+
+    _SUMS = (
+        "n", "innov", "innov2", "n_norm", "norm", "norm2", "total_var", "spread2",
+        "obs", "obs2", "mean", "mean2", "obs_mean",
+    )
+
+    def __init__(self, n_members: int, rng: np.random.Generator | None = None):
+        self.n_members = n_members
+        self.rng = np.random.default_rng(0) if rng is None else rng
+        self.histogram = np.zeros(n_members + 1, dtype=np.int64)
+        self.sums = dict.fromkeys(self._SUMS, 0.0)
+
+    def add(
+        self,
+        obs: np.ndarray,
+        ensemble: np.ndarray,
+        obs_std: np.ndarray | float = 0.0,
+        ensemble_mean: np.ndarray | None = None,
+        ensemble_spread: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """
+        Add a chunk of observations.
+
+        Args:
+            obs: Observations, shape (n,).
+            ensemble: Member values, shape (n, n_members).
+            obs_std: Observation error standard deviation, scalar or shape (n,).
+            ensemble_mean, ensemble_spread: Mean and standard deviation to use for the
+                innovation statistics, e.g. DART's own. Computed from `ensemble`
+                (spread with ddof = 1) when not given.
+
+        Returns:
+            The ranks of this chunk's observations.
+        """
+        obs = np.asarray(obs, dtype=float)
+        ensemble = np.asarray(ensemble, dtype=float)
+        if ensemble.shape[1] != self.n_members:
+            raise ValueError(f"Expected {self.n_members} members, got {ensemble.shape[1]}")
+        obs_std = np.broadcast_to(np.asarray(obs_std, dtype=float), obs.shape)
+        mean = ensemble.mean(axis=1) if ensemble_mean is None else np.asarray(ensemble_mean, dtype=float)
+        spread = (
+            ensemble.std(axis=1, ddof=1) if ensemble_spread is None else np.asarray(ensemble_spread, dtype=float)
+        )
+
+        ranks = rank_in_ensemble(obs, ensemble, obs_std, self.rng)
+        self.histogram += np.bincount(ranks, minlength=self.n_members + 1)
+
+        innov = obs - mean
+        total_var = spread**2 + obs_std**2
+        with np.errstate(divide="ignore", invalid="ignore"):
+            norm = innov / np.sqrt(total_var)
+        finite = np.isfinite(norm)
+        s = self.sums
+        s["n"] += len(obs)
+        s["innov"] += innov.sum()
+        s["innov2"] += (innov**2).sum()
+        s["n_norm"] += finite.sum()
+        s["norm"] += norm[finite].sum()
+        s["norm2"] += (norm[finite] ** 2).sum()
+        s["total_var"] += total_var.sum()
+        s["spread2"] += (spread**2).sum()
+        s["obs"] += obs.sum()
+        s["obs2"] += (obs**2).sum()
+        s["mean"] += mean.sum()
+        s["mean2"] += (mean**2).sum()
+        s["obs_mean"] += (obs * mean).sum()
+        return ranks
+
+    def diagnostics(self) -> dict:
+        """Summary statistics over everything added so far."""
+        s = self.sums
+        n = s["n"]
+        nan = float("nan")
+        if n == 0:
+            return {"n_obs": 0, "n_ensemble": self.n_members, "frac_below": nan, "frac_above": nan,
+                    "frac_outside_expected": 2 / (self.n_members + 1), "innovation_mean": nan,
+                    "innovation_std": nan, "normalized_innov_mean": nan, "normalized_innov_std": nan,
+                    "correlation": nan, "rmse": nan, "mean_spread": nan, "spread_skill": nan}
+
+        innov_mean = s["innov"] / n
+        rmse = np.sqrt(s["innov2"] / n)
+        norm_mean = s["norm"] / s["n_norm"] if s["n_norm"] else nan
+        norm_var = s["norm2"] / s["n_norm"] - norm_mean**2 if s["n_norm"] else nan
+        var_obs = s["obs2"] / n - (s["obs"] / n) ** 2
+        var_mean = s["mean2"] / n - (s["mean"] / n) ** 2
+        cov = s["obs_mean"] / n - (s["obs"] / n) * (s["mean"] / n)
+        corr = cov / np.sqrt(var_obs * var_mean) if n > 1 and var_obs > 0 and var_mean > 0 else nan
+        return {
+            "n_obs": int(n),
+            "n_ensemble": self.n_members,
+            "frac_below": self.histogram[0] / n,
+            "frac_above": self.histogram[-1] / n,
+            "frac_outside_expected": 2 / (self.n_members + 1),
+            "innovation_mean": float(innov_mean),
+            "innovation_std": float(np.sqrt(max(s["innov2"] / n - innov_mean**2, 0.0))),
+            "normalized_innov_mean": float(norm_mean),
+            "normalized_innov_std": float(np.sqrt(max(norm_var, 0.0))),
+            "correlation": float(corr),
+            "rmse": float(rmse),
+            "mean_spread": float(np.sqrt(s["spread2"] / n)),
+            # ~1 when the ensemble spread and the obs error account for the error of the mean
+            "spread_skill": float(np.sqrt(s["total_var"] / n) / rmse) if rmse > 0 else nan,
+        }
+
+
+def rank_histogram(
+    obs: np.ndarray,
+    ensemble: np.ndarray,
+    obs_std: np.ndarray | float = 0.0,
+    ensemble_mean: np.ndarray | None = None,
+    ensemble_spread: np.ndarray | None = None,
+    rng: np.random.Generator | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict]:
     """
-    Compute a rank histogram from a diagnostics DataFrame.
+    Rank histogram of observations against an ensemble, with summary diagnostics.
 
-    Ranks each observation within the actual ensemble member values.
+    A flat histogram means a reliable ensemble; a U shape an under-dispersive one
+    (or a biased one, if lopsided); a dome an over-dispersive one. For more
+    observations than fit in memory at once, use `RankHistogramAccumulator`.
+
+    Args:
+        obs: Observations, shape (n,).
+        ensemble: Member values, shape (n, n_members).
+        obs_std: Observation error standard deviation, scalar or shape (n,).
+        ensemble_mean, ensemble_spread: See `RankHistogramAccumulator.add`.
+        rng: Random generator, see `rank_in_ensemble`.
+
+    Returns:
+        (histogram counts of length n_members + 1, per-observation ranks, diagnostics)
+    """
+    acc = RankHistogramAccumulator(np.asarray(ensemble).shape[1], rng)
+    ranks = acc.add(obs, ensemble, obs_std, ensemble_mean, ensemble_spread)
+    return acc.histogram, ranks, acc.diagnostics()
+
+
+def compute_rank_histogram(
+    df: pd.DataFrame,
+    use_posterior: bool = False,
+    rng: np.random.Generator | None = None,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    """
+    Compute a rank histogram from a DART diagnostics DataFrame.
+
+    Ranks each observation within the ensemble member values, with the members
+    perturbed by the observation error (see `rank_in_ensemble`).
 
     Args:
         df: DataFrame with columns obs, obs_variance, prior_mean, prior_spread,
             and member_X_prior / member_X_posterior columns for each ensemble member X
             (zero-indexed, no leading zeros), and optionally posterior_mean,
             posterior_spread.
+        use_posterior: Rank against the posterior members instead of the prior.
+        rng: Random generator, see `rank_in_ensemble`.
 
     Returns:
         Tuple of (histogram, ranks, diagnostics_dict).
@@ -135,40 +319,14 @@ def compute_rank_histogram(
     if not member_cols:
         raise ValueError(f"No member columns found for stage '{stage}'.")
 
-    ensemble = df[member_cols].values  # shape: (n_obs, n_members)
-    n_members = ensemble.shape[1]
-
-    obs = df["obs"].values
-    obs_std = np.sqrt(df["obs_variance"].values)
-
-    if use_posterior:
-        ensemble_mean = df["posterior_mean"].values
-        ensemble_spread = df["posterior_spread"].values
-    else:
-        ensemble_mean = df["prior_mean"].values
-        ensemble_spread = df["prior_spread"].values
-
-    # Rank each observation within its ensemble, with dithering to handle ties
-    obs_dithered = obs + np.random.normal(0, obs_std)
-    ranks = np.sum(ensemble < obs_dithered[:, np.newaxis], axis=1)
-
-    hist, _ = np.histogram(ranks, bins=np.arange(n_members + 2) - 0.5)
-
-    innovations = obs - ensemble_mean
-    normalized_innovations = innovations / np.sqrt(ensemble_spread**2 + obs_std**2)
-
-    diagnostics = {
-        "n_obs": len(obs),
-        "n_ensemble": n_members,
-        "innovation_mean": np.mean(innovations),
-        "innovation_std": np.std(innovations),
-        "normalized_innov_mean": np.nanmean(normalized_innovations),
-        "normalized_innov_std": np.nanstd(normalized_innovations),
-        "correlation": np.corrcoef(obs, ensemble_mean)[0, 1],
-        "rmse": np.sqrt(np.mean(innovations**2)),
-    }
-
-    return hist, ranks, diagnostics
+    return rank_histogram(
+        df["obs"].to_numpy(dtype=float),
+        df[member_cols].to_numpy(dtype=float),
+        np.sqrt(df["obs_variance"].to_numpy(dtype=float)),
+        ensemble_mean=df[f"{stage}_mean"].to_numpy(dtype=float),
+        ensemble_spread=df[f"{stage}_spread"].to_numpy(dtype=float),
+        rng=rng,
+    )
 
 
 def _rms(x) -> float:

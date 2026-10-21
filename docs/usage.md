@@ -410,6 +410,12 @@ Observations are first converted to the WRF-Ensembly parquet format with the sep
     :prog_name: wrf-ensembly EXPERIMENT_PATH validation obs-curtain
     :depth: 2
 
+::: mkdocs-click
+    :module: wrf_ensembly.commands.validation
+    :command: rank_histogram
+    :prog_name: wrf-ensembly EXPERIMENT_PATH validation rank-histogram
+    :depth: 2
+
 ## Legacy obs_seq tools
 
 These commands belong to the older workflow where each observation file was converted to `obs_seq` directly by a DART converter. They are kept for existing experiments; new experiments should use the [observations](#observations) commands instead.

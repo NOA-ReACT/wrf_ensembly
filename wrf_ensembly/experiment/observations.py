@@ -1,6 +1,7 @@
 import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterator
 
 import duckdb
 import numpy as np
@@ -579,6 +580,125 @@ class ExperimentObservations:
             result["time"] = result["time"].dt.tz_localize("UTC")
 
         return result
+
+    def iter_member_ensemble(
+        self,
+        instrument: str,
+        quantity: str,
+        source: str = "forecast",
+        qc_flags: list[int] | None = None,
+        start_date: dt.datetime | None = None,
+        end_date: dt.datetime | None = None,
+        max_obs_per_chunk: int = 500_000,
+        memory_limit: str = "8GB",
+    ) -> Iterator[tuple[pd.DataFrame, np.ndarray]]:
+        """
+        Per-member model values at each observation, one row per observation, in
+        chunks of consecutive hours.
+
+        Reads `data/validation/model_member_{source}.parquet` (from
+        `validation interpolate-model-per-member`) and joins it with the observations.
+        Only observations that every member has a finite value for are returned.
+        The parquet holds one row per (observation, member), hundreds of millions of
+        rows for a dense satellite product, so it is never pivoted in one go: hours
+        are packed into chunks of at most `max_obs_per_chunk` observations (an hour
+        with more is a chunk of its own), and DuckDB is capped at `memory_limit`.
+
+        Args:
+            instrument: Instrument name.
+            quantity: Observed quantity.
+            source: 'forecast' or 'analysis'.
+            qc_flags: If set, only these QC flags (e.g. [-1] for held-out superobs).
+            start_date: If set, only observations at or after this time.
+            end_date: If set, only observations before or at this time.
+            max_obs_per_chunk: Target number of observations per chunk.
+            memory_limit: DuckDB memory limit for the queries.
+
+        Yields:
+            (observations, members): a DataFrame with time (UTC), longitude, latitude,
+            value, value_uncertainty and qc_flag, and the member values aligned with
+            it, shape (n_obs, n_members). Nothing if the parquet does not exist or
+            nothing matches.
+        """
+        parquet_path = self.paths.data_validation / f"model_member_{source}.parquet"
+        if not parquet_path.exists():
+            return
+
+        n_members = self.cfg.assimilation.n_members
+        with self._get_duckdb(read_only=True) as con:
+            con.execute(f"SET memory_limit = '{memory_limit}'")
+
+            # Observations per hour, from one member's rows: cheap, and enough to plan
+            hours = con.execute(
+                """
+                SELECT date_trunc('hour', time) AS hour, count(*) AS n
+                FROM read_parquet(?)
+                WHERE instrument = ? AND quantity = ? AND member = 0
+                GROUP BY 1 ORDER BY 1
+                """,
+                [str(parquet_path), instrument, quantity],
+            ).fetchall()
+
+            chunks: list[tuple[dt.datetime, dt.datetime]] = []
+            count = 0
+            for hour, n in hours:
+                if chunks and count + n <= max_obs_per_chunk:
+                    chunks[-1] = (chunks[-1][0], hour + dt.timedelta(hours=1))
+                    count += n
+                else:
+                    chunks.append((hour, hour + dt.timedelta(hours=1)))
+                    count = n
+
+            obs_where = ""
+            obs_params: list = []
+            if qc_flags is not None:
+                obs_where += f" AND qc_flag IN ({', '.join('?' * len(qc_flags))})"
+                obs_params.extend(qc_flags)
+            if start_date is not None:
+                obs_where += " AND time >= ?"
+                obs_params.append(start_date)
+            if end_date is not None:
+                obs_where += " AND time <= ?"
+                obs_params.append(end_date)
+
+            # sql
+            query = f"""
+                WITH pm AS (
+                    SELECT rowid, member, value FROM read_parquet(?)
+                    WHERE instrument = ? AND quantity = ? AND time >= ? AND time < ?
+                ),
+                o AS (
+                    SELECT ROWID AS rid, time, longitude, latitude, value,
+                           value_uncertainty, qc_flag
+                    FROM observations
+                    WHERE instrument = ? AND quantity = ? AND time >= ? AND time < ?
+                      AND isfinite(value) {obs_where}
+                )
+                SELECT
+                    o.time AT TIME ZONE 'UTC' AS time,
+                    o.longitude, o.latitude, o.value, o.value_uncertainty, o.qc_flag,
+                    list(pm.value ORDER BY pm.member) AS members
+                FROM pm
+                JOIN o ON o.rid = pm.rowid
+                GROUP BY pm.rowid, o.time, o.longitude, o.latitude, o.value,
+                         o.value_uncertainty, o.qc_flag
+                -- count(value) skips NULLs (how NaN often comes back from parquet)
+                HAVING count(pm.value) = ? AND bool_and(isfinite(pm.value))
+                ORDER BY o.time, pm.rowid
+            """
+            for t0, t1 in chunks:
+                params = [str(parquet_path), instrument, quantity, t0, t1,
+                          instrument, quantity, t0, t1, *obs_params, n_members]
+                table = con.execute(query, params).fetch_arrow_table()
+                if table.num_rows == 0:
+                    continue
+                lists = table.column("members").combine_chunks()
+                members = lists.flatten().to_numpy(zero_copy_only=False).reshape(-1, n_members)
+                result = table.drop_columns(["members"]).to_pandas()
+                del table, lists
+                if result["time"].dt.tz is None:
+                    result["time"] = result["time"].dt.tz_localize("UTC")
+                yield result, members
 
     def get_model_interpolated(
         self,

@@ -1144,14 +1144,17 @@ def plot_rank_histogram(
     hist: np.ndarray,
     diagnostics: dict,
     title_suffix: str = "",
+    hist_no_obs_error: np.ndarray | None = None,
 ) -> Figure:
     """
     Plot a rank histogram with confidence intervals and diagnostics text.
 
     Args:
-        hist: Histogram counts from compute_rank_histogram.
-        diagnostics: Diagnostics dict from compute_rank_histogram.
+        hist: Histogram counts from compute_rank_histogram / rank_histogram.
+        diagnostics: Diagnostics dict from the same call.
         title_suffix: Optional suffix for the title.
+        hist_no_obs_error: Optional counts ranked against the unperturbed members,
+            drawn as a step line on top of the bars.
 
     Returns:
         A matplotlib Figure.
@@ -1166,7 +1169,23 @@ def plot_rank_histogram(
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
     x = np.arange(n_ensemble + 1)
-    ax1.bar(x, hist, alpha=0.7, edgecolor="black", color="steelblue")
+    ax1.bar(
+        x,
+        hist,
+        alpha=0.7,
+        edgecolor="black",
+        color="steelblue",
+        label="members perturbed with the obs error",
+    )
+    if hist_no_obs_error is not None:
+        ax1.step(
+            x,
+            hist_no_obs_error,
+            where="mid",
+            color="black",
+            linewidth=1.2,
+            label="raw members (no obs error)",
+        )
     ax1.axhline(
         expected_count,
         color="red",
@@ -1212,6 +1231,13 @@ def plot_rank_histogram(
         f"  (should be ~0 and ~1 if well-calibrated)\n\n"
         f"Correlation (obs vs ensemble): {diagnostics['correlation']:.4f}"
     )
+    if "frac_below" in diagnostics:
+        diag_text += (
+            f"\n\nBelow / above the ensemble: "
+            f"{diagnostics['frac_below']:.3f} / {diagnostics['frac_above']:.3f}\n"
+            f"  (reliable: {diagnostics['frac_outside_expected'] / 2:.3f} each)\n"
+            f"Spread-skill: {diagnostics['spread_skill']:.3f} (reliable: ~1)"
+        )
     ax2.text(
         0.05,
         0.95,
