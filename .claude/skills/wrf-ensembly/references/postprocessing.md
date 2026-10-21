@@ -52,7 +52,7 @@ While it runs:
   every minute or two, since postprocessing is minutes to tens of minutes per cycle. A job that
   climbs steadily from timestep to timestep (rather than levelling off after the first one) is
   leaking, typically through a processor, and will OOM on long cycles.
-- **Locally on the dev VM**: find the PID (`pgrep -f "postprocess run"`) and sample
+- **Locally (outside SLURM)**: find the PID (`pgrep -f "postprocess run"`) and sample
   `ps -o rss=,etime= -p <pid>` alongside `free -g`. To record peak memory for a single run, use
   `/usr/bin/time -v wrf-ensembly ... postprocess run --cycle N`.
 - **Progress**: the newest `logs/<ts>-postprocess-run/wrf_ensembly.log` shows which timestep and

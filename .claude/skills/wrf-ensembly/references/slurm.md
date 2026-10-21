@@ -75,5 +75,5 @@ Report back when: a task fails (go straight into `troubleshooting.md`), the anal
 starts or finishes, the cycle number moves forward, or something is pending for an unexpected
 reason (`DependencyNeverSatisfied`, `QOSMaxJobsPerUserLimit`, ...).
 
-On the dev VM (host `Iridium`), SLURM is a single node with 32 hyperthreads, of which the user
-uses 24. Big runs go to the team HPC.
+Per-machine limits (cores, memory, whether to confirm before submitting) and the recommended
+members x ranks layout are in `hosts.md`.

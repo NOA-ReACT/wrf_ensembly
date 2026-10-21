@@ -27,7 +27,7 @@ Re-adding a file (`add` with the same filename) **replaces** its rows. That also
 
 Converters: `wrf-ensembly-obs convert --help` lists them. Each one has its own options.
 `wrf-ensembly-obs operations dump-info FILE` is the quick way to check a converted file
-before adding it. Add with `--jobs`. On the dev VM keep that ≤ 24.
+before adding it. Add with `--jobs`, within the host's core limit (`hosts.md`).
 
 ## Derived vs. source columns
 

@@ -120,11 +120,10 @@ regenerated but it takes hours to days. Watch for indirect deletion too:
 - `experiment copy-model --force` wipes `work/ensemble/member_*` (including rsl evidence).
 - `status reset` / `ensemble reset-cycle` don't delete data but rewind state; confirm intent.
 
-Also confirm before submitting SLURM jobs (`sbatch`, `slurm run-experiment`, ...) on the
-team HPC — they consume a shared allocation. Re-running `advance-member` for one member
-locally on the dev VM is fine to just do. On the dev VM (`Iridium`), use at most 24 cores
-(`--cores`, `--jobs`). It has 32 hardware threads, but they're hyperthreads. The user runs the very large experiments by hand
-on a separate big HPC; if a path or hostname suggests that machine, only inspect, don't act.
+**What you may run, and with how many cores, depends on the machine.** Before running WRF,
+DART, postprocessing or submitting jobs, run `hostname` and read its section in
+`references/hosts.md` (permissions, core and memory limits, MPI flags, recommended layout).
+An unknown host is treated as shared: ask first.
 
 Running WRF or DART outside SLURM (e.g. `advance-member` in your shell) needs what the jobfiles
 normally set up: `ulimit -s unlimited` (otherwise wrf.exe segfaults right after reading wrfbdy)
@@ -143,6 +142,7 @@ Read the matching reference before acting — each has the non-obvious parts:
 - **New experiment from a template or an existing one** → `references/experiment-decisions.md`, then `references/derive-experiment.md`
 - **Preprocessing with new meteorology or chem data** → `references/preprocessing.md`
 - **Submitting jobs or keeping an eye on a running job** → `references/slurm.md`
+- **How many cores/members to run on this machine, MPI flags** → `references/hosts.md`
 - **Postprocessing, including memory/OOM** → `references/postprocessing.md`
 - **Observations: converting, adding, editing or querying the DB, validation columns** → `references/observations.md`
 
