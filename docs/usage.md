@@ -375,6 +375,12 @@ Observations are first converted to the WRF-Ensembly parquet format with the sep
 ## Validation
 
 ::: mkdocs-click
+    :module: wrf_ensembly.commands.plots
+    :command: forward_operator_check
+    :prog_name: wrf-ensembly EXPERIMENT_PATH plots forward-operator-check
+    :depth: 2
+
+::: mkdocs-click
     :module: wrf_ensembly.commands.validation
     :command: interpolate_model
     :prog_name: wrf-ensembly EXPERIMENT_PATH validation interpolate-model

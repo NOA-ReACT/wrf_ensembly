@@ -586,8 +586,9 @@ def plot_cycle_consistency_timeseries(
 
     Panels, with one line per observation type:
       (0) O-B and O-A RMS, with the RMS reduction on a twin axis
-      (1) Spread-skill ratio, with a reference line at 1
+      (1) Spread-skill ratio, with (dashed) and without the mean O-B, reference at 1
       (2) Desroziers observation-error estimate against the assigned error
+      (3) Desroziers background-error estimate against the prior ensemble spread
 
     Cycles with too few assimilated observations carry NaN metrics and appear as
     gaps, which is intended.
@@ -600,11 +601,11 @@ def plot_cycle_consistency_timeseries(
     Returns:
         A matplotlib Figure.
     """
-    fig, axes = plt.subplots(3, 1, figsize=(12, 13), sharex=True)
+    fig, axes = plt.subplots(4, 1, figsize=(12, 17), sharex=True)
 
     obs_types = sorted(df["obs_type"].unique())
 
-    ax_rms, ax_ratio, ax_sigma = axes
+    ax_rms, ax_ratio, ax_sigma, ax_sigma_b = axes
     ax_reduction = ax_rms.twinx()
 
     for obs_type in obs_types:
@@ -628,7 +629,16 @@ def plot_cycle_consistency_timeseries(
             alpha=0.4,
         )
 
-        ax_ratio.plot(cycles, sub["spread_skill_ratio"], "o-", label=obs_type)
+        (rline,) = ax_ratio.plot(cycles, sub["spread_skill_ratio"], "o-", label=obs_type)
+        if "spread_skill_ratio_debiased" in sub:
+            ax_ratio.plot(
+                cycles,
+                sub["spread_skill_ratio_debiased"],
+                "s--",
+                color=rline.get_color(),
+                alpha=0.7,
+                label=f"{obs_type}, mean O-B removed",
+            )
 
         (sline,) = ax_sigma.plot(
             cycles, sub["sigma_o_desroziers"], "o-", label=f"{obs_type} Desroziers"
@@ -642,6 +652,19 @@ def plot_cycle_consistency_timeseries(
             label=f"{obs_type} assigned",
         )
 
+        if "sigma_b_desroziers" in sub:
+            (bline,) = ax_sigma_b.plot(
+                cycles, sub["sigma_b_desroziers"], "o-", label=f"{obs_type} Desroziers"
+            )
+            ax_sigma_b.plot(
+                cycles,
+                sub["mean_prior_spread"],
+                "s--",
+                color=bline.get_color(),
+                alpha=0.7,
+                label=f"{obs_type} prior spread",
+            )
+
     ax_rms.set_ylabel("RMS")
     ax_rms.set_title("Innovation RMS before and after the analysis")
     ax_rms.grid(True, alpha=0.3)
@@ -652,7 +675,7 @@ def plot_cycle_consistency_timeseries(
     ax_ratio.axhline(
         1.0, color="red", lw=0.8, ls="--", label="consistent (ratio = 1)"
     )
-    ax_ratio.set_ylabel("var(O-B) / (σ_o² + σ_B²)")
+    ax_ratio.set_ylabel("⟨(O-B)²⟩ / ⟨σ_o² + σ_B²⟩")
     ax_ratio.set_title(
         "Spread-skill ratio - below 1 over-specifies the observation error, above 1 under-specifies it"
     )
@@ -660,16 +683,75 @@ def plot_cycle_consistency_timeseries(
     ax_ratio.legend(fontsize=8)
 
     ax_sigma.set_ylabel("σ_o")
-    ax_sigma.set_xlabel("Cycle")
     ax_sigma.set_title("Desroziers observation-error estimate vs the assigned error")
     ax_sigma.grid(True, alpha=0.3)
     ax_sigma.legend(fontsize=8)
+
+    ax_sigma_b.set_ylabel("σ_B")
+    ax_sigma_b.set_xlabel("Cycle")
+    ax_sigma_b.set_title(
+        "Desroziers background-error estimate vs the prior spread - above the spread is under-dispersive"
+    )
+    ax_sigma_b.grid(True, alpha=0.3)
+    ax_sigma_b.legend(fontsize=8)
 
     title = "Data assimilation consistency across cycles"
     if title_suffix:
         title += f" - {title_suffix}"
     fig.suptitle(title, fontsize=14, fontweight="bold")
 
+    fig.tight_layout()
+    return fig
+
+
+def plot_forward_operator_check(
+    matched: pd.DataFrame, table: pd.DataFrame, title_suffix: str = ""
+) -> Figure:
+    """
+    DART's prior mean against the interpolated postprocessed forecast.
+
+    Left: every matched observation, one colour per observation type, with the 1:1
+    line and the pooled slope through zero. Right: the slope per cycle.
+
+    Args:
+        matched: Rows from `diagnostics.match_dart_to_db` (prior_mean, model_forecast,
+            obs_type).
+        table: Frame from `diagnostics.forward_operator_metrics_to_dataframe`.
+        title_suffix: Optional suffix for the figure title.
+    """
+    fig, (ax_sc, ax_cyc) = plt.subplots(1, 2, figsize=(15, 6))
+
+    for obs_type in sorted(matched["obs_type"].unique()):
+        sub = matched[matched["obs_type"] == obs_type]
+        ok = np.isfinite(sub["prior_mean"]) & np.isfinite(sub["model_forecast"])
+        p, m = sub["prior_mean"][ok], sub["model_forecast"][ok]
+        slope = np.sum(p * m) / np.sum(m**2) if np.sum(m**2) > 0 else np.nan
+        ax_sc.scatter(m, p, s=3, alpha=0.4, label=f"{obs_type} (slope {slope:.3f}, n = {ok.sum()})")
+
+        rows = table[table["obs_type"] == obs_type].sort_values("cycle")
+        ax_cyc.plot(rows["cycle"], rows["slope"], "o-", label=obs_type)
+
+    lim = np.nanmax(np.r_[matched["prior_mean"], matched["model_forecast"], 0.0]) * 1.05 or 1.0
+    ax_sc.plot([0, lim], [0, lim], color="gray", lw=0.8, ls="--", label="1:1")
+    ax_sc.set_xlim(min(0.0, np.nanmin(matched["model_forecast"])), lim)
+    ax_sc.set_ylim(min(0.0, np.nanmin(matched["prior_mean"])), lim)
+    ax_sc.set_xlabel("Interpolated forecast mean (validation interpolate-model)")
+    ax_sc.set_ylabel("DART prior ensemble mean")
+    ax_sc.set_title("Prior mean at the assimilated observations")
+    ax_sc.grid(True, alpha=0.3)
+    ax_sc.legend(fontsize=8, markerscale=3)
+
+    ax_cyc.axhline(1.0, color="gray", lw=0.8, ls="--")
+    ax_cyc.set_xlabel("Cycle")
+    ax_cyc.set_ylabel("Slope through zero, DART / interpolated")
+    ax_cyc.set_title("Per cycle (1 = the filter sees the same model as the validation)")
+    ax_cyc.grid(True, alpha=0.3)
+    ax_cyc.legend(fontsize=8)
+
+    title = "Forward operator check"
+    if title_suffix:
+        title += f" - {title_suffix}"
+    fig.suptitle(title, fontsize=14, fontweight="bold")
     fig.tight_layout()
     return fig
 

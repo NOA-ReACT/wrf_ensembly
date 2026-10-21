@@ -9,7 +9,10 @@ from wrf_ensembly.config import PlotVariableConfig
 from wrf_ensembly.console import logger
 from wrf_ensembly.diagnostics import (
     compute_cycle_consistency,
+    compute_forward_operator_metrics,
     consistency_metrics_to_dataframe,
+    forward_operator_metrics_to_dataframe,
+    match_dart_to_db,
     read_obs_seq_nc,
 )
 from wrf_ensembly.experiment import experiment
@@ -17,6 +20,7 @@ from wrf_ensembly.plotting import (
     generate_filter_stats_plots,
     plot_cycle_consistency_timeseries,
     plot_forecast,
+    plot_forward_operator_check,
     plot_forecast_vs_analysis,
 )
 from wrf_ensembly.validation import EnsembleSpreadAnalysis
@@ -325,13 +329,18 @@ def cycle_consistency(
     resulting RMS reduction, and two checks on whether the assigned observation
     error is consistent with the observed innovations.
 
-    The spread-skill ratio is var(O-B) / (sigma_o^2 + prior_spread^2), which is
-    about 1 when the observation error and the ensemble spread together explain the
-    innovations. Below 1 the observation error is over-specified, so observations
-    are under-weighted and increments are conservative; above 1 it is
-    under-specified, risking over-fitting. The Desroziers estimate is an independent
-    read on the same question - a large gap from the assigned error suggests moving
-    the assigned value toward it.
+    The spread-skill ratio is mean((O-B)^2) / mean(sigma_o^2 + prior_spread^2),
+    which is about 1 when the observation error and the ensemble spread together
+    explain the innovations. Below 1 the observation error is over-specified, so
+    observations are under-weighted and increments are conservative; above 1 it is
+    under-specified, risking over-fitting. It is also given with the cycle's mean
+    O-B removed: a bias raises the first but not the second.
+
+    The Desroziers estimates are an independent read on the same question.
+    sqrt(E[(O-A)(O-B)]) estimates the observation error - a large gap from the
+    assigned error suggests moving the assigned value toward it - and
+    sqrt(E[(A-B)(O-B)]) the background error in observation space, to compare with
+    the prior ensemble spread (well above it: the ensemble is under-dispersive).
 
     Writes a per-cycle CSV table and across-cycle summary plots to
     plots/cycle_consistency/. Requires that `ensemble filter` has run.
@@ -405,13 +414,137 @@ def cycle_consistency(
             "oma_rms",
             "rms_reduction_pct",
             "spread_skill_ratio",
+            "spread_skill_ratio_debiased",
             "mean_sigma_o",
             "sigma_o_desroziers",
+            "mean_prior_spread",
+            "sigma_b_desroziers",
         ]
     ]
     for line in summary.to_string(
         index=False, float_format=lambda x: f"{x:.4g}"
     ).splitlines():
+        logger.info(line)
+
+
+@plots_cli.command()
+@click.option(
+    "--cycle",
+    "cycles",
+    multiple=True,
+    type=int,
+    help="Cycle to include. Can be specified multiple times. "
+    "Defaults to every cycle that has a diagnostics file.",
+)
+@pass_experiment_path
+def forward_operator_check(experiment_path: Path, cycles: tuple[int, ...]):
+    """
+    Check that the filter sees the same model as the validation.
+
+    Compares DART's prior ensemble mean at each assimilated observation (from the
+    obs_seq.final diagnostics) with the postprocessed forecast mean interpolated to
+    the same observation (the `model_forecast` column written by `validation
+    interpolate-model`). The two should agree; a factor between them is a bias the
+    filter sees and the validation doesn't, for example DART's forward operator and
+    the postprocessing using different optics.
+
+    DART observations are matched back to the database on quantity, time, position
+    and value. Observations that only exist in the obs_seq (e.g. superobs made at
+    prepare-cycles time and not stored in the database) cannot be matched and are
+    counted as unmatched.
+
+    Writes a per-cycle CSV and a scatter/slope plot to
+    plots/forward_operator_check/. Requires `ensemble filter` and `validation
+    interpolate-model` to have run.
+    """
+
+    logger.setup("plots-forward-operator-check", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+
+    if cycles:
+        cycle_indices = sorted(cycles)
+    else:
+        cycle_indices = sorted(
+            int(m.group(1))
+            for path in exp.paths.data_diag.glob("cycle_*.nc")
+            if (m := re.fullmatch(r"cycle_(\d+)\.nc", path.name)) is not None
+        )
+        if not cycle_indices:
+            logger.error(f"No diagnostics files found in {exp.paths.data_diag}")
+            logger.error("Ensure `ensemble filter` has been run.")
+            return
+
+    import pandas as pd
+
+    from wrf_ensembly.observations.dart import OBS_TYPE_TABLE
+
+    quantity_of = {v: k for k, v in OBS_TYPE_TABLE.items()}
+
+    rows, matched_all = [], []
+    for cycle in cycle_indices:
+        diag_file = exp.paths.data_diag / f"cycle_{cycle}.nc"
+        if not diag_file.exists():
+            logger.warning(f"Diagnostics file not found, skipping: {diag_file}")
+            continue
+
+        dart = read_obs_seq_nc(diag_file)
+        dart = dart[dart["dart_qc"] == 0]
+        if dart.empty:
+            logger.info(f"Cycle {cycle}: no assimilated observations")
+            continue
+
+        times = pd.to_datetime(dart["timestamp"]).dt.tz_localize("UTC")
+        quantities = sorted({quantity_of.get(t, t) for t in dart["obs_type"].unique()})
+        db = exp.obs.get_model_forecast_in_window(
+            quantities,
+            times.min() - pd.Timedelta(seconds=1),
+            times.max() + pd.Timedelta(seconds=1),
+        )
+        matched = match_dart_to_db(dart, db)
+        matched_all.append(matched.assign(cycle=cycle))
+        logger.info(
+            f"Cycle {cycle}: matched {len(matched)} of {len(dart)} assimilated observations"
+        )
+
+        rows.append(compute_forward_operator_metrics(dart, matched, cycle, "ALL"))
+        for obs_type in sorted(dart["obs_type"].unique()):
+            rows.append(
+                compute_forward_operator_metrics(
+                    dart[dart["obs_type"] == obs_type],
+                    matched[matched["obs_type"] == obs_type],
+                    cycle,
+                    obs_type,
+                )
+            )
+
+    table = forward_operator_metrics_to_dataframe(rows)
+    if table.empty or table["n_matched"].sum() == 0:
+        logger.error(
+            "No assimilated observation could be matched to a database row with a "
+            "model_forecast. Run `validation interpolate-model` first."
+        )
+        return
+
+    output_dir = exp.paths.plots / "forward_operator_check"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / "forward_operator_check.csv"
+    table.to_csv(csv_path, index=False)
+    logger.info(f"Saved {csv_path}")
+
+    import matplotlib.pyplot as plt
+
+    fig = plot_forward_operator_check(
+        pd.concat(matched_all), table[table["obs_type"] != "ALL"], exp.cfg.metadata.name
+    )
+    plot_path = output_dir / "forward_operator_check.png"
+    fig.savefig(plot_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    logger.info(f"Saved {plot_path}")
+
+    summary = table[table["obs_type"] == "ALL"][
+        ["cycle", "n_dart", "n_matched", "mean_dart_prior", "mean_model_forecast", "slope", "median_ratio", "r"]
+    ]
+    for line in summary.to_string(index=False, float_format=lambda x: f"{x:.4g}").splitlines():
         logger.info(line)
 
 

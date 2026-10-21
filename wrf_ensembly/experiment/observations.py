@@ -721,6 +721,44 @@ class ExperimentObservations:
 
         return result
 
+    def get_model_forecast_in_window(
+        self,
+        quantities: list[str],
+        start_date: dt.datetime,
+        end_date: dt.datetime,
+    ) -> pd.DataFrame:
+        """
+        Observations of the given quantities in a time window that have a model_forecast.
+
+        Used to put the interpolated model next to DART's forward operator for the
+        same observations (see `diagnostics.match_dart_to_db`). Every QC flag is
+        returned, since the match is made on time, position and value.
+
+        Returns:
+            DataFrame with instrument, quantity, time (UTC), longitude, latitude,
+            value and model_forecast. Empty if nothing matches.
+        """
+        if not quantities:
+            return pd.DataFrame(
+                columns=["instrument", "quantity", "time", "longitude", "latitude", "value", "model_forecast"]
+            )
+        placeholders = ", ".join("?" * len(quantities))
+        # sql
+        query = f"""
+            SELECT instrument, quantity, time AT TIME ZONE 'UTC' AS time,
+                   longitude, latitude, value, model_forecast
+            FROM observations
+            WHERE model_forecast IS NOT NULL
+              AND quantity IN ({placeholders})
+              AND time >= ? AND time <= ?
+        """
+        with self._get_duckdb(read_only=True) as con:
+            result = con.execute(query, [*quantities, start_date, end_date]).fetchdf()
+
+        if not result.empty and result["time"].dt.tz is None:
+            result["time"] = result["time"].dt.tz_localize("UTC")
+        return result
+
     def get_reconstructable_for_pair(
         self,
         instrument: str,
