@@ -25,12 +25,27 @@ def _write_slice(var: netCDF4.Variable, index: tuple, values: np.ndarray) -> Non
     """
     values = np.asarray(values)
     if values.dtype.kind not in "SUO":
-        var[index] = values
+        var[index] = _mask_missing(var, values)
         return
 
     int_axes = tuple(ax for ax, i in enumerate(index) if isinstance(i, int))
     slices = tuple(slice(i, i + 1) if isinstance(i, int) else i for i in index)
     var[slices] = np.expand_dims(values, int_axes)
+
+
+def _mask_missing(var: netCDF4.Variable, values: np.ndarray) -> np.ndarray:
+    """
+    Turns NaN into masked values for variables that have a fill value, so that they
+    are written as the fill value. Lossy compression (quantization) leaves the fill
+    value alone but turns a NaN into zero.
+    """
+
+    if values.dtype.kind != "f" or "_FillValue" not in var.ncattrs():
+        return values
+    missing = np.isnan(values)
+    if not missing.any():
+        return values
+    return np.ma.masked_array(values, mask=missing)
 
 
 class StreamingEnsembleWriter:
@@ -141,7 +156,7 @@ class StreamingEnsembleWriter:
                 _write_slice(var, (self.time_index, Ellipsis), values)
             else:
                 if self.time_index == 0 and member_i == 0:
-                    var[:] = values
+                    var[:] = _mask_missing(var, np.asarray(values))
 
     def finalize_timestep(self) -> None:
         """Flush to disk and advance to the next timestep."""
@@ -280,7 +295,7 @@ class StreamingNetCDFWriter:
             else:
                 # Non-time-varying variable, only write once
                 if self.time_index == 0:
-                    var[:] = values
+                    var[:] = _mask_missing(var, np.asarray(values))
 
         self.time_index += 1
         self.ds.sync()  # Flush to disk

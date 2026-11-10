@@ -216,7 +216,16 @@ def create_file(
             var.setncattr(attr_name, attr_value)
 
         if var_tmpl.constant_value is not None:
-            var[:] = var_tmpl.constant_value
+            constant = var_tmpl.constant_value
+            # NaN is stored as the fill value where there is one, the lossy
+            # compression would turn it into zero
+            if (
+                "_FillValue" in var_tmpl.attributes
+                and isinstance(constant, np.ndarray)
+                and constant.dtype.kind == "f"
+            ):
+                constant = np.ma.masked_invalid(constant)
+            var[:] = constant
 
     for attr_name, attr_value in template.global_attributes.items():
         ds.setncattr(attr_name, attr_value)
