@@ -42,6 +42,9 @@ class ProcessingContext:
     config: Config
     """Experiment configuration object"""
 
+    cache_dir: Path | None = None
+    """Directory of the experiment where processors can keep files between runs"""
+
 
 class DataProcessor(ABC):
     """
@@ -333,13 +336,17 @@ def load_processor_from_string(processor_spec: str, **kwargs) -> DataProcessor:
         )
 
 
-def create_pipeline_from_config(config: List[ProcessorConfig]) -> ProcessorPipeline:
+def create_pipeline_from_config(
+    config: List[ProcessorConfig], model: str = "wrf"
+) -> ProcessorPipeline:
     """
     Create a processor pipeline from configuration.
 
-    The XWRFPostProcessor is always included as the first step in the pipeline.
+    The first step is always the model's own processor, which brings its output to
+    the common layout: XWRFPostProcessor for WRF, IconPostProcessor for ICON.
 
     Args:
+        model: `metadata.model` of the experiment
         config: List of processor configurations, each containing:
                - 'processor': processor specification string
                - Additional keyword arguments for the processor
@@ -353,8 +360,14 @@ def create_pipeline_from_config(config: List[ProcessorConfig]) -> ProcessorPipel
             {"processor": "/path/to/file.py:MyProcessor", "param2": "value2"},
         ]
     """
-    # Start with the xWRF post-processor as the default, always as the first step
-    processors: list[DataProcessor] = [XWRFPostProcessor()]
+    processors: list[DataProcessor]
+    if model == "icon":
+        # Imported here, the module imports this one
+        from wrf_ensembly.icon.processor import IconPostProcessor
+
+        processors = [IconPostProcessor()]
+    else:
+        processors = [XWRFPostProcessor()]
 
     for proc_config in config:
         processor_spec = proc_config.processor

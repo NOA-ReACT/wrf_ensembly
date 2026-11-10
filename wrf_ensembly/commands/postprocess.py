@@ -10,7 +10,7 @@ from typing import Optional
 import click
 import xarray as xr
 
-from wrf_ensembly import experiment, processors
+from wrf_ensembly import experiment, model_files, processors
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.postprocess.compression import (
@@ -54,6 +54,14 @@ def print_variables_to_keep(experiment_path: Path):
 
     # Find a sample forecast file, cycle 0, member 0
     scratch_forecast_dir = exp.paths.scratch_forecasts_path(0)
+    if exp.cfg.is_icon:
+        logger.error(
+            "Not available for ICON: the names in variables_to_keep are matched "
+            "against the variables of icon.output_variables (temp, pres, u, v and z_mc "
+            "become air_temperature, air_pressure, wind_east, wind_north and "
+            "geopotential_height)"
+        )
+        sys.exit(1)
     forecast_files = list(scratch_forecast_dir.rglob("member_00/wrfout*"))
     if len(forecast_files) == 0:
         logger.error("No forecast files found, exiting")
@@ -173,7 +181,7 @@ def run(
     # Create processor pipeline
     try:
         pipeline = processors.create_pipeline_from_config(
-            exp.cfg.postprocess.processors
+            exp.cfg.postprocess.processors, exp.cfg.metadata.model
         )
         logger.info(
             f"Created pipeline with processors: {[p.name for p in pipeline.processors]}"
@@ -282,6 +290,8 @@ def clean(experiment_path: Path, cycle: Optional[int], remove_wrfout: bool):
             continue
 
         if remove_wrfout:
-            for f in scratch_dir.rglob("wrfout*"):
+            # For ICON this leaves the first guess and analysis files, which the next
+            # cycle starts from; `ensemble cycle` deletes those when they are not needed
+            for f in scratch_dir.rglob(model_files.forecast_glob(exp.cfg)):
                 logger.info(f"Removing {f}")
                 f.unlink()

@@ -15,6 +15,7 @@ from typing import Literal
 import numpy as np
 import xarray as xr
 
+from wrf_ensembly import model_files
 from wrf_ensembly.config import Config, PostprocessConfig
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import Experiment
@@ -107,6 +108,7 @@ def process_members_for_timestep(
     precomputed_first_member: xr.Dataset | None = None,
     compute_mean: bool = True,
     compute_sd: bool = True,
+    cache_dir: Path | None = None,
 ) -> tuple[dict[str, WelfordState] | None, np.ndarray]:
     """
     Process all ensemble members for a single output timestep.
@@ -157,6 +159,7 @@ def process_members_for_timestep(
                     input_file=wrfout_path,
                     output_file=Path("/dev/null"),  # Not used in streaming mode
                     config=config,
+                    cache_dir=cache_dir,
                 )
                 processed = pipeline.process(ds, context)
 
@@ -242,7 +245,7 @@ def cycle_has_analysis(exp: Experiment, cycle: int) -> bool:
     middle of a segment) never get one.
     """
 
-    wrfout_name = f"wrfout_d01_{exp.cycles[cycle].end:%Y-%m-%d_%H:%M:%S}"
+    wrfout_name = model_files.forecast_file_name(exp.cfg, exp.cycles[cycle].end)
     return (exp.paths.scratch_analysis_path(cycle) / "member_00" / wrfout_name).exists()
 
 
@@ -297,10 +300,10 @@ def process_cycle_streaming(
         logger.warning(f"Member 00 directory not found: {member_00_dir}")
         return None
 
-    member_00_files = sorted(member_00_dir.glob("wrfout_d01_*"))
+    member_00_files = sorted(member_00_dir.glob(model_files.forecast_glob(exp.cfg)))
 
     # Filter out cycle start time file (should not be included in output)
-    cycle_start_str = exp.cycles[cycle].start.strftime("%Y-%m-%d_%H:%M:%S")
+    cycle_start_str = model_files.time_stamp(exp.cfg, exp.cycles[cycle].start)
     member_00_files = [f for f in member_00_files if cycle_start_str not in f.name]
 
     if not member_00_files:
@@ -309,7 +312,7 @@ def process_cycle_streaming(
 
     # If only processing last timestep, filter to just that file
     if only_last_timestep:
-        cycle_end_str = exp.cycles[cycle].end.strftime("%Y-%m-%d_%H:%M:%S")
+        cycle_end_str = model_files.time_stamp(exp.cfg, exp.cycles[cycle].end)
         member_00_files = [f for f in member_00_files if cycle_end_str in f.name]
         if not member_00_files:
             logger.warning(f"Last timestep file not found for cycle {cycle}")
@@ -359,6 +362,7 @@ def process_cycle_streaming(
             input_file=first_member_paths[0],
             output_file=Path("/dev/null"),
             config=exp.cfg,
+            cache_dir=exp.paths.data / "regrid_weights",
         )
         template_ds = pipeline.process(ds, context)
 
@@ -422,6 +426,7 @@ def process_cycle_streaming(
             precomputed_first_member=template_ds,
             compute_mean=compute_mean,
             compute_sd=compute_sd,
+            cache_dir=exp.paths.data / "regrid_weights",
         )
         del template_ds
         write_statistics(first_accumulators, time_val)
@@ -446,6 +451,7 @@ def process_cycle_streaming(
                 ensemble_writer=ensemble_writer,
                 compute_mean=compute_mean,
                 compute_sd=compute_sd,
+                cache_dir=exp.paths.data / "regrid_weights",
             )
 
             # Finalize and write this timestep
@@ -505,10 +511,10 @@ def process_cycle_single_member(
         logger.warning(f"Member 00 directory not found: {member_00_dir}")
         return None
 
-    wrfout_files = sorted(member_00_dir.glob("wrfout_d01_*"))
+    wrfout_files = sorted(member_00_dir.glob(model_files.forecast_glob(exp.cfg)))
 
     # Filter out cycle start time
-    cycle_start_str = exp.cycles[cycle].start.strftime("%Y-%m-%d_%H:%M:%S")
+    cycle_start_str = model_files.time_stamp(exp.cfg, exp.cycles[cycle].start)
     wrfout_files = [f for f in wrfout_files if cycle_start_str not in f.name]
 
     if not wrfout_files:
@@ -516,7 +522,7 @@ def process_cycle_single_member(
         return None
 
     if only_last_timestep:
-        cycle_end_str = exp.cycles[cycle].end.strftime("%Y-%m-%d_%H:%M:%S")
+        cycle_end_str = model_files.time_stamp(exp.cfg, exp.cycles[cycle].end)
         wrfout_files = [f for f in wrfout_files if cycle_end_str in f.name]
 
     if not wrfout_files:
@@ -535,6 +541,7 @@ def process_cycle_single_member(
             input_file=first_file,
             output_file=Path("/dev/null"),
             config=exp.cfg,
+            cache_dir=exp.paths.data / "regrid_weights",
         )
         template_ds = pipeline.process(ds, context)
 
@@ -567,6 +574,7 @@ def process_cycle_single_member(
                     input_file=wrfout_file,
                     output_file=Path("/dev/null"),
                     config=exp.cfg,
+                    cache_dir=exp.paths.data / "regrid_weights",
                 )
                 processed = pipeline.process(ds, context)
 
