@@ -44,12 +44,12 @@ Defined in `wrf_ensembly/models/base.py`, with `WrfModel` in `wrf.py` and `IconM
 | `update_bc(member_i)` | `ensemble update-bc` | Makes the boundary conditions consistent with a changed initial state |
 | `clean_old_state()` | `ensemble cycle` | Deletes the files that no cycle can start from anymore |
 
-Optional features have a default that raises `NotImplementedError`. Only WRF has them today:
+Optional features have a default that raises `NotImplementedError`:
 
-- Perturbations: `generate_perturbations`, `generate_perturbations_for_cycles`, `apply_perturbations`
-- Segments: `member_initial_state`, `prepare_member_boundaries`, `remove_cycle_output`
+- Perturbations: `generate_perturbations`, `generate_perturbations_for_cycles`, `apply_perturbations`. WRF has all of them; ICON perturbs the first cycle only
+- Segments: `member_initial_state`, `prepare_member_boundaries`, `remove_cycle_output`. WRF only
 
-`Config.check()` rejects the settings that would need them (`[perturbations]`, `[segments]`) for a model without them, so the error is at the configuration and not in the middle of a run.
+`Config.check()` rejects the settings that would need them (`[segments]`, perturbations after the first cycle) for a model without them, so the error is at the configuration and not in the middle of a run.
 
 ## `Domain`
 

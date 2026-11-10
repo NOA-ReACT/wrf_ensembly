@@ -41,7 +41,7 @@ The experiment directory, the commands of a cycle (`advance-member`, `filter`, `
 | The next cycle starts from | A fresh wrfinput with the analysis' `cycled_variables` | The member's restart file with the analysis' `state_variables` | The first guess and an analysis file, combined by ICON |
 | Boundaries after the analysis | `update-bc` | `update-bc` (increment only) | Nothing to do |
 | Several cycles in one run ([segments](./wrf.md#segments)) | No | Yes | No |
-| `[perturbations]` | Yes | Yes | No, see [ensemble spread](./icon.md#things-to-know) |
+| `[perturbations]` | Yes | Yes | First cycle only, see [Perturbations](./icon.md#perturbations) |
 
 The details are on the page of each model: [WRF](./wrf.md), [ICON](./icon.md).
 

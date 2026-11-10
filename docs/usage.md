@@ -173,7 +173,7 @@ Observations are first converted to the WRF-Ensembly parquet format with the sep
 
 ## Ensemble Management
 
-`advance-member`, `filter`, `analysis` and `cycle` are one cycle, for any model. WRF only: `plan-segment` and `finish-segment` ([segments](wrf.md#segments)), `generate-perturbations` and `apply-perturbations` ([perturbations](configuration.md#perturbations)), `setup-from-other-experiment`.
+`advance-member`, `filter`, `analysis` and `cycle` are one cycle, for any model. `generate-perturbations` and `apply-perturbations` are for both as well, with [limits for ICON](icon.md#perturbations). WRF only: `plan-segment` and `finish-segment` ([segments](wrf.md#segments)), `setup-from-other-experiment`.
 
 ::: mkdocs-click
     :module: wrf_ensembly.commands.ensemble

@@ -54,7 +54,7 @@ The lateral boundaries always come from the boundary files. ICON takes the state
 - **Cycle length.** ICON looks for boundary files at the start of a run plus multiples of `time_control.boundary_update_interval`. Every cycle must therefore be a multiple of that interval long. The configuration is rejected otherwise.
 - **Surface tiles are reset every cycle.** ICON can only tell the surface tiles apart in GRIB input. With the netCDF first guess, the tiles start each cycle from the tile-averaged soil and surface fields (`ltile_coldstart = .true.`). The averaged fields themselves carry over.
 - **State variables.** `assimilation.state_variables` lists what goes back into ICON. `temp`, `pres`, `u`, `v`, `qv`, `qc`, `qi`, `qr`, `qs`, `qg` go through the analysis file. Any other variable (e.g. an aerosol tracer) must be on cells and in the first guess file (`icon.first_guess_variables`); it is updated in a copy of that file. Do not put `vn`, `rho` or `theta_v` in the state: ICON derives them.
-- **Ensemble spread.** There are no `[perturbations]` for ICON. Use different initial and boundary files per member (the `%MEMBER%` placeholder in `icon.ifs_grib`, `icon.initial_conditions`, `icon.boundary_conditions`), per-member namelists (`[icon.namelist_per_member.member_03.<group>]`), random noise on the initial state of the first cycle (`icon.initial_noise`, good for testing only: it has no spatial structure) and ICON's own parameter perturbations (`[icon.namelist.ensemble_pert_nml]`; every member gets its own `perturbationNumber`). Test the latter with a single run first: with icon-2026.04 and ZONDA external parameters, `use_ensemble_pert` corrupted memory on our system.
+- **Ensemble spread.** `[perturbations]` works for the initial conditions of the first cycle, see [Perturbations](#perturbations). Other sources of spread: different initial and boundary files per member (the `%MEMBER%` placeholder in `icon.ifs_grib`, `icon.initial_conditions`, `icon.boundary_conditions`), per-member namelists (`[icon.namelist_per_member.member_03.<group>]`), random noise on the initial state of the first cycle (`icon.initial_noise`, good for testing only: it has no spatial structure) and ICON's own parameter perturbations (`[icon.namelist.ensemble_pert_nml]`; every member gets its own `perturbationNumber`). Test the latter with a single run first: with icon-2026.04 and ZONDA external parameters, `use_ensemble_pert` corrupted memory on our system.
 - **Segments** (several cycles in one run) are not supported.
 - **Disk space.** A first guess file is large (about 1.2 GB for 300 000 cells and 50 levels). `ensemble cycle` deletes the first guess and analysis files of cycles older than the previous one, unless `assimilation.keep_restart_files` or `keep_restart_files_for_cycles` says otherwise.
 
@@ -75,6 +75,29 @@ Each file is converted to netCDF, its variables are renamed to what ICON expects
 `ensemble setup` links the executable and the input files into each member's directory. Nothing is copied by `experiment copy-model`.
 
 You can skip `icon-icbc` and point `icon.initial_conditions` and `icon.boundary_conditions` to files you made yourself.
+
+## Perturbations
+
+`[perturbations]` adds spatially correlated noise to the IFS initial conditions that the first cycle starts from, with the same settings and commands as for WRF:
+
+```toml
+[perturbations.variables.T]
+operation = "add"
+mean = 0.0
+sd = 0.5
+gaussian_sigma = 2.5
+```
+
+```bash
+wrf-ensembly $EXP ensemble setup
+wrf-ensembly $EXP ensemble generate-perturbations
+wrf-ensembly $EXP ensemble apply-perturbations
+```
+
+- The variables are those of the initial conditions file, by their names there: `T`, `U`, `V`, `QV`, `LNPS`, ..., on IFS levels. ICON interpolates the file to its own levels and integrates the pressure hydrostatically when it reads it, so the perturbed state needs no rebalancing.
+- With `[perturbations]`, `ensemble setup` gives every member its own copy of the initial conditions instead of a link. If you add the section later, run `ensemble setup` again.
+- The noise is smoothed on a regular lat/lon grid with about the spacing of the ICON grid and then read off at the cell centres, so `gaussian_sigma` counts grid spacings as for WRF. It is smoothed between levels as well.
+- Only the first cycle is perturbed: later cycles start from the first guess, not from this file. `perturb_every_cycle`, `kind = "parameter"` and `boundary` are rejected. The lateral boundaries are not perturbed; use `%MEMBER%` in `icon.boundary_conditions` for that.
 
 ## Namelists
 
@@ -169,6 +192,7 @@ The `plots` commands and the map plots of `observations` and `validation` work a
 ## Not supported yet
 
 - Nested domains
-- `[perturbations]` and `[segments]`
+- `[segments]`
+- Perturbations after the first cycle, of parameters (`kind = "parameter"`) and of the lateral boundaries
 - `ensemble setup-from-other-experiment`
 - `preprocess interpolate-chem` and the other WRF/WPS preprocessing commands

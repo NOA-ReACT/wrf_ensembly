@@ -50,6 +50,7 @@ Switch environments by changing the symlink target.
 | [assimilation](#assimilation) | Both | Ensemble and DART configuration |
 | [observations](#observations) | Both | Observation processing settings |
 | [validation](#validation) | Both | Validation and first-departure analysis |
+| [perturbations](#perturbations) | Both | Initial condition perturbation settings. With ICON, the first cycle only |
 | [slurm](#slurm) | Both | SLURM job configuration |
 | [postprocess](#postprocess) | Both | Post-processing and output settings |
 | [plots](#plots) | Both | Diagnostic plot configuration |
@@ -60,7 +61,6 @@ Switch environments by changing the symlink target.
 | [data](#data) | WRF | Input data locations and settings |
 | [geogrid](#geogrid) | WRF | Geographical data preprocessing |
 | [wrf_namelist](#wrf-namelist) | WRF | WRF namelist overrides |
-| [perturbations](#perturbations) | WRF | Initial condition perturbation settings |
 | [segments](#segments) | WRF | Running several cycles as one WRF run (restart mode) |
 | [icon](#icon) | ICON | Grid, input data, namelists and regridding |
 
@@ -421,7 +421,7 @@ table = "GEOGRID.TBL.ARW_CHEM"
 
 ## Perturbations
 
-*WRF only.* Initial condition perturbation settings for ensemble generation. The configuration is rejected if this section has variables with ICON, see [ensemble spread](icon.md#things-to-know) for what to use there.
+Initial condition perturbation settings for ensemble generation. This section describes them for WRF. With ICON, only the initial conditions of the first cycle can be perturbed (no `kind = "parameter"`, `perturb_every_cycle` or `boundary`), see [Perturbations](icon.md#perturbations).
 
 ```toml
 [perturbations]
