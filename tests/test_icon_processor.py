@@ -7,6 +7,7 @@ import numpy as np
 import xarray as xr
 
 from wrf_ensembly import config
+from wrf_ensembly.icon.processor import IconPostProcessor
 from wrf_ensembly.processors import ProcessingContext, create_pipeline_from_config
 
 from test_icon_model import template_text
@@ -72,7 +73,9 @@ def make_config(grid_file: Path, extra: str = "") -> config.Config:
 
 
 def run(tmp_path: Path, cfg: config.Config, forecast: Path) -> xr.Dataset:
-    pipeline = create_pipeline_from_config(cfg.postprocess.processors, "icon")
+    pipeline = create_pipeline_from_config(
+        cfg.postprocess.processors, IconPostProcessor()
+    )
     assert [p.name for p in pipeline.processors] == ["ICON post-processor"]
     context = ProcessingContext(
         member=0,

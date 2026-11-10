@@ -152,7 +152,7 @@ def advance_segment(exp: experiment.Experiment, first: int, last: int):
 
     for m in range(exp.cfg.assimilation.n_members):
         fake_segment_run(exp, m, first, last)
-        exp.file_segment_outputs(m, range(first, last + 1))
+        exp.model.file_segment_outputs(m, range(first, last + 1))
         for c in reversed(range(first, last + 1)):
             exp.state.set_member_advanced(c, m)
 
@@ -168,7 +168,7 @@ def test_file_segment_outputs(tmp_path: Path):
     exp = make_experiment(tmp_path / "exp")
     fake_segment_run(exp, 0, 4, 6)  # 2021-01-02 00:00 -> 2021-01-02 18:00
 
-    exp.file_segment_outputs(0, range(4, 7))
+    exp.model.file_segment_outputs(0, range(4, 7))
 
     # The file at the segment start is gone, the cycle end belongs to the cycle
     assert wrfout_hours(exp, 4) == [1, 2, 3, 4, 5, 6]
@@ -179,7 +179,7 @@ def test_file_segment_outputs(tmp_path: Path):
     assert (exp.paths.scratch_restart_path(6, 0) / end).exists()
 
     # Again, as for a job that died after sorting
-    exp.file_segment_outputs(0, range(4, 7))
+    exp.model.file_segment_outputs(0, range(4, 7))
     assert wrfout_hours(exp, 5) == [7, 8, 9, 10, 11, 12]
 
 
@@ -190,7 +190,7 @@ def test_file_segment_outputs_without_restart_file(tmp_path: Path):
         f.unlink()
 
     with pytest.raises(FileNotFoundError):
-        exp.file_segment_outputs(0, range(4, 7))
+        exp.model.file_segment_outputs(0, range(4, 7))
 
 
 def test_runnable_segment(tmp_path: Path):

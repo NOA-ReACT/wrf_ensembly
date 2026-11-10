@@ -6,7 +6,7 @@ import numpy as np
 from rich.console import Console
 from rich.table import Table
 
-from wrf_ensembly import experiment, model_files, utils
+from wrf_ensembly import experiment, utils
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import CycleState, ExperimentStateError
@@ -493,7 +493,7 @@ def reconcile(experiment_path: Path, cycle: int | None, dry_run: bool):
     )
     end_cycle = cycles[-1]
     cycle_info = exp.cycles[end_cycle]
-    wrfout_name = model_files.cycle_end_file_name(exp.cfg, cycle_info.end)
+    wrfout_name = exp.model.cycle_end_file_name(cycle_info.end)
     # Recorded only if every cycle says so; a partial record is dropped if not on disk
     per_cycle = [exp.state.get_advanced_members(c) for c in cycles]
     recorded = set.intersection(*per_cycle)

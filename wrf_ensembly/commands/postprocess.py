@@ -10,7 +10,7 @@ from typing import Optional
 import click
 import xarray as xr
 
-from wrf_ensembly import experiment, model_files, processors
+from wrf_ensembly import experiment, processors
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.postprocess.compression import (
@@ -181,7 +181,7 @@ def run(
     # Create processor pipeline
     try:
         pipeline = processors.create_pipeline_from_config(
-            exp.cfg.postprocess.processors, exp.cfg.metadata.model
+            exp.cfg.postprocess.processors, exp.model.first_processor()
         )
         logger.info(
             f"Created pipeline with processors: {[p.name for p in pipeline.processors]}"
@@ -292,6 +292,6 @@ def clean(experiment_path: Path, cycle: Optional[int], remove_wrfout: bool):
         if remove_wrfout:
             # For ICON this leaves the first guess and analysis files, which the next
             # cycle starts from; `ensemble cycle` deletes those when they are not needed
-            for f in scratch_dir.rglob(model_files.forecast_glob(exp.cfg)):
+            for f in scratch_dir.rglob(exp.model.forecast_glob):
                 logger.info(f"Removing {f}")
                 f.unlink()

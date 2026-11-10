@@ -12,7 +12,7 @@ import netCDF4
 import numpy as np
 import pytest
 
-from wrf_ensembly import config, cycling, experiment, model_files
+from wrf_ensembly import config, cycling, experiment
 from wrf_ensembly.experiment import StateTransition
 from wrf_ensembly.icon import model as icon_model
 from wrf_ensembly.icon import namelists
@@ -258,7 +258,7 @@ def test_advance_filter_analysis_cycle(tmp_path: Path):
 
     exp.state_machine.current_cycle.transition(StateTransition.ANALYSIS_COMPLETE)
     for member_i in range(2):
-        exp.cycle_member(member_i, use_forecast=False)
+        exp.model.cycle_member(member_i, use_forecast=False)
     assert (member_dir / "first_guess.nc").resolve() == priors[0].resolve()
     assert (member_dir / "analysis.nc").resolve() == icon_model.analysis_file(exp, 0, 0)
     exp.state_machine.current_cycle.transition(StateTransition.CYCLE_COMPLETE)
@@ -283,11 +283,11 @@ def test_cycle_without_analysis_and_cleanup(tmp_path: Path):
     for cycle_i in range(3):
         assert exp.advance_member(0, cores=1)
         exp.load_status()
-        exp.cycle_member(0, use_forecast=True)
+        exp.model.cycle_member(0, use_forecast=True)
         assert not (member_dir / "analysis.nc").exists()
         exp.state_machine.current_cycle.transition(StateTransition.CYCLE_COMPLETE)
         exp.set_next_cycle()
-        exp.clean_restart_files()
+        exp.model.clean_old_state()
     assert "lread_ana = .false." in (member_dir / "NAMELIST_atm").read_text()
 
     def first_guesses(cycle_i: int) -> int:
@@ -318,7 +318,7 @@ def test_tracers_are_updated_in_the_first_guess(tmp_path: Path):
         assert float(ds["rho"][:].max()) < 1.0
 
     exp.state_machine.current_cycle.transition(StateTransition.ANALYSIS_COMPLETE)
-    exp.cycle_member(0, use_forecast=False)
+    exp.model.cycle_member(0, use_forecast=False)
     assert (exp.paths.member_path(0) / "first_guess.nc").resolve() == updated.resolve()
 
     exp.cfg.assimilation.state_variables = ["temp", "not_there"]
@@ -335,23 +335,22 @@ def test_failed_run_is_not_advanced(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert exp.advance_member(0, cores=1)
 
 
-def test_file_names():
-    icon_cfg = config.Config.from_toml(template_text())
+def test_file_names(tmp_path: Path):
     time = dt.datetime(2026, 9, 13, 6, tzinfo=UTC)
-    assert model_files.forecast_file_name(icon_cfg, time) == "icon_20260913T060000Z.nc"
-    assert model_files.cycle_end_file_name(icon_cfg, time) == "fg_20260913T060000Z.nc"
-    assert model_files.forecast_glob(icon_cfg) == "icon_*.nc"
+    icon = make_experiment(tmp_path / "icon").model
+    assert icon.name == "icon"
+    assert icon.forecast_file_name(time) == "icon_20260913T060000Z.nc"
+    assert icon.cycle_end_file_name(time) == "fg_20260913T060000Z.nc"
+    assert icon.forecast_glob == "icon_*.nc"
 
-    wrf_cfg = config.Config.from_toml(
+    (tmp_path / "wrf").mkdir()
+    (tmp_path / "wrf" / "config.toml").write_text(
         resources.files("wrf_ensembly.config_templates")
         .joinpath("default.toml")
         .read_text()
     )
-    assert (
-        model_files.forecast_file_name(wrf_cfg, time)
-        == "wrfout_d01_2026-09-13_06:00:00"
-    )
-    assert (
-        model_files.cycle_end_file_name(wrf_cfg, time)
-        == "wrfout_d01_2026-09-13_06:00:00"
-    )
+    wrf = experiment.Experiment(tmp_path / "wrf").model
+    assert wrf.name == "wrf"
+    assert wrf.forecast_file_name(time) == "wrfout_d01_2026-09-13_06:00:00"
+    assert wrf.cycle_end_file_name(time) == "wrfout_d01_2026-09-13_06:00:00"
+    assert wrf.forecast_glob == "wrfout_d01_*"

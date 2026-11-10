@@ -15,7 +15,6 @@ from typing import Literal
 import numpy as np
 import xarray as xr
 
-from wrf_ensembly import model_files
 from wrf_ensembly.config import Config, PostprocessConfig
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import Experiment
@@ -245,7 +244,7 @@ def cycle_has_analysis(exp: Experiment, cycle: int) -> bool:
     middle of a segment) never get one.
     """
 
-    wrfout_name = model_files.forecast_file_name(exp.cfg, exp.cycles[cycle].end)
+    wrfout_name = exp.model.forecast_file_name(exp.cycles[cycle].end)
     return (exp.paths.scratch_analysis_path(cycle) / "member_00" / wrfout_name).exists()
 
 
@@ -300,10 +299,10 @@ def process_cycle_streaming(
         logger.warning(f"Member 00 directory not found: {member_00_dir}")
         return None
 
-    member_00_files = sorted(member_00_dir.glob(model_files.forecast_glob(exp.cfg)))
+    member_00_files = sorted(member_00_dir.glob(exp.model.forecast_glob))
 
     # Filter out cycle start time file (should not be included in output)
-    cycle_start_str = model_files.time_stamp(exp.cfg, exp.cycles[cycle].start)
+    cycle_start_str = exp.model.time_stamp(exp.cycles[cycle].start)
     member_00_files = [f for f in member_00_files if cycle_start_str not in f.name]
 
     if not member_00_files:
@@ -312,7 +311,7 @@ def process_cycle_streaming(
 
     # If only processing last timestep, filter to just that file
     if only_last_timestep:
-        cycle_end_str = model_files.time_stamp(exp.cfg, exp.cycles[cycle].end)
+        cycle_end_str = exp.model.time_stamp(exp.cycles[cycle].end)
         member_00_files = [f for f in member_00_files if cycle_end_str in f.name]
         if not member_00_files:
             logger.warning(f"Last timestep file not found for cycle {cycle}")
@@ -511,10 +510,10 @@ def process_cycle_single_member(
         logger.warning(f"Member 00 directory not found: {member_00_dir}")
         return None
 
-    wrfout_files = sorted(member_00_dir.glob(model_files.forecast_glob(exp.cfg)))
+    wrfout_files = sorted(member_00_dir.glob(exp.model.forecast_glob))
 
     # Filter out cycle start time
-    cycle_start_str = model_files.time_stamp(exp.cfg, exp.cycles[cycle].start)
+    cycle_start_str = exp.model.time_stamp(exp.cycles[cycle].start)
     wrfout_files = [f for f in wrfout_files if cycle_start_str not in f.name]
 
     if not wrfout_files:
@@ -522,7 +521,7 @@ def process_cycle_single_member(
         return None
 
     if only_last_timestep:
-        cycle_end_str = model_files.time_stamp(exp.cfg, exp.cycles[cycle].end)
+        cycle_end_str = exp.model.time_stamp(exp.cycles[cycle].end)
         wrfout_files = [f for f in wrfout_files if cycle_end_str in f.name]
 
     if not wrfout_files:

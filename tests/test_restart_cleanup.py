@@ -52,7 +52,7 @@ def test_cleanup_keeps_what_the_current_cycle_starts_from(tmp_path: Path):
     write_restart_files(exp, range(5))
 
     exp.current_cycle_i = 5
-    exp.clean_restart_files()
+    exp.model.clean_old_state()
 
     # Cycle 5 starts from cycle 4's end-of-cycle file, older cycles are gone
     assert remaining(exp) == {4: 1}
@@ -63,7 +63,7 @@ def test_cleanup_keeps_listed_cycles(tmp_path: Path):
     write_restart_files(exp, range(5))
 
     exp.current_cycle_i = 5
-    exp.clean_restart_files()
+    exp.model.clean_old_state()
 
     assert remaining(exp) == {1: 2, 2: 2, 4: 1}
 
@@ -73,7 +73,7 @@ def test_cleanup_can_be_turned_off(tmp_path: Path):
     write_restart_files(exp, range(5))
 
     exp.current_cycle_i = 5
-    exp.clean_restart_files()
+    exp.model.clean_old_state()
 
     assert remaining(exp) == {i: 2 for i in range(5)}
 

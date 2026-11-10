@@ -337,19 +337,17 @@ def load_processor_from_string(processor_spec: str, **kwargs) -> DataProcessor:
 
 
 def create_pipeline_from_config(
-    config: List[ProcessorConfig], model: str = "wrf"
+    config: List[ProcessorConfig], first: DataProcessor
 ) -> ProcessorPipeline:
     """
     Create a processor pipeline from configuration.
 
-    The first step is always the model's own processor, which brings its output to
-    the common layout: XWRFPostProcessor for WRF, IconPostProcessor for ICON.
-
     Args:
-        model: `metadata.model` of the experiment
         config: List of processor configurations, each containing:
                - 'processor': processor specification string
                - Additional keyword arguments for the processor
+        first: The model's own processor (`Model.first_processor`), which brings its
+               output to the common layout before the configured ones run
 
     Returns:
         ProcessorPipeline instance
@@ -360,14 +358,7 @@ def create_pipeline_from_config(
             {"processor": "/path/to/file.py:MyProcessor", "param2": "value2"},
         ]
     """
-    processors: list[DataProcessor]
-    if model == "icon":
-        # Imported here, the module imports this one
-        from wrf_ensembly.icon.processor import IconPostProcessor
-
-        processors = [IconPostProcessor()]
-    else:
-        processors = [XWRFPostProcessor()]
+    processors: list[DataProcessor] = [first]
 
     for proc_config in config:
         processor_spec = proc_config.processor

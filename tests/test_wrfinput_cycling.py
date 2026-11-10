@@ -93,7 +93,7 @@ def test_analysis_and_cycle(tmp_path: Path):
     (member_dir / "rsl.out.0000").touch()
     (member_dir / "wrfout_d01_leftover").touch()
 
-    exp.cycle_member(1, use_forecast=False)
+    exp.model.cycle_member(1, use_forecast=False)
     wrfinput = member_dir / "wrfinput_d01"
     in_both = sorted(set(cycled) & set(state))
     np.testing.assert_array_equal(read(wrfinput, in_both[0]), 3.0)  # analysis
@@ -105,7 +105,7 @@ def test_analysis_and_cycle(tmp_path: Path):
     assert not list(member_dir.glob("rsl*")) and not list(member_dir.glob("wrfout*"))
 
     # Without an analysis, the forecast is cycled
-    exp.cycle_member(0, use_forecast=True)
+    exp.model.cycle_member(0, use_forecast=True)
     np.testing.assert_array_equal(
         read(exp.paths.member_path(0) / "wrfinput_d01", in_both[0]), 1.0
     )

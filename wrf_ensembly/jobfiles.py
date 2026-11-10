@@ -39,46 +39,9 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
     exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
 
     base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} preprocess {{subcommand}}"
-    if exp.cfg.is_icon:
-        return _write_preprocess_jobfile(exp, [_build_command(base_cmd, "icon-icbc")])
-
-    commands = [
-        _build_command(base_cmd, "setup"),
-        _build_command(base_cmd, "geogrid"),
-    ]
-
-    # real.exe runs once per cycle, or once for the whole experiment in restart mode
-    real_runs: list[dict[str, int]]
-    if exp.cfg.assimilation.cycling_mode == "restart":
-        real_runs = [{}]
-    else:
-        real_runs = [{"cycle": cycle} for cycle in range(len(exp.cycles))]
-
-    if exp.cfg.data.per_member_meteorology:
-        commands.append(f"for MEMBER in {{0..{len(exp.members) - 1}}}; do")
-        commands.append(_build_command(base_cmd, "ungrib", member="$MEMBER"))
-        commands.append(_build_command(base_cmd, "metgrid"))
-        commands.extend(
-            [
-                _build_command(base_cmd, "real", member="$MEMBER", **real_args)
-                for real_args in real_runs
-            ]
-        )
-        commands.append("done")
-        # Interpolates the chemistry for all members at once, in parallel
-        commands.append(_build_command(base_cmd, "interpolate-chem"))
-    else:
-        commands.extend(
-            [
-                _build_command(base_cmd, "ungrib"),
-                _build_command(base_cmd, "metgrid"),
-            ]
-            + [_build_command(base_cmd, "real", **real_args) for real_args in real_runs]
-            + [
-                _build_command(base_cmd, "interpolate-chem"),
-            ]
-        )
-
+    commands = exp.model.preprocess_job(
+        lambda subcommand, **kwargs: _build_command(base_cmd, subcommand, **kwargs)
+    )
     return _write_preprocess_jobfile(exp, commands)
 
 

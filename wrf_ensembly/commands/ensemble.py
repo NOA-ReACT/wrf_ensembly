@@ -4,13 +4,11 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 import click
-import netCDF4
 
 from wrf_ensembly import config, experiment, perturbations, utils
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import ExperimentStateError, StateTransition
-from wrf_ensembly.icon import model as icon_model
 
 
 @click.group(name="ensemble", cls=GroupWithStartEndPrint)
@@ -44,30 +42,11 @@ def setup(experiment_path: Path, jobs: int | None):
     jobs = utils.determine_jobs(jobs)
     logger.info(f"Using {jobs} jobs")
 
-    # Each member copies a wrfinput and extracts its wrfbdy, independently of the others
+    # The members are set up independently of each other
     n_members = exp.cfg.assimilation.n_members
     with ProcessPoolExecutor(max_workers=jobs) as executor:
-        for _ in executor.map(_setup_member, [exp] * n_members, range(n_members)):
+        for _ in executor.map(exp.model.setup_member, range(n_members)):
             pass
-
-
-def _setup_member(exp: experiment.Experiment, member_i: int) -> None:
-    if exp.cfg.is_icon:
-        icon_model.setup_member(exp, member_i)
-        missing = icon_model.missing_boundary_files(exp, member_i)
-        if missing:
-            logger.warning(
-                f"Member {member_i}: {len(missing)} boundary file(s) are missing, "
-                f"the first is {missing[0]}"
-            )
-        logger.info(f"Member {member_i}: Linked the model and its input files")
-        return
-
-    utils.copy(
-        exp.paths.ic_path(member_i, 0), exp.paths.member_path(member_i) / "wrfinput_d01"
-    )
-    exp.prepare_member_boundaries(member_i, 0)
-    logger.info(f"Member {member_i}: Copied initial and boundary conditions")
 
 
 @ensemble_cli.command()
@@ -259,7 +238,7 @@ def generate_perturbations(experiment_path: Path, jobs: int | None, force: bool)
     # First, generate the perturbations for the first cycle, because they might be needed
     # for the other cycles too (`kind = "parameter"` in wrfinput cycling mode)
     logger.info("Generating perturbations for first cycle...")
-    exp.generate_perturbations(0)
+    exp.model.generate_perturbations(0)
 
     # Mark cycle 0 as done
     exp.state.mark_optional_operation_complete(0, operation_name)
@@ -268,7 +247,7 @@ def generate_perturbations(experiment_path: Path, jobs: int | None, force: bool)
     # perturbs the same variables.
     if len(exp.cycles) > 1 and perturbations.applied_at_cycle(exp.cfg, 1):
         logger.info("Generating perturbations for all cycles...")
-        for cycle_i in exp.generate_perturbations_for_cycles(
+        for cycle_i in exp.model.generate_perturbations_for_cycles(
             range(1, len(exp.cycles)), jobs
         ):
             exp.state.mark_optional_operation_complete(cycle_i, operation_name)
@@ -333,7 +312,7 @@ def apply_perturbations(experiment_path: Path, jobs: int | None, force: bool):
 
     with ProcessPoolExecutor(max_workers=jobs) as executor:
         res = executor.map(
-            exp.apply_perturbations, range(exp.cfg.assimilation.n_members)
+            exp.model.apply_perturbations, range(exp.cfg.assimilation.n_members)
         )
         for _ in res:
             pass
@@ -365,7 +344,7 @@ def update_bc(experiment_path: Path, jobs: int | None):
 
     with ProcessPoolExecutor(max_workers=jobs) as executor:
         results = executor.map(
-            exp.update_bc,
+            exp.model.update_bc,
             range(exp.cfg.assimilation.n_members),
         )
 
@@ -395,7 +374,7 @@ def advance_member(
 
     logger.setup(f"ensemble-advance-member_{member}", experiment_path)
     exp = experiment.Experiment(experiment_path)
-    exp.set_wrf_environment()
+    exp.set_model_environment()
     if member < 0 or member >= exp.cfg.assimilation.n_members:
         logger.error(f"Member {member} does not exist")
         sys.exit(1)
@@ -478,57 +457,17 @@ def analysis(experiment_path: Path):
         logger.error(error)
         sys.exit(1)
 
-    cycle_i = exp.current_cycle_i
-    cycle = exp.current_cycle
-
-    forecast_dir = exp.paths.scratch_forecasts_path(cycle_i)
-    analysis_dir = exp.paths.scratch_analysis_path(cycle_i)
-    dart_out_dir = exp.paths.scratch_dart_path(cycle_i)
-
-    if exp.cfg.is_icon:
-        jobs = utils.determine_jobs(None)
-        n_members = exp.cfg.assimilation.n_members
-        with ProcessPoolExecutor(max_workers=min(jobs, n_members)) as executor:
+    n_members = exp.cfg.assimilation.n_members
+    jobs = min(utils.determine_jobs(None), n_members)
+    try:
+        with ProcessPoolExecutor(max_workers=jobs) as executor:
             for member, _ in enumerate(
-                executor.map(icon_model.make_analysis, [exp] * n_members, range(n_members))
+                executor.map(exp.model.make_analysis, range(n_members))
             ):
-                logger.info(f"Member {member}: Wrote the analysis files")
-        exp.state_machine.current_cycle.transition(StateTransition.ANALYSIS_COMPLETE)
-        logger.info("Analysis complete - ready to cycle")
-        return
-
-    # Postprocess analysis files
-    for member in range(exp.cfg.assimilation.n_members):
-        # Copy forecasts to analysis directory
-        wrfout_name = "wrfout_d01_" + cycle.end.strftime("%Y-%m-%d_%H:%M:%S")
-        forecast_file = forecast_dir / f"member_{member:02d}" / wrfout_name
-        analysis_file = analysis_dir / f"member_{member:02d}" / wrfout_name
-        utils.copy(forecast_file, analysis_file)
-
-        dart_file = dart_out_dir / f"dart_member_{member:02d}.nc"
-        if not dart_file.exists():
-            logger.error(f"Member {member}: {dart_file} does not exist")
-            sys.exit(1)
-
-        # Copy the state variables from the dart file to the analysis file
-        logger.info(f"Member {member}: Copying state variables from {dart_file}")
-        with (
-            netCDF4.Dataset(dart_file, "r") as nc_dart,  # type: ignore
-            netCDF4.Dataset(analysis_file, "r+") as nc_analysis,  # type: ignore
-        ):
-            for name in exp.cfg.assimilation.state_variables:
-                if name not in nc_dart.variables:
-                    logger.warning(f"Member {member}: {name} not in dart file")
-                    continue
-                logger.info(f"Member {member}: Copying {name}")
-                nc_analysis[name][:] = nc_dart[name][:]
-
-            # Add experiment name and current cycle information to attributes
-            # TODO Standardize this somehow? We must add metadata to all files!
-            nc_analysis.experiment_name = exp.cfg.metadata.name
-            nc_analysis.current_cycle = cycle_i
-            nc_analysis.cycle_start = cycle.start.strftime("%Y-%m-%d_%H:%M:%S")
-            nc_analysis.cycle_end = cycle.end.strftime("%Y-%m-%d_%H:%M:%S")
+                logger.info(f"Member {member}: Wrote the analysis")
+    except (FileNotFoundError, ValueError) as e:
+        logger.error(str(e))
+        sys.exit(1)
 
     exp.state_machine.current_cycle.transition(StateTransition.ANALYSIS_COMPLETE)
     logger.info("Analysis complete - ready to cycle")
@@ -601,7 +540,7 @@ def cycle(experiment_path: Path, jobs: int | None, run_until: int | None):
     # Do the cycling work
     with ProcessPoolExecutor(max_workers=jobs) as executor:
         results = executor.map(
-            exp.cycle_member,
+            exp.model.cycle_member,
             range(exp.cfg.assimilation.n_members),
             [use_forecast] * exp.cfg.assimilation.n_members,
         )
@@ -615,7 +554,7 @@ def cycle(experiment_path: Path, jobs: int | None, run_until: int | None):
     exp.set_next_cycle()
     logger.info(f"Cycled to cycle {next_cycle_i}")
 
-    exp.clean_restart_files()
+    exp.model.clean_old_state()
 
 
 @ensemble_cli.command()

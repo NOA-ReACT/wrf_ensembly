@@ -89,7 +89,7 @@ def geogrid(experiment_path: Path):
 
     logger.setup("preprocess-geogrid", experiment_path)
     exp = experiment.Experiment(experiment_path)
-    exp.set_wrf_environment()
+    exp.set_model_environment()
     wps_dir = exp.paths.work_preprocessing_wps
 
     # Remove old geo_em file if it exists
@@ -138,7 +138,7 @@ def ungrib(experiment_path: Path, member: int | None):
 
     logger.setup("preprocess-ungrib", experiment_path)
     exp = experiment.Experiment(experiment_path)
-    exp.set_wrf_environment()
+    exp.set_model_environment()
     wps_dir = exp.paths.work_preprocessing_wps
 
     if exp.cfg.data.per_member_meteorology:
@@ -206,7 +206,7 @@ def metgrid(experiment_path: Path):
 
     logger.setup("preprocess-metgrid", experiment_path)
     exp = experiment.Experiment(experiment_path)
-    exp.set_wrf_environment()
+    exp.set_model_environment()
     wps_dir = exp.paths.work_preprocessing_wps
 
     for old_file in wps_dir.glob("met_em*.nc"):
@@ -268,7 +268,7 @@ def real(
     logger.setup(f"preprocess-real-{label}", experiment_path)
 
     exp = experiment.Experiment(experiment_path)
-    exp.set_wrf_environment()
+    exp.set_model_environment()
 
     restart_mode = exp.cfg.assimilation.cycling_mode == "restart"
     if restart_mode and cycle is not None:

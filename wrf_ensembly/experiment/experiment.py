@@ -1,36 +1,19 @@
-import contextlib
-import dataclasses
-import datetime as dt
-import json
 import os
-import shutil
-from collections.abc import Iterable, Iterator
 from concurrent.futures import ProcessPoolExecutor
-from functools import partial
 from pathlib import Path
-from typing import Any
 
-import netCDF4
-import numpy as np
-import xarray as xr
 
 from wrf_ensembly import (
-    checkpoints,
     config,
     cycling,
     external,
+    models,
     obs_sequence,
-    perturbations,
-    rebalance,
-    restart,
     segments,
-    update_bc,
     utils,
-    wrf,
 )
 from wrf_ensembly.console import logger
 from wrf_ensembly.fortran_namelists import write_namelist
-from wrf_ensembly.icon import model as icon_model
 
 from .dataclasses import MemberStatus
 from .inflation import InflationConfig
@@ -86,6 +69,7 @@ class Experiment:
     cfg: config.Config
     cycles: list[cycling.CycleInformation]
     paths: ExperimentPaths
+    model: models.Model
     members: list[MemberStatus] = []
 
     state: ExperimentState
@@ -98,6 +82,7 @@ class Experiment:
         self.cycles = cycling.get_cycle_information(self.cfg)
 
         self.paths = ExperimentPaths(experiment_path, self.cfg)
+        self.model = models.create(self)
         self.state = ExperimentState(self.paths, self.cfg.assimilation.n_members)
 
         # Read the experiment status. Nothing is written here.
@@ -213,202 +198,11 @@ class Experiment:
             utils.copy(source_path, target_path)
             logger.info(f"Copied extra DART file from {source_path} to {target_path}")
 
-    def _perturbation_worker_args(self) -> dict[str, Any]:
-        """
-        The arguments `perturbations.generate_perturbations_for_cycle` needs, pulled out
-        of the experiment. Kept in one place because the same set has to be handed to
-        worker processes, which cannot be given `self`.
-        """
-
-        return {
-            "perturbations_cfg": self.cfg.perturbations,
-            "reapplied_parameters": perturbations.reapplied_parameters(self.cfg),
-            "n_members": self.cfg.assimilation.n_members,
-            "experiment_name": self.cfg.metadata.name,
-            "ic_path": self.paths.ic_path(0, 0),
-            "diag_dir": self.paths.data_diag,
-        }
-
-    def generate_perturbations(self, cycle_i: int):
-        """
-        Generates perturbations for a given cycle and stores them in `data/diag/perturbations`.
-        """
-
-        perturbations.generate_perturbations_for_cycle(
-            cycle_i=cycle_i, **self._perturbation_worker_args()
-        )
-
-    def generate_perturbations_for_cycles(
-        self, cycle_indices: Iterable[int], jobs: int
-    ) -> Iterator[int]:
-        """
-        Generates perturbations for several cycles in parallel, yielding each cycle index
-        as it finishes so the caller can record progress one cycle at a time.
-
-        Args:
-            cycle_indices: Which cycles to generate perturbations for
-            jobs: How many cycles to process in parallel
-
-        Yields:
-            Each cycle index, once its perturbations have been written
-        """
-
-        cycle_indices = list(cycle_indices)
-        worker = partial(
-            perturbations.generate_perturbations_for_cycle,
-            **self._perturbation_worker_args(),
-        )
-
-        with ProcessPoolExecutor(max_workers=jobs, max_tasks_per_child=1) as executor:
-            results = executor.map(worker, cycle_indices)
-            for cycle_i in cycle_indices:
-                next(results)  # Raises here if the worker failed
-                yield cycle_i
-
-    def apply_perturbations(self, member_i: int):
-        """
-        Apply perturbations to the initial conditions of a member.
-        Must be generated with `generate_perturbations` first.
-        You should call this function once for every member, after the initial conditions
-        are copied in the member directory (either during `ensemble setup` or `ensemble cycle`).
-
-        This function will mostly not check the configuration, rather it will assume that
-        the contents of the perturbation files are correct. This allows you to modify them
-        outside of this program if needed. The exception is variables in the config that
-        are not perturbed at this cycle (see `perturbations.applied_at_cycle`), which are
-        skipped even if the file has them. Files generated before `kind = "parameter"`
-        existed repeat the first cycle's field in every cycle, and in restart mode
-        applying it again would compound it.
-        """
-
-        if member_i >= self.cfg.assimilation.n_members:
-            raise ValueError(
-                f"Member index {member_i} is out of bounds for {self.cfg.assimilation.n_members} members"
-            )
-
-        pert_file = (
-            self.paths.data_diag
-            / "perturbations"
-            / f"perts_cycle_{self.current_cycle_i}.nc"
-        )
-        if not pert_file.exists():
-            raise FileNotFoundError(
-                f"Perturbation file for cycle {self.current_cycle_i} not found at {pert_file}"
-            )
-        initial_state = self.member_initial_state(member_i, self.current_cycle_i)
-        if not initial_state.exists():
-            raise FileNotFoundError(
-                f"Initial conditions file for member {member_i} not found at {initial_state}"
-            )
-        # In restart mode, after the first cycle, it's a restart file that needs rebalancing
-        is_restart = initial_state.name.startswith("wrfrst")
-
-        perts = xr.open_dataset(pert_file).sel(member=member_i)
-        applied = perturbations.applied_at_cycle(self.cfg, self.current_cycle_i)
-        pert_config = {}
-        for name, var in perts.data_vars.items():
-            if name in self.cfg.perturbations.variables and name not in applied:
-                logger.info(
-                    f"Member {member_i}: Not perturbing {name}, it is not perturbed at "
-                    f"cycle {self.current_cycle_i}"
-                )
-                continue
-            pert_config[name] = json.loads(var.attrs["cfg"])
-        if not pert_config:
-            logger.info(f"Member {member_i}: Nothing to perturb")
-            return
-
-        with netCDF4.Dataset(initial_state, "r+") as member_icbc:  # type: ignore
-            before = rebalance.balanced_fields(member_icbc) if is_restart else None
-            for name, cfg in pert_config.items():
-                if "operation" not in cfg:
-                    raise ValueError(
-                        f"Perturbation config for {name} does not contain 'operation', parsed from netCDF attribute `cfg`"
-                    )
-                operation = cfg["operation"]
-
-                logger.debug(f"Applying perturbation to {name} for member {member_i}")
-                logger.debug(f"Perturbation config: {pert_config}")
-                if not restart.field_names(member_icbc, name):
-                    raise ValueError(f"Variable {name} not found in member IC/BC file.")
-
-                field = perts[name].to_numpy()
-
-                # Apply midcycle taper if configured (for non-first cycles using
-                # reused perturbation fields)
-                midcycle_taper_width = cfg.get("midcycle_taper_width", 0)
-                if midcycle_taper_width > 0 and self.current_cycle_i > 0:
-                    logger.debug(
-                        f"Applying mid-cycle taper (width={midcycle_taper_width}) to {name}"
-                    )
-                    taper = perturbations.edge_taper(
-                        field.shape[-2], field.shape[-1], midcycle_taper_width
-                    )
-                    if operation == "add":
-                        field = field * taper
-                    elif operation == "multiply":
-                        field = 1 + (field - 1) * taper
-                    else:
-                        raise ValueError(
-                            "Cannot use 'assign' operation with midcycle taper"
-                        )
-
-                # Perturb the current state, `set_field` handles restart time levels
-                current = member_icbc[restart.field_names(member_icbc, name)[-1]][:]
-                match operation:
-                    case "add":
-                        perturbed = current + field
-                    case "multiply":
-                        perturbed = current * field
-                    case "assign":
-                        perturbed = np.broadcast_to(field, current.shape)
-                    case _:
-                        raise ValueError(f"Unknown perturbation operation: {operation}")
-                restart.set_field(member_icbc, name, perturbed)
-
-            if before is not None:
-                rebalance.rebalance(member_icbc, before)
-
-        logger.info(f"Applied perturbations to member {member_i}")
-
-    def update_bc(self, member_i: int) -> None:
-        """
-        Update the boundary conditions of a member with the changes made to its initial
-        state (analysis, perturbations), see `member_reference_state`.
-        """
-
-        if self.cfg.is_icon:
-            # ICON takes the state at the start of a run as the boundary data for that
-            # time (init_latbc_from_fg) and relaxes towards the next boundary file
-            logger.info("Nothing to do for ICON, the boundary files are used as they are")
-            return
-
-        member_path = self.paths.member_path(member_i)
-        reference = self.member_reference_state(member_i, self.current_cycle_i)
-        if not reference.exists():
-            raise FileNotFoundError(
-                f"Member {member_i}: The unmodified initial state is needed to update the "
-                f"boundary conditions, but {reference} does not exist"
-            )
-        changed = update_bc.update_wrf_bc(
-            self.member_initial_state(member_i, self.current_cycle_i),
-            reference,
-            member_path / "wrfbdy_d01",
-        )
-        if changed:
-            logger.info(f"Member {member_i}: Updated boundary conditions")
-        else:
-            logger.info(
-                f"Member {member_i}: Initial state unchanged at the boundaries, "
-                "boundary conditions left as they are"
-            )
-
     def advance_member(self, member_idx: int, cores: int) -> bool:
         """
-        Run WRF to advance a member to the next cycle, or with segments to the end of the
-        current segment.
-        Initial and boundary condition files must already be present in the member directory.
-        Will generate the appropriate namelist. Will move forecasts to the output directory.
+        Run the model to advance a member to the next cycle, or with segments to the end
+        of the current segment. The member's directory must be set up (`ensemble setup`
+        or `ensemble cycle`). Moves the forecasts to the output directory.
 
         Args:
             member: Index of the member to advance
@@ -419,7 +213,6 @@ class Experiment:
         """
 
         member = self.members[member_idx]
-        member_path = self.paths.member_path(member_idx)
         segment = self.runnable_segment()
         if len(segment) == 1:
             # Keeps the cycle's own output interval and forecast extension
@@ -435,286 +228,29 @@ class Experiment:
             logger.error(f"Member {member_idx} already advanced")
             return False
 
-        if self.cfg.is_icon:
-            executable = member_path / icon_model.EXECUTABLE
-            if not executable.exists():
-                logger.error(
-                    f"Member {member_idx}: ICON executable not found at {executable}, "
-                    "run `ensemble setup` first"
-                )
-                return False
-            ok, start_time, end_time = icon_model.run_member(
-                self, member_idx, cycle, cores
-            )
-            if not ok:
-                return False
-            self.state.set_member_advanced(
-                cycle.index,
-                member_idx,
-                start=start_time,
-                end=end_time,
-                duration_s=int((end_time - start_time).total_seconds()),
-                simulated_s=int((cycle.end - cycle.start).total_seconds()),
-            )
-            self.members[member_idx].advanced = True
-            return True
-
-        # Locate WRF executable, icbc, ensure they all exist
-        wrf_exe_path = (member_path / "wrf.exe").resolve()
-        if not wrf_exe_path.exists():
-            logger.error(
-                f"Member {member_idx}: WRF executable not found at {wrf_exe_path}"
-            )
+        run = self.model.run_member(member_idx, segment, cycle, cores)
+        if run is None:
             return False
-
-        ic_path = self.member_initial_state(member_idx, self.current_cycle_i).resolve()
-        bc_path = (member_path / "wrfbdy_d01").resolve()
-        if not ic_path.exists() or not bc_path.exists():
-            logger.error(
-                f"Member {member_idx}: Initial/boundary conditions not found at {ic_path} or {bc_path}"
-            )
-            return False
-
-        # With segments, continue from the newest checkpoint of an earlier attempt, if
-        # there is one. The member keeps its wrfbdy, which has the boundary increment of
-        # the segment's start.
-        restart_interval = None
-        resume: tuple[dt.datetime, Path] | None = None
-        plan = self.segment_of(segment[0])
-        if plan is not None:
-            restart_interval = plan.checkpoint_interval_min
-            resume = self.find_resume_point(member_idx, segment)
-
-        if resume is not None and resume[0] == cycle.end:
-            logger.info(
-                f"Member {member_idx}: An earlier attempt already ran to the end, "
-                "only filing its output"
-            )
-            start_time = end_time = None
-        else:
-            if resume is not None:
-                resume_time, checkpoint = resume
-                logger.info(f"Member {member_idx}: Resuming from {checkpoint}")
-                # Copies left by earlier resumes, not the segment's initial state
-                for f in member_path.glob("wrfrst_d01_*"):
-                    if f != self.member_initial_state(member_idx, segment[0]):
-                        f.unlink()
-                utils.copy(checkpoint, member_path / checkpoint.name)
-                cycle = dataclasses.replace(cycle, start=resume_time)
-
-            ok, start_time, end_time = self._run_wrf(
-                member_idx,
-                cycle,
-                cores,
-                restart_interval,
-                restart=True if resume is not None else None,
-                watch_checkpoints=plan is not None,
-            )
-            if not ok:
-                return False
-
-        self.file_segment_outputs(member_idx, segment)
 
         # Every cycle of the segment gets its own status file. The first cycle's is what
         # decides whether the member is advanced (`can_advance_member`, the job array),
         # so it is written last: a job that dies in between counts as not advanced.
         # The runtime goes on the last cycle's file only, since it is one run.
         for cycle_i in reversed(segment):
-            if cycle_i == segment[-1] and start_time is not None and end_time is not None:
+            if cycle_i == segment[-1] and run.start is not None and run.end is not None:
                 self.state.set_member_advanced(
                     cycle_i,
                     member_idx,
-                    start=start_time,
-                    end=end_time,
-                    duration_s=int((end_time - start_time).total_seconds()),
-                    simulated_s=int((cycle.end - cycle.start).total_seconds()),
+                    start=run.start,
+                    end=run.end,
+                    duration_s=int((run.end - run.start).total_seconds()),
+                    simulated_s=run.simulated_s,
                 )
             else:
                 self.state.set_member_advanced(cycle_i, member_idx)
         self.members[member_idx].advanced = True
 
         return True
-
-    def _run_wrf(
-        self,
-        member_idx: int,
-        cycle: cycling.CycleInformation,
-        cores: int,
-        restart_interval: int | None,
-        restart: bool | None,
-        watch_checkpoints: bool,
-    ) -> tuple[bool, dt.datetime, dt.datetime]:
-        """
-        Writes the namelist and runs wrf.exe for a member from `cycle.start` to
-        `cycle.forecast_end`. With `watch_checkpoints`, confirms and prunes the restart
-        files it writes on the way (see `checkpoints.py`).
-
-        Returns:
-            Whether WRF succeeded, and when it started and ended
-        """
-
-        member_path = self.paths.member_path(member_idx)
-        wrf_exe_path = (member_path / "wrf.exe").resolve()
-
-        # Generate namelist
-        wrf_namelist_path = member_path / "namelist.input"
-        wrf.generate_wrf_namelist(
-            self.cfg,
-            cycle,
-            True,
-            wrf_namelist_path,
-            member_idx,
-            self.paths,
-            restart_interval=restart_interval,
-            restart=restart,
-        )
-
-        # Clean old log files
-        for f in member_path.glob("rsl.*"):
-            f.unlink()
-
-        # Run WRF
-        logger.info(f"Running WRF for member {member_idx}...")
-        cmd = [
-            *self.cfg.slurm.mpirun_command.split(" "),
-            "-n",
-            str(cores),
-            str(wrf_exe_path),
-        ]
-
-        rsl_file = member_path / "rsl.out.0000"
-        watcher = contextlib.nullcontext()
-        if watch_checkpoints:
-            interval = (
-                restart_interval
-                if restart_interval is not None
-                else int((cycle.end - cycle.start).total_seconds() // 60)
-            )
-            watcher = checkpoints.CheckpointWatcher(
-                self.paths.scratch_restart_path(cycle.index, member_idx),
-                rsl_file,
-                cycle.start,
-                dt.timedelta(minutes=interval),
-                keep=(
-                    None
-                    if self.cfg.assimilation.keep_restart_files
-                    else self.cfg.segments.keep_checkpoints
-                ),
-            )
-
-        start_time = dt.datetime.now()
-        with watcher:
-            res = external.runc(cmd, cwd=member_path)
-        end_time = dt.datetime.now()
-
-        # Check output logs
-        if not rsl_file.exists():
-            logger.error(f"Member {member_idx}: RSL file not found at {rsl_file}")
-            return False, start_time, end_time
-
-        logger.add_log_file(rsl_file)
-        rsl_content = rsl_file.read_text()
-
-        if "SUCCESS COMPLETE WRF" not in rsl_content:
-            logger.error(
-                f"Member {member_idx}: wrf.exe failed with exit code {res.returncode}"
-            )
-            return False, start_time, end_time
-
-        # Store logs in a zip file
-        if logger.log_dir is not None:
-            rsl_files = sorted(member_path.glob("rsl.*"))
-            utils.zip_files(rsl_files, logger.log_dir / "rsl.zip")
-
-        return True, start_time, end_time
-
-    def find_resume_point(
-        self, member_i: int, segment: range
-    ) -> tuple[dt.datetime, Path] | None:
-        """
-        The newest checkpoint of an earlier attempt at a segment that the member can
-        continue from, with its time: confirmed (WRF finished writing it), readable, and
-        inside the segment. If it is at the segment's end, the earlier attempt finished
-        and only its output needs filing. None to start from the beginning.
-        """
-
-        first, last = segment[0], segment[-1]
-        start, end = self.cycles[first].start, self.cycles[last].end
-
-        # Moved there only after an earlier attempt succeeded
-        end_name = f"wrfrst_d01_{end:%Y-%m-%d_%H:%M:%S}"
-        moved = self.paths.scratch_restart_path(last, member_i) / end_name
-        if last != first and moved.exists():
-            return end, moved
-
-        directory = self.paths.scratch_restart_path(first, member_i)
-        confirmed = checkpoints.confirmed_times(directory)
-        for time, f in reversed(checkpoints.list_checkpoints(directory)):
-            if not start < time <= end:
-                continue
-            if time not in confirmed:
-                logger.info(
-                    f"Member {member_i}: Not resuming from {f.name}, WRF didn't confirm "
-                    "writing it"
-                )
-                continue
-            if not checkpoints.is_complete(f, time):
-                logger.warning(f"Member {member_i}: Not resuming from unreadable {f}")
-                continue
-            return time, f
-        return None
-
-    def file_segment_outputs(self, member_i: int, segment: range):
-        """
-        After a member ran a segment: WRF wrote all output and restart files into the
-        first cycle's scratch directories. Move each wrfout into the cycle it belongs to
-        (`start < time <= end`), delete the one at the segment start (as for a single
-        cycle), and move the restart file at the segment end into the last cycle's
-        restart directory, where `cycle` looks for it.
-
-        Safe to run again on files that were already moved.
-        """
-
-        first, last = segment[0], segment[-1]
-        first_dir = self.paths.scratch_forecasts_path(first, member_i)
-        first_output = (
-            first_dir / f"wrfout_d01_{self.cycles[first].start:%Y-%m-%d_%H:%M:%S}"
-        )
-        if first_output.exists():
-            logger.info(f"Removing first output file {first_output}")
-            first_output.unlink()
-
-        if first == last:
-            return
-
-        for f in sorted(first_dir.glob("wrfout_d01_*")):
-            time = wrf.wrfout_time(f.name)
-            cycle_i = next(
-                (
-                    i
-                    for i in segment
-                    if self.cycles[i].start < time <= self.cycles[i].end
-                ),
-                None,
-            )
-            if cycle_i is None or cycle_i == first:
-                continue
-            target = self.paths.scratch_forecasts_path(cycle_i, member_i) / f.name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            f.rename(target)
-        logger.info(f"Member {member_i}: Sorted the output into cycles {first}-{last}")
-
-        if self.cfg.assimilation.cycling_mode == "restart":
-            end = self.cycles[last].end
-            name = f"wrfrst_d01_{end:%Y-%m-%d_%H:%M:%S}"
-            source = self.paths.scratch_restart_path(first, member_i) / name
-            target = self.paths.scratch_restart_path(last, member_i) / name
-            if source.exists():
-                target.parent.mkdir(parents=True, exist_ok=True)
-                source.rename(target)
-                logger.info(f"Member {member_i}: Moved {name} to {target.parent}")
-            elif not target.exists():
-                raise FileNotFoundError(f"WRF wrote no restart file at {source}")
 
     def filter(self) -> bool:
         """
@@ -753,19 +289,9 @@ class Experiment:
         obs_seq.unlink(missing_ok=True)
         utils.copy(obs_file, obs_seq)
 
-        # Write lists of input and output files
-        # The input list is the latest forecast for each member
-        if self.cfg.is_icon:
-            priors = icon_model.prepare_filter(self)
-        else:
-            wrfout_name = "wrfout_d01_" + self.current_cycle.end.strftime(
-                "%Y-%m-%d_%H:%M:%S"
-            )
-            priors = [
-                self.paths.scratch_forecasts_path(self.current_cycle_i, member_i)
-                / wrfout_name
-                for member_i in range(0, self.cfg.assimilation.n_members)
-            ]
+        # Write lists of input and output files. The model also puts what DART's
+        # interface to it reads (grid, coordinates) in the DART directory.
+        priors = self.model.prepare_filter()
         missing_priors = [prior for prior in priors if not prior.exists()]
         if missing_priors:
             logger.error(f"Forecast file(s) missing: {missing_priors[0]}, ...")
@@ -784,16 +310,6 @@ class Experiment:
         logger.info(f"Wrote {dart_output_txt}")
 
         self.paths.scratch_dart_path(self.current_cycle_i).mkdir(exist_ok=True, parents=True)
-
-        if not self.cfg.is_icon:
-            # Link wrfinput, required by filter to read coordinates
-            wrfinput_path = dart_dir / "wrfinput_d01"
-            wrfinput_path.unlink(missing_ok=True)
-            # Any wrfinput of the domain works, the grid doesn't change between cycles.
-            # In restart mode, only the first cycle has one.
-            wrfinput_cur_cycle_path = self.paths.ic_path(0, 0)
-            wrfinput_path.symlink_to(wrfinput_cur_cycle_path)
-            logger.info(f"Linked {wrfinput_path} to {wrfinput_cur_cycle_path}")
 
         # Run filter
         if self.cfg.assimilation.filter_mpi_tasks == 1:
@@ -832,47 +348,6 @@ class Experiment:
         self.state_machine.current_cycle.transition(StateTransition.FILTER_COMPLETE)
 
         return True
-
-    def clean_restart_files(self) -> None:
-        """
-        Deletes the WRF restart files in scratch that no cycle can start from anymore, in
-        restart mode, unless `assimilation.keep_restart_files` is set or the cycle is in
-        `assimilation.keep_restart_files_for_cycles`. Call after moving to the next cycle.
-
-        The current cycle starts from the previous cycle's restart files, which are kept
-        so it can be rerun. Older cycles' are deleted, and so are any restart files of
-        the previous cycle other than the one at its end (written when a forecast
-        extension reaches past the next restart time).
-        """
-
-        if self.cfg.is_icon:
-            icon_model.clean_first_guess_files(self)
-            return
-
-        if (
-            self.cfg.assimilation.cycling_mode != "restart"
-            or self.cfg.assimilation.keep_restart_files
-        ):
-            return
-
-        previous_i = self.current_cycle_i - 1
-        if previous_i < 0:
-            return
-        keep_cycles = set(self.cfg.assimilation.keep_restart_files_for_cycles)
-        for cycle_dir in sorted(self.paths.scratch_restart.glob("cycle_*")):
-            cycle_i = int(cycle_dir.name.removeprefix("cycle_"))
-            if cycle_i < previous_i and cycle_i not in keep_cycles:
-                logger.info(f"Removing restart files in {cycle_dir}")
-                shutil.rmtree(cycle_dir)
-
-        end = self.cycles[previous_i].end
-        keep = f"wrfrst_d01_{end:%Y-%m-%d_%H:%M:%S}"
-        for member_i in range(self.cfg.assimilation.n_members):
-            member_dir = self.paths.scratch_restart_path(previous_i, member_i)
-            for f in member_dir.glob("wrfrst_*"):
-                if f.name != keep:
-                    logger.info(f"Removing unused restart file {f}")
-                    f.unlink()
 
     # Segments (see `segments.py`)
 
@@ -1086,16 +561,7 @@ class Experiment:
         for cycle_i in plan.cycles:
             self.state_machine.get_cycle(cycle_i).reset()
             for member_i in range(self.cfg.assimilation.n_members):
-                for f in self.paths.scratch_forecasts_path(cycle_i, member_i).glob(
-                    "wrfout_*"
-                ):
-                    f.unlink()
-                # Checkpoints and their confirmations
-                restart_dir = self.paths.scratch_restart_path(cycle_i, member_i)
-                if restart_dir.is_dir():
-                    for f in restart_dir.iterdir():
-                        if f.is_file():
-                            f.unlink()
+                self.model.remove_cycle_output(cycle_i, member_i)
         logger.info(f"Reset the status of {plan} and deleted its output and restart files")
 
         self.state.clear_segment_plan(plan.first)
@@ -1121,7 +587,7 @@ class Experiment:
         missing = [
             i
             for i in range(n_members)
-            if not self.member_initial_state(i, cycle_i).exists()
+            if not self.model.member_initial_state(i, cycle_i).exists()
         ]
         if cycle_i == 0 and len(missing) == n_members:
             logger.info("The members are not set up yet, `ensemble setup` will do it")
@@ -1129,7 +595,7 @@ class Experiment:
         if missing:
             logger.warning(
                 f"{len(missing)} member(s) have no initial state for cycle {cycle_i} "
-                f"(e.g. {self.member_initial_state(missing[0], cycle_i)}), their "
+                f"(e.g. {self.model.member_initial_state(missing[0], cycle_i)}), their "
                 "boundaries were not updated for the segment. Once they are set up, run "
                 "`ensemble plan-segment --replan`."
             )
@@ -1142,8 +608,8 @@ class Experiment:
                 pass
 
     def _refresh_member_boundaries(self, member_i: int) -> None:
-        self.prepare_member_boundaries(member_i, self.current_cycle_i)
-        self.update_bc(member_i)
+        self.model.prepare_member_boundaries(member_i, self.current_cycle_i)
+        self.model.update_bc(member_i)
 
     def segment_started(self, plan: segments.SegmentPlan) -> bool:
         """
@@ -1164,233 +630,13 @@ class Experiment:
                     return True
         return False
 
-    def member_initial_state(self, member_i: int, cycle_i: int) -> Path:
+    def set_model_environment(self):
         """
-        The file a member starts a cycle from, in its directory: the wrfinput, or in
-        restart mode (after the first cycle) the WRF restart file at the cycle's start.
-        """
-
-        member_path = self.paths.member_path(member_i)
-        if self.cfg.assimilation.cycling_mode == "restart" and cycle_i > 0:
-            start = self.cycles[cycle_i].start
-            return member_path / f"wrfrst_d01_{start:%Y-%m-%d_%H:%M:%S}"
-        return member_path / "wrfinput_d01"
-
-    def member_reference_state(self, member_i: int, cycle_i: int) -> Path:
-        """
-        The initial state of a member at a cycle before it was modified by the analysis or
-        perturbations: real.exe's wrfinput, or in restart mode (after the first cycle) the
-        restart file WRF wrote at the end of the previous cycle. `cycle` copies the latter
-        into the member directory and keeps the original in scratch.
+        Adds the model's environment variables from the config (`environment.wrf` or
+        `environment.icon`) to the current environment
         """
 
-        if self.cfg.assimilation.cycling_mode == "restart" and cycle_i > 0:
-            start = self.cycles[cycle_i].start
-            return self.paths.scratch_restart_path(cycle_i - 1, member_i) / (
-                f"wrfrst_d01_{start:%Y-%m-%d_%H:%M:%S}"
-            )
-        return self.paths.ic_path(member_i, cycle_i)
-
-    def prepare_member_boundaries(self, member_i: int, cycle_i: int) -> None:
-        """
-        Puts the boundary conditions for a cycle in the member's directory: the wrfbdy
-        (in restart mode, the cycle's records of the experiment-long one, or the whole
-        segment's if one starts at this cycle) and the lower boundary (wrflowinp, linked)
-        if real.exe made one.
-        """
-
-        member_path = self.paths.member_path(member_i)
-        cycle = self.cycles[cycle_i]
-        bdy_target = member_path / "wrfbdy_d01"
-        if self.cfg.assimilation.cycling_mode == "restart":
-            end = cycle.forecast_end
-            segment = self.segment_of(cycle_i)
-            if segment is not None and segment.first == cycle_i:
-                end = self.cycles[segment.last].end
-            n_records = wrf.extract_boundary_records(
-                self.paths.bc_path(member_i, None),
-                bdy_target,
-                cycle.start,
-                end,
-            )
-            logger.info(f"Member {member_i}: Extracted {n_records} boundary record(s)")
-            lowinp = self.paths.lowinp_path(member_i, None)
-        else:
-            utils.copy(self.paths.bc_path(member_i, cycle_i), bdy_target)
-            lowinp = self.paths.lowinp_path(member_i, cycle_i)
-
-        lowinp_target = member_path / "wrflowinp_d01"
-        lowinp_target.unlink(missing_ok=True)
-        if lowinp.exists():
-            lowinp_target.symlink_to(lowinp.resolve())
-        elif self.cfg.wrf_namelist.get("physics", {}).get("sst_update", 0) == 1:
-            raise FileNotFoundError(
-                f"sst_update = 1 but there's no lower boundary file at {lowinp}"
-            )
-
-    def cycle_member(self, member_i: int, use_forecast: bool):
-        """
-        Prepares a member for the next cycle, starting from the analysis of the current
-        cycle. Must be done for all members after finishing a set of forward runs and
-        running the filter. If you have no observations and filter is skipped, run this
-        step with use_forecast=True to use the forecast from the current cycle as the
-        analysis.
-
-        In `wrfinput` cycling mode, the next cycle's wrfinput gets the `cycled_variables`
-        from the analysis. In `restart` mode, the member continues from its restart file.
-
-        Args:
-            member_i: Index of the member to cycle
-            use_forecast: Use the forecast from the previous cycle as the analysis
-        """
-
-        member_path = self.paths.member_path(member_i)
-        if self.cfg.is_icon:
-            icon_model.cycle_member(self, member_i, use_forecast)
-            return
-        if self.cfg.assimilation.cycling_mode == "restart":
-            self._cycle_member_restart(member_i, use_forecast)
-        else:
-            self._cycle_member_wrfinput(member_i, use_forecast)
-
-        # Remove forecast files, log files
-        logger.info(f"Cleaning up member directory {member_path}")
-        for f in member_path.glob("wrfout*"):
-            logger.debug(f"Removing forecast file {f}")
-            f.unlink()
-        for f in member_path.glob("rsl*"):
-            logger.debug(f"Removing log file {f}")
-            f.unlink()
-
-    def _cycle_member_wrfinput(self, member_i: int, use_forecast: bool) -> None:
-        """`cycle_member` for the `wrfinput` cycling mode"""
-
-        member_path = self.paths.member_path(member_i)
-        next_cycle_i = self.current_cycle_i + 1
-
-        # Find analysis/forecast file to use
-        wrfout_name = "wrfout_d01_" + self.current_cycle.end.strftime(
-            "%Y-%m-%d_%H:%M:%S"
-        )
-        if use_forecast:
-            analysis_file = (
-                self.paths.scratch_forecasts_path(self.current_cycle_i)
-                / f"member_{member_i:02d}"
-                / wrfout_name
-            )
-        else:
-            analysis_file = (
-                self.paths.scratch_analysis_path(self.current_cycle_i)
-                / f"member_{member_i:02d}"
-                / wrfout_name
-            )
-
-        if not analysis_file.exists():
-            raise FileNotFoundError(analysis_file)
-        logger.info(f"Using {analysis_file} as analysis for member {member_i}")
-
-        # Copy the initial & boundary condition files for the next cycle, as is
-        icbc_target_file = member_path / "wrfinput_d01"
-        utils.copy(self.paths.ic_path(member_i, next_cycle_i), icbc_target_file)
-        self.prepare_member_boundaries(member_i, next_cycle_i)
-
-        # Copy cycled variables from the analysis file to the IC file
-        with (
-            netCDF4.Dataset(analysis_file, "r") as nc_analysis,  # type: ignore
-            netCDF4.Dataset(icbc_target_file, "r+") as nc_icbc,  # type: ignore
-        ):
-            for name in self.cfg.assimilation.cycled_variables:
-                if name not in nc_analysis.variables:
-                    logger.warning(f"Member {member_i}: {name} not in analysis file")
-                    continue
-                logger.info(f"Member {member_i}: Copying {name}")
-                nc_icbc[name][:] = nc_analysis[name][:]
-
-            # Add experiment name to attributes
-            nc_icbc.experiment_name = self.cfg.metadata.name
-
-    def _cycle_member_restart(self, member_i: int, use_forecast: bool) -> None:
-        """
-        `cycle_member` for the `restart` cycling mode: the member's restart file at the
-        end of the current cycle is copied into its directory (the original is kept in
-        scratch so the next cycle can be rerun). Unless cycling the forecast, the
-        `state_variables` of the analysis are written into it and it is rebalanced.
-        """
-
-        member_path = self.paths.member_path(member_i)
-        next_cycle_i = self.current_cycle_i + 1
-        end = self.current_cycle.end
-        source = self.paths.scratch_restart_path(self.current_cycle_i, member_i) / (
-            f"wrfrst_d01_{end:%Y-%m-%d_%H:%M:%S}"
-        )
-        if not source.exists():
-            raise FileNotFoundError(source)
-        logger.info(f"Member {member_i}: Continuing from {source}")
-
-        # Only the next cycle's restart file belongs in the member directory. A stale
-        # wrfinput would be ignored by wrf.exe, but could be modified by mistake.
-        for f in member_path.glob("wrfrst_d01_*"):
-            f.unlink()
-        (member_path / "wrfinput_d01").unlink(missing_ok=True)
-
-        initial_state = self.member_initial_state(member_i, next_cycle_i)
-        utils.copy(source, initial_state)
-
-        # Parameter perturbations are applied once and then only carried over in the
-        # restart file. WRF only writes the fields its Registry marks for restart, so
-        # without that a parameter would silently go back to its default.
-        parameters = [
-            name
-            for name, var in self.cfg.perturbations.variables.items()
-            if var.kind == "parameter"
-        ]
-        if parameters:
-            with netCDF4.Dataset(initial_state, "r") as nc_restart:  # type: ignore
-                missing = [
-                    p for p in parameters if not restart.field_names(nc_restart, p)
-                ]
-            if missing:
-                raise ValueError(
-                    f'{", ".join(missing)} (perturbed with kind = "parameter") not in '
-                    f"{source}. WRF only writes fields with the `r` flag in its Registry "
-                    "to restart files, so the perturbation would be lost after the first "
-                    "cycle. Add the flag and rebuild WRF."
-                )
-
-        if not use_forecast:
-            analysis_file = (
-                self.paths.scratch_analysis_path(self.current_cycle_i)
-                / f"member_{member_i:02d}"
-                / f"wrfout_d01_{end:%Y-%m-%d_%H:%M:%S}"
-            )
-            if not analysis_file.exists():
-                raise FileNotFoundError(analysis_file)
-            with (
-                netCDF4.Dataset(analysis_file, "r") as nc_analysis,  # type: ignore
-                netCDF4.Dataset(initial_state, "r+") as nc_restart,  # type: ignore
-            ):
-                before = rebalance.balanced_fields(nc_restart)
-                written = restart.write_state(
-                    nc_restart, nc_analysis, self.cfg.assimilation.state_variables
-                )
-                rebalance.rebalance(nc_restart, before)
-                nc_restart.experiment_name = self.cfg.metadata.name
-            logger.info(
-                f"Member {member_i}: Wrote the analysis ({', '.join(written)}) into "
-                f"{initial_state.name} and rebalanced it"
-            )
-
-        self.prepare_member_boundaries(member_i, next_cycle_i)
-
-    def set_wrf_environment(self):
-        """
-        Adds the environment variables from config's `environment.wrf` to the current environment
-        """
-
-        model_environment = (
-            self.cfg.environment.icon if self.cfg.is_icon else self.cfg.environment.wrf
-        )
-        for key, value in model_environment.items():
+        for key, value in self.model.environment.items():
             os.environ[key] = value
 
     def set_dart_environment(self):

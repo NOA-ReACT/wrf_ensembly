@@ -96,7 +96,7 @@ def test_advance_member_resumes_from_confirmed_checkpoint(
     assert exp.state.get_advanced_members(0) == set()
 
     monkeypatch.delenv("FAKE_WRF_DIE_AFTER_HOURS")
-    assert exp.find_resume_point(0, range(0, 4))[1].name.endswith("12:00:00")
+    assert exp.model.find_resume_point(0, range(0, 4))[1].name.endswith("12:00:00")
     assert exp.advance_member(0, cores=1)
 
     rsl = (exp.paths.member_path(0) / "rsl.out.0000").read_text()
@@ -122,7 +122,7 @@ def test_advance_member_starts_over_without_confirmed_checkpoints(
     assert not exp.advance_member(0, cores=1)
     (exp.paths.scratch_restart_path(0, 0) / checkpoints.CONFIRMED_FILE).unlink()
 
-    assert exp.find_resume_point(0, range(0, 4)) is None
+    assert exp.model.find_resume_point(0, range(0, 4)) is None
 
 
 def test_advance_member_only_files_output_of_a_finished_run(
