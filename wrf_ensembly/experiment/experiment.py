@@ -6,6 +6,7 @@ from pathlib import Path
 from wrf_ensembly import (
     config,
     cycling,
+    domain,
     external,
     models,
     obs_sequence,
@@ -70,6 +71,7 @@ class Experiment:
     cycles: list[cycling.CycleInformation]
     paths: ExperimentPaths
     model: models.Model
+    domain: domain.Domain
     members: list[MemberStatus] = []
 
     state: ExperimentState
@@ -83,6 +85,7 @@ class Experiment:
 
         self.paths = ExperimentPaths(experiment_path, self.cfg)
         self.model = models.create(self)
+        self.domain = domain.create(self.cfg, self.paths)
         self.state = ExperimentState(self.paths, self.cfg.assimilation.n_members)
 
         # Read the experiment status. Nothing is written here.

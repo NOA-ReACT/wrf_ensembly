@@ -19,7 +19,7 @@ from rich.console import Console
 from rich.progress import Progress, track
 from rich.table import Table
 
-from wrf_ensembly import domain, experiment, external, observations
+from wrf_ensembly import experiment, external, observations
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import console, logger
 from wrf_ensembly.observations import plotting
@@ -426,8 +426,8 @@ def plot_cycle(experiment_path: Path, cycle: int, dpi: int):
         logger.error(f"Cycle {cycle_info.index} has no observations in its window")
         return
 
-    proj = domain.cartopy_crs(exp.cfg)
-    bounds = domain.domain_bounds(exp.cfg, exp.paths)
+    proj = exp.domain.cartopy_crs()
+    bounds = exp.domain.bounds()
     half = exp.cfg.assimilation.half_window_length_minutes
     exp.paths.plots.mkdir(exist_ok=True, parents=True)
 
@@ -474,10 +474,10 @@ def plot_cycle_locations(experiment_path: Path, cycle: int):
         logger.error(f"Cycle {cycle_info.index} has no observations, cannot plot")
         return
 
-    bounds = domain.domain_bounds(exp.cfg, exp.paths)
+    bounds = exp.domain.bounds()
     fig = observations.plotting.plot_observation_locations_on_map(
         obs,
-        proj=domain.cartopy_crs(exp.cfg),
+        proj=exp.domain.cartopy_crs(),
         domain_bounds=bounds,
     )
     fig.suptitle(f"Observation Locations for Cycle {cycle_info.index}")
@@ -540,7 +540,7 @@ def plot_compare_obs_to_grid(
     keep_only_good_qc: bool,
 ):
     """
-    Plot observation locations overlaid on the WRF model grid, zoomed in to compare
+    Plot observation locations overlaid on the model grid, zoomed in to compare
     observation density with grid resolution. Useful for determining optimal superobbing
     bin sizes.
 
@@ -548,9 +548,6 @@ def plot_compare_obs_to_grid(
     as colored dots on top. By default it zooms to ~30x30 grid points around the domain
     center.
     """
-
-    import numpy as np
-    import xarray as xr
 
     logger.setup("observations-plot-compare-obs-to-grid", experiment_path)
     exp = experiment.Experiment(experiment_path)
@@ -579,63 +576,14 @@ def plot_compare_obs_to_grid(
             logger.error("No observations remaining after filtering for good QC")
             return
 
-    if exp.cfg.icon is not None:
-        from wrf_ensembly.icon.regrid import IconGrid
-
-        grid = IconGrid.from_file(exp.cfg.icon.grid_file)
-        center = None
-        if center_lat is not None and center_lon is not None:
-            center = (center_lat, center_lon)
-        # Longitudes near the centre of the grid, so that the cells of a domain across
-        # the dateline stay together
-        west, east, _, _ = domain.icon_grid_bounds(grid)
-        middle = 0.5 * (west + east)
-
-        def wrap(lon):
-            return middle + (np.degrees(lon) - middle + 180.0) % 360.0 - 180.0
-
-        cell_lon = wrap(grid.clon)
-        fig = observations.plotting.plot_obs_vs_triangular_grid(
-            cell_lon=cell_lon,
-            cell_lat=np.degrees(grid.clat),
-            vertex_lon=cell_lon[:, None]
-            + (np.degrees(grid.vlon - grid.clon[:, None]) + 180.0) % 360.0
-            - 180.0,
-            vertex_lat=np.degrees(grid.vlat),
-            observations=obs,
-            center=center,
-            window_size=window_size,
-        )
-    else:
-        # Load grid coordinates from wrfinput
-        wrfinput_path = exp.paths.ic_path(0, 0)
-        if not wrfinput_path.exists():
-            logger.error(f"wrfinput file not found at {wrfinput_path}")
-            return
-
-        with xr.open_dataset(wrfinput_path) as ds:
-            grid_lat = ds["XLAT"].isel(Time=0).values
-            grid_lon = ds["XLONG"].isel(Time=0).values
-
-        # Determine center grid index
-        center_idx = None
-        if center_lat is not None and center_lon is not None:
-            # Find nearest grid point to the given lat/lon
-            dist = (grid_lat - center_lat) ** 2 + (grid_lon - center_lon) ** 2
-            center_idx = np.unravel_index(np.argmin(dist), dist.shape)
-            logger.info(
-                f"Centering on grid index {center_idx} (nearest to {center_lat}, {center_lon})"
-            )
-
-        proj = domain.cartopy_crs(exp.cfg)
-        fig = observations.plotting.plot_obs_vs_grid(
-            grid_lat=grid_lat,
-            grid_lon=grid_lon,
-            observations=obs,
-            proj=proj,
-            center_idx=center_idx,
-            window_size=window_size,
-        )
+    center = None
+    if center_lat is not None and center_lon is not None:
+        center = (center_lat, center_lon)
+    try:
+        fig = exp.domain.plot_observations_on_grid(obs, center, window_size)
+    except FileNotFoundError as e:
+        logger.error(str(e))
+        return
 
     title = f"Observations vs Grid - Cycle {cycle_info.index}"
     if instrument or quantity:

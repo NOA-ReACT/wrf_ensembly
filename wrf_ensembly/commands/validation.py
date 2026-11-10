@@ -3,7 +3,6 @@ from pathlib import Path
 
 import click
 
-from wrf_ensembly import domain
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import experiment
@@ -222,7 +221,7 @@ def analyze_first_departures(
         )
 
     # Get cartopy projection
-    proj = domain.cartopy_crs_or_none(exp.cfg)
+    proj = exp.domain.cartopy_crs_or_none()
 
     pairs_to_analyze = _resolve_pairs(
         exp,

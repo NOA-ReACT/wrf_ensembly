@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 
-from wrf_ensembly import external, wrf
+from wrf_ensembly import domain, external, wrf
 from wrf_ensembly import observations as obs
 from wrf_ensembly.config import Config
 from wrf_ensembly.console import logger
@@ -197,50 +197,8 @@ class ExperimentObservations:
                 ]
 
         start_time, end_time = wrf.get_temporal_domain_bounds(self.cycles)
-        if self.cfg.icon is not None:
-            # The output of ICON is postprocessed to a lat/lon grid, so x and y are
-            # simply the longitude and latitude. An observation is in the domain if
-            # it is inside one of the grid's triangles.
-            from wrf_ensembly.icon import regrid
-
-            grid = regrid.IconGrid.from_file(self.cfg.icon.grid_file)
-            df = df.copy()
-            df["x"] = df["longitude"]
-            df["y"] = df["latitude"]
-            df = df[(df["time"] >= start_time) & (df["time"] <= end_time)]
-            df["in_domain"] = (
-                regrid.locate_cells(
-                    grid,
-                    np.radians(df["longitude"].to_numpy(dtype=float)),
-                    np.radians(df["latitude"].to_numpy(dtype=float)),
-                )
-                >= 0
-            )
-        else:
-            # Find wrfinput file
-            if not self.cfg.data.per_member_meteorology:
-                wrfinput_path = self.paths.data_icbc / "wrfinput_d01_cycle_0"
-            else:
-                wrfinput_path = (
-                    self.paths.data_icbc / "member_00" / "wrfinput_d01_member_00_cycle_0"
-                )
-            if not wrfinput_path.exists():
-                raise FileNotFoundError(
-                    f"wrfinput file not found at {wrfinput_path}, cannot trim observations spatially"
-                )
-
-            # Trim file into experiment time and space bounds
-            transformer = wrf.get_wrf_proj_transformer(self.cfg.domain_control)
-            x_min, x_max, y_min, y_max = wrf.get_spatial_domain_bounds(wrfinput_path)
-
-            df = obs.utils.project_locations_to_wrf(df, transformer)
-            df = df[(df["time"] >= start_time) & (df["time"] <= end_time)]
-            df["in_domain"] = (
-                (df["x"] >= x_min)
-                & (df["x"] <= x_max)
-                & (df["y"] >= y_min)
-                & (df["y"] <= y_max)
-            )
+        df = df[(df["time"] >= start_time) & (df["time"] <= end_time)]
+        df = domain.create(self.cfg, self.paths).locate(df)
 
         # For spatial filtering, we must make sure that the final array has no NaNs after
         # reshaping into the original shape.

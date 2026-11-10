@@ -23,23 +23,26 @@ def read_template(name: str) -> config.Config:
     return config.Config.from_toml(text)
 
 
-def test_projection():
-    assert isinstance(domain.cartopy_crs(read_template("icon.toml")), ccrs.PlateCarree)
-    assert isinstance(
-        domain.cartopy_crs(read_template("default.toml")), ccrs.LambertConformal
-    )
+def test_projection(tmp_path: Path):
+    for name, projection in (
+        ("icon.toml", ccrs.PlateCarree),
+        ("default.toml", ccrs.LambertConformal),
+    ):
+        cfg = read_template(name)
+        crs = domain.create(cfg, ExperimentPaths(tmp_path, cfg)).cartopy_crs()
+        assert isinstance(crs, projection)
 
 
 def test_icon_domain_bounds(tmp_path: Path):
     cfg = read_template("icon.toml")
     assert cfg.icon is not None
     cfg.icon.grid_file = tmp_path / "grid.nc"
-    paths = ExperimentPaths(tmp_path, cfg)
-    assert domain.domain_bounds(cfg, paths) is None  # no grid file yet
+    icon_domain = domain.create(cfg, ExperimentPaths(tmp_path, cfg))
+    assert icon_domain.bounds() is None  # no grid file yet
 
     write_grid_file(cfg.icon.grid_file)  # 8 x 8 degrees around 20 E, 35 N
     np.testing.assert_allclose(
-        domain.domain_bounds(cfg, paths), (16.0, 24.0, 31.0, 39.0), atol=1e-6
+        icon_domain.bounds(), (16.0, 24.0, 31.0, 39.0), atol=1e-6
     )
 
 
