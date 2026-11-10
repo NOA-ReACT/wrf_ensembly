@@ -19,7 +19,7 @@ from rich.console import Console
 from rich.progress import Progress, track
 from rich.table import Table
 
-from wrf_ensembly import experiment, external, observations, wrf
+from wrf_ensembly import domain, experiment, external, observations
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import console, logger
 from wrf_ensembly.observations import plotting
@@ -400,20 +400,6 @@ def cycle_info(experiment_path: Path, cycle: int, as_json: bool):
     console.print(files_table)
 
 
-def _domain_bounds(exp) -> tuple[float, float, float, float] | None:
-    """Domain extent in the WRF projection, from the cycle-0 wrfinput if it exists"""
-    if not exp.cfg.data.per_member_meteorology:
-        wrfinput_path = exp.paths.data_icbc / "wrfinput_d01_cycle_0"
-    else:
-        wrfinput_path = (
-            exp.paths.data_icbc / "member_00" / "wrfinput_d01_member_00_cycle_0"
-        )
-    if not wrfinput_path.exists():
-        logger.warning(f"No wrfinput file at {wrfinput_path}, cannot set map bounds")
-        return None
-    return wrf.get_spatial_domain_bounds(wrfinput_path)
-
-
 @observations_cli.command()
 @click.argument("cycle", type=int, required=True)
 @click.option("--dpi", type=int, default=150, help="DPI for output files")
@@ -440,8 +426,8 @@ def plot_cycle(experiment_path: Path, cycle: int, dpi: int):
         logger.error(f"Cycle {cycle_info.index} has no observations in its window")
         return
 
-    proj = wrf.get_wrf_cartopy_crs(exp.cfg.domain_control)
-    bounds = _domain_bounds(exp)
+    proj = domain.cartopy_crs(exp.cfg)
+    bounds = domain.domain_bounds(exp.cfg, exp.paths)
     half = exp.cfg.assimilation.half_window_length_minutes
     exp.paths.plots.mkdir(exist_ok=True, parents=True)
 
@@ -488,10 +474,10 @@ def plot_cycle_locations(experiment_path: Path, cycle: int):
         logger.error(f"Cycle {cycle_info.index} has no observations, cannot plot")
         return
 
-    bounds = _domain_bounds(exp)
+    bounds = domain.domain_bounds(exp.cfg, exp.paths)
     fig = observations.plotting.plot_observation_locations_on_map(
         obs,
-        proj=wrf.get_wrf_cartopy_crs(exp.cfg.domain_control),
+        proj=domain.cartopy_crs(exp.cfg),
         domain_bounds=bounds,
     )
     fig.suptitle(f"Observation Locations for Cycle {cycle_info.index}")
@@ -613,7 +599,7 @@ def plot_compare_obs_to_grid(
             f"Centering on grid index {center_idx} (nearest to {center_lat}, {center_lon})"
         )
 
-    proj = wrf.get_wrf_cartopy_crs(exp.cfg.domain_control)
+    proj = domain.cartopy_crs(exp.cfg)
     fig = observations.plotting.plot_obs_vs_grid(
         grid_lat=grid_lat,
         grid_lon=grid_lon,

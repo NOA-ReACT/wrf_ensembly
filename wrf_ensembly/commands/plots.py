@@ -4,6 +4,7 @@ from pathlib import Path
 import click
 import xarray as xr
 
+from wrf_ensembly import domain
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.config import PlotVariableConfig
 from wrf_ensembly.console import logger
@@ -24,7 +25,6 @@ from wrf_ensembly.plotting import (
     plot_forecast_vs_analysis,
 )
 from wrf_ensembly.validation import EnsembleSpreadAnalysis
-from wrf_ensembly.wrf import get_wrf_cartopy_crs
 
 
 @click.group(name="plots", cls=GroupWithStartEndPrint)
@@ -111,13 +111,7 @@ def forecast_vs_analysis(
         return
 
     # Get cartopy projection
-    try:
-        proj = get_wrf_cartopy_crs(exp.cfg.domain_control)
-    except NotImplementedError:
-        logger.warning(
-            "Could not create cartopy projection for this domain, falling back to PlateCarree"
-        )
-        proj = None
+    proj = domain.cartopy_crs_or_none(exp.cfg)
 
     # Output directory
     output_dir = exp.paths.plots / "forecast_vs_analysis" / f"cycle_{cycle:03d}"
@@ -266,13 +260,7 @@ def cycle_filter_stats(experiment_path: Path, cycle: int):
     df = read_obs_seq_nc(diag_file)
     logger.info(f"Loaded {len(df)} observations")
 
-    try:
-        proj = get_wrf_cartopy_crs(exp.cfg.domain_control)
-    except NotImplementedError:
-        logger.warning(
-            "Could not create cartopy projection for this domain, falling back to PlateCarree"
-        )
-        proj = None
+    proj = domain.cartopy_crs_or_none(exp.cfg)
 
     base_output_dir = exp.paths.plots / "cycle_filter_stats" / f"cycle_{cycle:03d}"
 
@@ -639,13 +627,7 @@ def forecast(
         )
         return
 
-    try:
-        proj = get_wrf_cartopy_crs(exp.cfg.domain_control)
-    except NotImplementedError:
-        logger.warning(
-            "Could not create cartopy projection for this domain, falling back to PlateCarree"
-        )
-        proj = None
+    proj = domain.cartopy_crs_or_none(exp.cfg)
 
     output_dir = exp.paths.plots / "forecasts" / f"cycle_{cycle:03d}"
     output_dir.mkdir(parents=True, exist_ok=True)

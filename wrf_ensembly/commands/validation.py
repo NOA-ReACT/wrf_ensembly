@@ -3,6 +3,7 @@ from pathlib import Path
 
 import click
 
+from wrf_ensembly import domain
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import experiment
@@ -14,7 +15,6 @@ from wrf_ensembly.validation import (
     PerMemberModelInterpolation,
     RankHistogramAnalysis,
 )
-from wrf_ensembly.wrf import get_wrf_cartopy_crs
 
 
 @click.group(name="validation", cls=GroupWithStartEndPrint)
@@ -222,13 +222,7 @@ def analyze_first_departures(
         )
 
     # Get cartopy projection
-    try:
-        proj = get_wrf_cartopy_crs(exp.cfg.domain_control)
-    except NotImplementedError:
-        logger.warning(
-            "Could not create cartopy projection for this domain, falling back to PlateCarree"
-        )
-        proj = None
+    proj = domain.cartopy_crs_or_none(exp.cfg)
 
     pairs_to_analyze = _resolve_pairs(
         exp,
