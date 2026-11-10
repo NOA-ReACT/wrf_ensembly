@@ -69,7 +69,9 @@ class ExperimentPaths:
         self.logs_slurm = self.logs / "slurm"
 
         # DART working directory
-        self.dart_work_dir = cfg.directories.dart_root / "models" / "wrf" / "work"
+        self.dart_work_dir = (
+            cfg.directories.dart_root / "models" / cfg.metadata.model / "work"
+        )
 
         # Scratch. `{{exp}}` lets a shared env config give every experiment its own
         # scratch tree, e.g. scratch_root = "/lus/.../scratch/{{exp}}"

@@ -76,6 +76,17 @@ def copy_model(experiment_path: Path, force: bool):
     logger.setup("experiment-copy-model", experiment_path)
     exp = experiment.Experiment(experiment_path)
 
+    if exp.cfg.is_icon:
+        # ICON runs from its build directory: `ensemble setup` links the executable
+        # into every member's directory, there are no tables to copy
+        assert exp.cfg.directories.icon_root is not None
+        icon_exe = exp.cfg.directories.icon_root / "bin" / "icon"
+        if not icon_exe.exists():
+            logger.error(f"No ICON executable at {icon_exe}")
+            sys.exit(1)
+        logger.info(f"Using {icon_exe}, nothing to copy for ICON")
+        return
+
     # Check if WRF/WPS directories already exist
     if exp.paths.work_wrf.exists():
         if force:

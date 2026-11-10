@@ -30,6 +30,7 @@ from wrf_ensembly import (
 )
 from wrf_ensembly.console import logger
 from wrf_ensembly.fortran_namelists import write_namelist
+from wrf_ensembly.icon import model as icon_model
 
 from .dataclasses import MemberStatus
 from .inflation import InflationConfig
@@ -376,6 +377,12 @@ class Experiment:
         state (analysis, perturbations), see `member_reference_state`.
         """
 
+        if self.cfg.is_icon:
+            # ICON takes the state at the start of a run as the boundary data for that
+            # time (init_latbc_from_fg) and relaxes towards the next boundary file
+            logger.info("Nothing to do for ICON, the boundary files are used as they are")
+            return
+
         member_path = self.paths.member_path(member_i)
         reference = self.member_reference_state(member_i, self.current_cycle_i)
         if not reference.exists():
@@ -427,6 +434,30 @@ class Experiment:
         if member.advanced:
             logger.error(f"Member {member_idx} already advanced")
             return False
+
+        if self.cfg.is_icon:
+            executable = member_path / icon_model.EXECUTABLE
+            if not executable.exists():
+                logger.error(
+                    f"Member {member_idx}: ICON executable not found at {executable}, "
+                    "run `ensemble setup` first"
+                )
+                return False
+            ok, start_time, end_time = icon_model.run_member(
+                self, member_idx, cycle, cores
+            )
+            if not ok:
+                return False
+            self.state.set_member_advanced(
+                cycle.index,
+                member_idx,
+                start=start_time,
+                end=end_time,
+                duration_s=int((end_time - start_time).total_seconds()),
+                simulated_s=int((cycle.end - cycle.start).total_seconds()),
+            )
+            self.members[member_idx].advanced = True
+            return True
 
         # Locate WRF executable, icbc, ensure they all exist
         wrf_exe_path = (member_path / "wrf.exe").resolve()
@@ -724,14 +755,21 @@ class Experiment:
 
         # Write lists of input and output files
         # The input list is the latest forecast for each member
-        wrfout_name = "wrfout_d01_" + self.current_cycle.end.strftime(
-            "%Y-%m-%d_%H:%M:%S"
-        )
-        priors = [
-            self.paths.scratch_forecasts_path(self.current_cycle_i, member_i)
-            / wrfout_name
-            for member_i in range(0, self.cfg.assimilation.n_members)
-        ]
+        if self.cfg.is_icon:
+            priors = icon_model.prepare_filter(self)
+        else:
+            wrfout_name = "wrfout_d01_" + self.current_cycle.end.strftime(
+                "%Y-%m-%d_%H:%M:%S"
+            )
+            priors = [
+                self.paths.scratch_forecasts_path(self.current_cycle_i, member_i)
+                / wrfout_name
+                for member_i in range(0, self.cfg.assimilation.n_members)
+            ]
+        missing_priors = [prior for prior in priors if not prior.exists()]
+        if missing_priors:
+            logger.error(f"Forecast file(s) missing: {missing_priors[0]}, ...")
+            return False
         posterior = [
             self.paths.scratch_dart_path(self.current_cycle_i)
             / f"dart_{prior.parent.name}.nc"
@@ -747,14 +785,15 @@ class Experiment:
 
         self.paths.scratch_dart_path(self.current_cycle_i).mkdir(exist_ok=True, parents=True)
 
-        # Link wrfinput, required by filter to read coordinates
-        wrfinput_path = dart_dir / "wrfinput_d01"
-        wrfinput_path.unlink(missing_ok=True)
-        # Any wrfinput of the domain works, the grid doesn't change between cycles. In
-        # restart mode, only the first cycle has one.
-        wrfinput_cur_cycle_path = self.paths.ic_path(0, 0)
-        wrfinput_path.symlink_to(wrfinput_cur_cycle_path)
-        logger.info(f"Linked {wrfinput_path} to {wrfinput_cur_cycle_path}")
+        if not self.cfg.is_icon:
+            # Link wrfinput, required by filter to read coordinates
+            wrfinput_path = dart_dir / "wrfinput_d01"
+            wrfinput_path.unlink(missing_ok=True)
+            # Any wrfinput of the domain works, the grid doesn't change between cycles.
+            # In restart mode, only the first cycle has one.
+            wrfinput_cur_cycle_path = self.paths.ic_path(0, 0)
+            wrfinput_path.symlink_to(wrfinput_cur_cycle_path)
+            logger.info(f"Linked {wrfinput_path} to {wrfinput_cur_cycle_path}")
 
         # Run filter
         if self.cfg.assimilation.filter_mpi_tasks == 1:
@@ -805,6 +844,10 @@ class Experiment:
         the previous cycle other than the one at its end (written when a forecast
         extension reaches past the next restart time).
         """
+
+        if self.cfg.is_icon:
+            icon_model.clean_first_guess_files(self)
+            return
 
         if (
             self.cfg.assimilation.cycling_mode != "restart"
@@ -1202,6 +1245,9 @@ class Experiment:
         """
 
         member_path = self.paths.member_path(member_i)
+        if self.cfg.is_icon:
+            icon_model.cycle_member(self, member_i, use_forecast)
+            return
         if self.cfg.assimilation.cycling_mode == "restart":
             self._cycle_member_restart(member_i, use_forecast)
         else:
@@ -1341,7 +1387,10 @@ class Experiment:
         Adds the environment variables from config's `environment.wrf` to the current environment
         """
 
-        for key, value in self.cfg.environment.wrf.items():
+        model_environment = (
+            self.cfg.environment.icon if self.cfg.is_icon else self.cfg.environment.wrf
+        )
+        for key, value in model_environment.items():
             os.environ[key] = value
 
     def set_dart_environment(self):

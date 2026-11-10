@@ -120,7 +120,7 @@ def join_obs_seq(
         binary_obs_sequence: Whether to write the output file as a binary obs_seq file, defaults to False (i.e., ASCII)
     """
 
-    dart_work_dir = cfg.directories.dart_root / "models" / "wrf" / "work"
+    dart_work_dir = cfg.directories.dart_root / "models" / cfg.metadata.model / "work"
     obs_seq_tool = dart_work_dir / "obs_sequence_tool"
 
     nml = {
@@ -172,6 +172,21 @@ def join_obs_seq(
     return res
 
 
+def find_dart_program(dart_root: Path, name: str) -> Path:
+    """
+    Locates a DART program that is built for every model (obs_seq_to_netcdf,
+    obs_sequence_tool, ...), in the work directory of whichever model was built.
+    """
+
+    for model in ("wrf", "icon"):
+        binary = (dart_root / "models" / model / "work" / name).resolve()
+        if binary.exists():
+            return binary
+    raise RuntimeError(
+        f"{name} binary not found in {dart_root}/models/{{wrf,icon}}/work, is DART built?"
+    )
+
+
 def obs_seq_to_nc(
     dart_root: Path,
     obs_seq: Path,
@@ -192,10 +207,7 @@ def obs_seq_to_nc(
     """
 
     # Locate executable
-    binary = dart_root / "models" / "wrf" / "work" / "obs_seq_to_netcdf"
-    binary = binary.resolve()
-    if not binary.exists():
-        raise RuntimeError(f"obs_seq_to_netcdf binary not found at {binary}")
+    binary = find_dart_program(dart_root, "obs_seq_to_netcdf")
 
     # Link obs_seq_to_netcdf inside a temp directory
     with tempfile.TemporaryDirectory() as tmp_dir:

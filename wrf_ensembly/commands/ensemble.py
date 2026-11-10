@@ -10,6 +10,7 @@ from wrf_ensembly import config, experiment, perturbations, utils
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import ExperimentStateError, StateTransition
+from wrf_ensembly.icon import model as icon_model
 
 
 @click.group(name="ensemble", cls=GroupWithStartEndPrint)
@@ -51,6 +52,17 @@ def setup(experiment_path: Path, jobs: int | None):
 
 
 def _setup_member(exp: experiment.Experiment, member_i: int) -> None:
+    if exp.cfg.is_icon:
+        icon_model.setup_member(exp, member_i)
+        missing = icon_model.missing_boundary_files(exp, member_i)
+        if missing:
+            logger.warning(
+                f"Member {member_i}: {len(missing)} boundary file(s) are missing, "
+                f"the first is {missing[0]}"
+            )
+        logger.info(f"Member {member_i}: Linked the model and its input files")
+        return
+
     utils.copy(
         exp.paths.ic_path(member_i, 0), exp.paths.member_path(member_i) / "wrfinput_d01"
     )
@@ -405,7 +417,7 @@ def advance_member(
         else:
             cores = 1
             logger.warning("No --cores no SLURM_NTASKS, will use 1 core!")
-    logger.info(f"Using {cores} cores for wrf.exe")
+    logger.info(f"Using {cores} cores for the model")
 
     # Run WRF!
     try:
@@ -472,6 +484,18 @@ def analysis(experiment_path: Path):
     forecast_dir = exp.paths.scratch_forecasts_path(cycle_i)
     analysis_dir = exp.paths.scratch_analysis_path(cycle_i)
     dart_out_dir = exp.paths.scratch_dart_path(cycle_i)
+
+    if exp.cfg.is_icon:
+        jobs = utils.determine_jobs(None)
+        n_members = exp.cfg.assimilation.n_members
+        with ProcessPoolExecutor(max_workers=min(jobs, n_members)) as executor:
+            for member, _ in enumerate(
+                executor.map(icon_model.make_analysis, [exp] * n_members, range(n_members))
+            ):
+                logger.info(f"Member {member}: Wrote the analysis files")
+        exp.state_machine.current_cycle.transition(StateTransition.ANALYSIS_COMPLETE)
+        logger.info("Analysis complete - ready to cycle")
+        return
 
     # Postprocess analysis files
     for member in range(exp.cfg.assimilation.n_members):
