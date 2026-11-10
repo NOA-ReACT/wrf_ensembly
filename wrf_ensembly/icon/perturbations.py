@@ -30,9 +30,12 @@ class CellSampler:
     """
     Bilinear interpolation from a regular lat/lon grid over the domain of an ICON grid
     to its cell centres.
+
+    Args:
+        margin: How many grid points the lat/lon grid extends beyond the domain
     """
 
-    def __init__(self, grid: IconGrid):
+    def __init__(self, grid: IconGrid, margin: int = 0):
         if grid.is_global():
             raise ValueError("Perturbations need a limited-area grid")
 
@@ -47,9 +50,12 @@ class CellSampler:
         dlat = grid.resolution_deg()
         dlon = dlat / max(np.cos(np.radians(lat.mean())), 0.1)
 
-        x = (lon - lon.min()) / dlon
-        y = (lat - lat.min()) / dlat
-        self.shape = (int(np.ceil(y.max())) + 2, int(np.ceil(x.max())) + 2)
+        x = (lon - lon.min()) / dlon + margin
+        y = (lat - lat.min()) / dlat + margin
+        self.shape = (
+            int(np.ceil(y.max())) + 2 + margin,
+            int(np.ceil(x.max())) + 2 + margin,
+        )
         self._j = np.floor(y).astype(int)
         self._i = np.floor(x).astype(int)
         self._fy = y - self._j
@@ -95,7 +101,9 @@ def generate_perturbation_ensemble(
     if boundary > 0:
         raise ValueError("`boundary` is not supported on the ICON grid")
 
-    sampler = CellSampler(IconGrid.from_file(grid_file))
+    # The filter mirrors the noise at the edges of the array, which makes the field
+    # there less smooth and its variance larger. Keep that outside of the domain.
+    sampler = CellSampler(IconGrid.from_file(grid_file), margin=int(np.ceil(4 * sigma)))
     if shape[-1] != sampler._i.size:
         raise ValueError(
             f"The variable has {shape[-1]} cells, the grid in {grid_file} has "
