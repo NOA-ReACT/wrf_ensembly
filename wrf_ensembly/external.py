@@ -66,6 +66,8 @@ def run(proc: ExternalProcess):
         command,
         cwd=proc.cwd,
         text=True,
+        # Model logs are not always valid UTF-8 (ICON prints raw bytes at times)
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         input=proc.stdin,
