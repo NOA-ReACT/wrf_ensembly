@@ -110,7 +110,6 @@ def test_template_is_a_valid_icon_config():
         (("analysis_interval = 360", "analysis_interval = 100"), "multiple"),
         (("[icon.namelist.grid_nml]", "[icon.namelist.grid_nml]\ndynamics_grid_filename = 'a.nc'"), "fills in"),
         (('icon_root = "/path/to/icon-build"', ""), "icon_root"),
-        (("[perturbations]", "[perturbations.variables.T]\noperation = 'add'\nsd = 1.0\nmean=0.0\ngaussian_sigma=1"), "perturbations"),
     ],
 )  # fmt: skip
 def test_config_check_rejects(change, message):

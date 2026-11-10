@@ -73,7 +73,8 @@ def setup_member(exp: "Experiment", member_i: int):
     """
     Prepares a member's run directory for the first cycle: links to the executable,
     the grid, the external parameters, the IFS initial conditions, the boundary data
-    and ecRad's data.
+    and ecRad's data. With `[perturbations]`, the member gets its own copy of the
+    initial conditions instead of a link, for `apply-perturbations` to change.
     """
 
     icon = exp.cfg.icon
@@ -102,7 +103,11 @@ def setup_member(exp: "Experiment", member_i: int):
     for name, target in links.items():
         if not target.exists():
             raise FileNotFoundError(f"Member {member_i}: {target} does not exist")
-        _link(target, member_path / name)
+        if name == namelists.IFS_LINK and exp.cfg.perturbations.variables:
+            (member_path / name).unlink(missing_ok=True)
+            shutil.copyfile(target, member_path / name)
+        else:
+            _link(target, member_path / name)
 
     namelists.write_latbc_map(
         icon.boundary_variables, member_path / namelists.LATBC_MAP_FILE

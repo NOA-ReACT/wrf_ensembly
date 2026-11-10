@@ -1383,11 +1383,21 @@ class Config(DataClassTOMLMixin):
             raise ValueError('metadata.model = "icon" needs directories.icon_root')
         if self.segments.enabled:
             raise ValueError("[segments] are not supported with ICON")
-        if self.perturbations.variables:
-            raise ValueError(
-                "[perturbations] are not supported with ICON, use per-member initial and "
-                "boundary conditions (%MEMBER%) and ICON's own ensemble perturbations"
-            )
+        # Perturbations go into the IFS initial conditions, which only the first cycle
+        # reads, on ICON's triangular grid
+        for name, var in self.perturbations.variables.items():
+            where = f"[perturbations.variables.{name}]"
+            if var.kind == "parameter":
+                raise ValueError(
+                    f'{where}: kind = "parameter" is not supported with ICON'
+                )
+            if var.perturb_every_cycle:
+                raise ValueError(
+                    f"{where}: perturb_every_cycle is not supported with ICON, only "
+                    "the initial conditions of the first cycle are perturbed"
+                )
+            if var.boundary > 0:
+                raise ValueError(f"{where}: boundary is not supported with ICON")
 
         # ICON looks for boundary files at the start of a run plus multiples of the
         # boundary interval, so every cycle has to start on a boundary time

@@ -155,7 +155,7 @@ class Model(ABC):
         """
 
     # Optional features. `Config.check` rejects the settings that need them for a
-    # model that does not have them.
+    # model that does not have them (ICON: only the first cycle can be perturbed).
 
     def generate_perturbations(self, cycle_i: int) -> None:
         """Writes the `[perturbations]` fields of a cycle"""

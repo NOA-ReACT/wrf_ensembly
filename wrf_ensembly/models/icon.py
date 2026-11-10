@@ -4,7 +4,7 @@ ICON behind the `Model` interface. The work is done by `wrf_ensembly.icon`, see
 """
 
 import datetime as dt
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
 from wrf_ensembly import cycling
@@ -98,3 +98,21 @@ class IconModel(Model):
 
     def clean_old_state(self) -> None:
         icon_model.clean_first_guess_files(self.exp)
+
+    # Perturbations: of the IFS initial conditions, so of the first cycle only
+
+    def generate_perturbations(self, cycle_i: int) -> None:
+        from wrf_ensembly.icon import perturbations
+
+        if cycle_i == 0:
+            perturbations.generate(self.exp)
+
+    def generate_perturbations_for_cycles(
+        self, cycle_indices: Iterable[int], jobs: int
+    ) -> Iterator[int]:
+        return iter(())
+
+    def apply_perturbations(self, member_i: int) -> None:
+        from wrf_ensembly.icon import perturbations
+
+        perturbations.apply(self.exp, member_i)

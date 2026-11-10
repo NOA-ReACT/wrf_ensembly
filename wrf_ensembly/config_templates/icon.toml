@@ -218,7 +218,12 @@ boundary_error_width = 1.0
 
 [validation.first_departures]
 
+# Noise on the IFS initial conditions of the first cycle, see docs/icon.md
 [perturbations]
+# [perturbations.variables.T]
+# operation = "add"
+# mean = 0.0
+# sd = 0.5
 
 [slurm]
 sbatch_command = "sbatch --parsable"

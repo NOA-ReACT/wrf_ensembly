@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from collections.abc import Callable
 from typing import Tuple
 
 import numpy as np
@@ -201,6 +202,7 @@ def generate_perturbations_for_cycle(
     experiment_name: str,
     ic_path: Path,
     diag_dir: Path,
+    generate: Callable[..., np.ndarray] | None = None,
 ):
     """
     Generates perturbations for a given cycle and stores them in the diag directory.
@@ -212,6 +214,10 @@ def generate_perturbations_for_cycle(
     only the latter are needed, a symlink to cycle 0's file is created instead. If neither
     is, no file is written and `apply-perturbations` is skipped for that cycle.
     The midcycle taper is applied at perturbation application time rather than here.
+
+    `ic_path` is a file with the variables to perturb, for their shapes. `generate` makes
+    the fields of one variable, by default `generate_perturbation_ensemble` (a regular
+    grid in the last two dimensions).
     """
 
     if len(perturbations_cfg.variables) == 0:
@@ -268,7 +274,7 @@ def generate_perturbations_for_cycle(
     for var in new_variables:
         pert_config = perturbations_cfg.variables[var]
         logger.debug(f"\tVariable: {var}, config: {pert_config}")
-        arr = generate_perturbation_ensemble(
+        arr = (generate or generate_perturbation_ensemble)(
             n_members=n_members,
             shape=wrfinput[var].shape,
             mean=pert_config.mean,
