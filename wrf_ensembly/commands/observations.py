@@ -579,35 +579,63 @@ def plot_compare_obs_to_grid(
             logger.error("No observations remaining after filtering for good QC")
             return
 
-    # Load grid coordinates from wrfinput
-    wrfinput_path = exp.paths.ic_path(0, 0)
-    if not wrfinput_path.exists():
-        logger.error(f"wrfinput file not found at {wrfinput_path}")
-        return
+    if exp.cfg.icon is not None:
+        from wrf_ensembly.icon.regrid import IconGrid
 
-    with xr.open_dataset(wrfinput_path) as ds:
-        grid_lat = ds["XLAT"].isel(Time=0).values
-        grid_lon = ds["XLONG"].isel(Time=0).values
+        grid = IconGrid.from_file(exp.cfg.icon.grid_file)
+        center = None
+        if center_lat is not None and center_lon is not None:
+            center = (center_lat, center_lon)
+        # Longitudes near the centre of the grid, so that the cells of a domain across
+        # the dateline stay together
+        west, east, _, _ = domain.icon_grid_bounds(grid)
+        middle = 0.5 * (west + east)
 
-    # Determine center grid index
-    center_idx = None
-    if center_lat is not None and center_lon is not None:
-        # Find nearest grid point to the given lat/lon
-        dist = (grid_lat - center_lat) ** 2 + (grid_lon - center_lon) ** 2
-        center_idx = np.unravel_index(np.argmin(dist), dist.shape)
-        logger.info(
-            f"Centering on grid index {center_idx} (nearest to {center_lat}, {center_lon})"
+        def wrap(lon):
+            return middle + (np.degrees(lon) - middle + 180.0) % 360.0 - 180.0
+
+        cell_lon = wrap(grid.clon)
+        fig = observations.plotting.plot_obs_vs_triangular_grid(
+            cell_lon=cell_lon,
+            cell_lat=np.degrees(grid.clat),
+            vertex_lon=cell_lon[:, None]
+            + (np.degrees(grid.vlon - grid.clon[:, None]) + 180.0) % 360.0
+            - 180.0,
+            vertex_lat=np.degrees(grid.vlat),
+            observations=obs,
+            center=center,
+            window_size=window_size,
         )
+    else:
+        # Load grid coordinates from wrfinput
+        wrfinput_path = exp.paths.ic_path(0, 0)
+        if not wrfinput_path.exists():
+            logger.error(f"wrfinput file not found at {wrfinput_path}")
+            return
 
-    proj = domain.cartopy_crs(exp.cfg)
-    fig = observations.plotting.plot_obs_vs_grid(
-        grid_lat=grid_lat,
-        grid_lon=grid_lon,
-        observations=obs,
-        proj=proj,
-        center_idx=center_idx,
-        window_size=window_size,
-    )
+        with xr.open_dataset(wrfinput_path) as ds:
+            grid_lat = ds["XLAT"].isel(Time=0).values
+            grid_lon = ds["XLONG"].isel(Time=0).values
+
+        # Determine center grid index
+        center_idx = None
+        if center_lat is not None and center_lon is not None:
+            # Find nearest grid point to the given lat/lon
+            dist = (grid_lat - center_lat) ** 2 + (grid_lon - center_lon) ** 2
+            center_idx = np.unravel_index(np.argmin(dist), dist.shape)
+            logger.info(
+                f"Centering on grid index {center_idx} (nearest to {center_lat}, {center_lon})"
+            )
+
+        proj = domain.cartopy_crs(exp.cfg)
+        fig = observations.plotting.plot_obs_vs_grid(
+            grid_lat=grid_lat,
+            grid_lon=grid_lon,
+            observations=obs,
+            proj=proj,
+            center_idx=center_idx,
+            window_size=window_size,
+        )
 
     title = f"Observations vs Grid - Cycle {cycle_info.index}"
     if instrument or quantity:

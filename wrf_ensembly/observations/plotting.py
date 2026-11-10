@@ -709,15 +709,28 @@ def plot_obs_vs_grid(
         zorder=2,
     )
 
-    # Filter observations to the visible area
+    extent = (lon_min - lon_pad, lon_max + lon_pad, lat_min - lat_pad, lat_max + lat_pad)
+    _scatter_observations_in_extent(ax, observations, extent)
+    return fig
+
+
+def _scatter_observations_in_extent(
+    ax, observations: pd.DataFrame, extent: tuple[float, float, float, float]
+):
+    """
+    Draws the observations inside `extent` (west, east, south, north in degrees),
+    colour-coded by instrument and quantity if available, and finishes the map
+    (extent, coastlines, legend).
+    """
+
+    west, east, south, north = extent
     obs = observations[
-        (observations["latitude"] >= lat_min - lat_pad)
-        & (observations["latitude"] <= lat_max + lat_pad)
-        & (observations["longitude"] >= lon_min - lon_pad)
-        & (observations["longitude"] <= lon_max + lon_pad)
+        (observations["latitude"] >= south)
+        & (observations["latitude"] <= north)
+        & (observations["longitude"] >= west)
+        & (observations["longitude"] <= east)
     ]
 
-    # Plot observations, color-coded by instrument/quantity if available
     if "instrument" in obs.columns and "quantity" in obs.columns and not obs.empty:
         for (instrument, quantity), group in obs.groupby(["instrument", "quantity"]):
             ax.scatter(
@@ -738,10 +751,7 @@ def plot_obs_vs_grid(
             zorder=3,
         )
 
-    ax.set_extent(
-        [lon_min - lon_pad, lon_max + lon_pad, lat_min - lat_pad, lat_max + lat_pad],
-        crs=ccrs.PlateCarree(),
-    )
+    ax.set_extent([west, east, south, north], crs=ccrs.PlateCarree())
     ax.coastlines()
     ax.legend(
         loc="upper right",
@@ -749,4 +759,72 @@ def plot_obs_vs_grid(
         frameon=True,
     )
 
+
+def plot_obs_vs_triangular_grid(
+    cell_lon: np.ndarray,
+    cell_lat: np.ndarray,
+    vertex_lon: np.ndarray,
+    vertex_lat: np.ndarray,
+    observations: pd.DataFrame,
+    center: tuple[float, float] | None = None,
+    window_size: int = 15,
+) -> Figure:
+    """
+    Like `plot_obs_vs_grid`, for a grid of triangles (ICON): the cells around a point
+    with their outlines and centres, and the observations on top.
+
+    Args:
+        cell_lon, cell_lat: Cell centres in degrees, 1-D.
+        vertex_lon, vertex_lat: The three vertices of each cell in degrees, (ncells, 3).
+        observations: DataFrame with columns `latitude`, `longitude`, and optionally
+            `instrument` and `quantity`.
+        center: (latitude, longitude) to center the view on. If None, the middle of
+            the grid.
+        window_size: How many cells to show in each direction from the center.
+    """
+
+    from matplotlib.collections import LineCollection
+
+    if center is None:
+        center = (float(np.median(cell_lat)), float(np.median(cell_lon)))
+    center_lat, center_lon = center
+
+    # Size of a cell in degrees of latitude, from the edges of the triangles
+    edge_lat = np.abs(vertex_lat - np.roll(vertex_lat, 1, axis=1)).max(axis=1)
+    half_height = window_size * float(np.median(edge_lat))
+    half_width = half_height / max(np.cos(np.radians(center_lat)), 0.1)
+    west, east = center_lon - half_width, center_lon + half_width
+    south, north = center_lat - half_height, center_lat + half_height
+
+    visible = (
+        (cell_lon >= west) & (cell_lon <= east) & (cell_lat >= south) & (cell_lat <= north)
+    )
+    outlines = np.stack([vertex_lon[visible], vertex_lat[visible]], axis=-1)
+    outlines = np.concatenate([outlines, outlines[:, :1]], axis=1)  # close them
+
+    fig, ax = plt.subplots(
+        subplot_kw={"projection": ccrs.PlateCarree()},
+        figsize=(10, 10),
+    )
+    ax.add_collection(
+        LineCollection(
+            outlines,
+            colors="grey",
+            linewidths=0.3,
+            alpha=0.5,
+            transform=ccrs.PlateCarree(),
+        )
+    )
+    ax.scatter(
+        cell_lon[visible],
+        cell_lat[visible],
+        color="grey",
+        s=8,
+        marker="^",
+        label="Cell centres",
+        transform=ccrs.PlateCarree(),
+        zorder=2,
+    )
+
+    _scatter_observations_in_extent(ax, observations, (west, east, south, north))
     return fig

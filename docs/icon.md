@@ -162,10 +162,13 @@ regridder = Regridder.build(grid, LatLonGrid.covering(grid, 0.1), method="linear
 ds = regridder.regrid_dataset(xr.open_dataset("icon_20260913T060000Z.nc"))
 ```
 
+## Plots
+
+The `plots` commands and the map plots of `observations` and `validation` work as for WRF. Maps are drawn in plain longitude and latitude, which is what the postprocessed output is on. `observations plot-compare-obs-to-grid` draws the triangles and their cell centres. Variables on model levels need a `level` or `pressure_level` in `[plots.*]`, as for WRF.
+
 ## Not supported yet
 
 - Nested domains
 - `[perturbations]` and `[segments]`
 - `ensemble setup-from-other-experiment`
-- The map plots of `observations` and `plots`, which use the WRF projection
 - `preprocess interpolate-chem` and the other WRF/WPS preprocessing commands
