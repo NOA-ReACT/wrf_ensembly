@@ -44,6 +44,9 @@ class MetadataConfig:
     description: str
     """Description of the experiment"""
 
+    model: Literal["wrf", "icon"] = "wrf"
+    """Which model the experiment runs: `wrf` (WRF or WRF-Chem) or `icon` (see `[icon]`)"""
+
 
 @dataclass
 class EnvironmentConfig:
@@ -55,6 +58,9 @@ class EnvironmentConfig:
     wrf: dict[str, str] = field(default_factory=dict)
     """Applied to WRF/WPS commands"""
 
+    icon: dict[str, str] = field(default_factory=dict)
+    """Applied to ICON commands"""
+
     dart: dict[str, str] = field(default_factory=dict)
     """Applied to DART commands"""
 
@@ -63,14 +69,23 @@ class EnvironmentConfig:
 class DirectoriesConfig:
     """Info about where the experiment will run (in, out, models,...)"""
 
-    wrf_root: Path
+    dart_root: Path
+    """
+    Root directory of the DART. Should contain a `models/wrf` (or `models/icon`)
+    directory, compiled.
+    """
+
+    wrf_root: Path | None = None
     """Root directory of the WRF model. Should contain the `run` directory w/ real compiled."""
 
-    wps_root: Path
+    wps_root: Path | None = None
     """Root directory to the WPS. Should contain the `geogrid.exe`, `metgrid.exe` and `ungrib.exe` executables."""
 
-    dart_root: Path
-    """Root directory of the DART. Should contain a `models/wrf` directory, compiled."""
+    icon_root: Path | None = None
+    """
+    ICON build directory, with `bin/icon` inside (`metadata.model = "icon"`). The
+    ecRad data is taken from its `externals/ecrad/data` unless `icon.ecrad_data` is set.
+    """
 
     scratch_root: Path = Path("./scratch")
     """
@@ -1002,6 +1017,170 @@ class CopyFileConfig:
 
 
 @dataclass
+class IconRegridConfig:
+    """How ICON output is interpolated from the triangular grid to a regular lat/lon grid"""
+
+    method: Literal["nearest", "linear", "conservative"] = "linear"
+    """
+    - `nearest`: value of the triangle that contains the target point
+    - `linear`: barycentric interpolation between the three nearest cell centres
+    - `conservative`: area-weighted mean of the triangles that overlap the target cell
+    """
+
+    method_overrides: dict[str, str] = field(default_factory=dict)
+    """
+    Another method for some variables, as `{regular expression: method}` matched against
+    the whole variable name. For example `{"tot_prec|rain_.*" = "conservative"}`.
+    """
+
+    resolution: float | None = None
+    """Grid spacing in degrees. By default, the spacing of the ICON grid."""
+
+    bounds: tuple[float, float, float, float] | None = None
+    """
+    The box to interpolate to, as west, east, south, north in degrees. By default, the
+    smallest box that contains the whole ICON grid.
+    """
+
+    threads: int = 1
+    """Number of threads that interpolate the levels of a variable"""
+
+
+RESERVED_ICON_NAMELIST_KEYS = {
+    "grid_nml": {"dynamics_grid_filename"},
+    "extpar_nml": {"extpar_filename"},
+    "limarea_nml": {"latbc_path", "latbc_filename", "latbc_varnames_map_file", "dtime_latbc"},
+    "initicon_nml": {"init_mode", "ifs2icon_filename", "dwdfg_filename", "dwdana_filename", "lread_ana"},
+}
+"""Atmosphere namelist variables that are set from the `[icon]` section"""
+
+DEFAULT_LATBC_VARIABLES = {
+    "u": "U",
+    "v": "V",
+    "w": "W",
+    "temp": "T",
+    "qv": "QV",
+    "qc": "QC",
+    "qi": "QI",
+    "qr": "QR",
+    "qs": "QS",
+    "pres_sfc": "PS",
+    "GEOSP": "GEOP_SFC",
+}
+"""ICON's internal variable names and their names in boundary files made from IFS data"""
+
+
+@dataclass
+class IconConfig:
+    """Configuration for the ICON model (`metadata.model = "icon"`), limited-area mode"""
+
+    grid_file: Path
+    """The ICON grid file (e.g. from ZONDA)"""
+
+    extpar_file: Path
+    """The external parameters file that belongs to the grid"""
+
+    initial_conditions: Path
+    """
+    Initial conditions for the first cycle: IFS data interpolated to the ICON grid
+    horizontally (ICON does the vertical, `init_mode = 2`), as made by
+    `preprocess icon-icbc`. For a different file per member, use the %MEMBER%
+    placeholder, which becomes the two-digit member number.
+    """
+
+    boundary_conditions: Path
+    """
+    Directory with the lateral boundary files, one file per `boundary_update_interval`
+    for the whole experiment. %MEMBER% works as in `initial_conditions`.
+    """
+
+    boundary_filename: str = "ifs_<y><m><d>_<h>_lbc_ICON.nc"
+    """Name of the boundary files, with ICON's keywords (`limarea_nml: latbc_filename`)"""
+
+    boundary_variables: dict[str, str] = field(
+        default_factory=lambda: dict(DEFAULT_LATBC_VARIABLES)
+    )
+    """ICON's internal variable names and what they are called in the boundary files"""
+
+    ifs_grib: Path | None = None
+    """
+    Directory with the IFS GRIB files from MARS (`ifs_<YYYYMMDDHH>.grb` for the initial
+    conditions, `ifs_<YYYYMMDDHH>_<step>_lbc.grb` for the boundaries), the input of
+    `preprocess icon-icbc`. %MEMBER% works as in `initial_conditions`.
+    """
+
+    dwd_grib_definitions: Path | None = None
+    """
+    DWD's ecCodes definitions, needed to read the IFS GRIB files under the names ICON
+    expects. Defaults to the `DWD_DEF` environment variable.
+    """
+
+    ecrad_data: Path | None = None
+    """Data directory of ecRad. Defaults to `externals/ecrad/data` in `directories.icon_root`."""
+
+    extra_files: list[CopyFileConfig] = field(default_factory=list)
+    """Other files to link into each member's run directory (ART XML files, ...)"""
+
+    output_variables: list[str] = field(
+        default_factory=lambda: [
+            "u", "v", "w", "temp", "pres", "qv", "qc", "qi", "pres_sfc", "pres_msl",
+            "t_2m", "td_2m", "u_10m", "v_10m", "tot_prec", "clct",
+        ]  # fmt: skip
+    )
+    """
+    Variables (or `group:` names) of the forecast output on model levels, written every
+    `time_control.output_interval` on the native grid. This is what gets postprocessed.
+    """
+
+    first_guess_variables: list[str] = field(
+        default_factory=lambda: [
+            "group:dwd_fg_atm_vars",
+            "group:dwd_fg_sfc_vars",
+        ]
+    )
+    """
+    What goes in the first guess file that a member writes at the end of a cycle. The
+    next cycle starts from it, and the filter reads its prior from it, so it must hold
+    ICON's first guess groups and all of `assimilation.state_variables`.
+    """
+
+    initial_noise: float = 0.0
+    """
+    Amplitude of the random noise that ICON puts on the initial state of the first
+    cycle (`initicon_nml: pinit_amplitude`, with the member number as the seed). The
+    wind, density and temperature variables of every grid point are multiplied by a
+    random number between `1 - initial_noise` and `1 + initial_noise`. A quick way to
+    get an ensemble out of one set of initial conditions, e.g. for testing; the noise
+    has no spatial structure. 0 turns it off.
+    """
+
+    perturbation_number: bool = True
+    """
+    Give each member its own `gribout_nml: perturbationNumber` (the member number plus
+    one), which seeds ICON's ensemble perturbations (`ensemble_pert_nml`, SPPT).
+    """
+
+    namelist: dict[str, Any] = field(default_factory=dict)
+    """
+    The atmosphere namelist, as `[icon.namelist.<group>]` tables. The grid, the
+    external parameters, the initial and boundary data, the dates and the output
+    streams described above are filled in. Extra output streams can be given as a list
+    of tables, `[[icon.namelist.output_nml]]`.
+    """
+
+    namelist_per_member: dict[str, dict[str, dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    """Overrides of `namelist` for single members, keyed like `wrf_namelist_per_member`"""
+
+    master_namelist: dict[str, dict[str, Any]] = field(default_factory=dict)
+    """Overrides for `icon_master.namelist`"""
+
+    regrid: IconRegridConfig = field(default_factory=IconRegridConfig)
+    """Interpolation to a regular lat/lon grid during postprocessing"""
+
+
+@dataclass(kw_only=True)
 class Config(DataClassTOMLMixin):
     class Config(BaseConfig):
         serialization_strategy = {datetime: UTCDatetimeStrategy()}
@@ -1012,14 +1191,14 @@ class Config(DataClassTOMLMixin):
     directories: DirectoriesConfig
     """Info about where the experiment will run (in, out, models,...)"""
 
-    domain_control: DomainControlConfig
-    """Info about the experiment domain (grid, ...)"""
+    domain_control: DomainControlConfig | None = None
+    """Info about the experiment domain (grid, ...). WRF only."""
 
     time_control: TimeControlConfig
     """Configuration related to the experiment time period."""
 
-    data: DataConfig
-    """Configuration related to the data used in the experiment."""
+    data: DataConfig | None = None
+    """Configuration related to the data used in the experiment. WRF only."""
 
     assimilation: AssimilationConfig
     """Configuration related to assimilation."""
@@ -1030,8 +1209,8 @@ class Config(DataClassTOMLMixin):
     validation: ValidationConfig
     """Configuration related to validation of the experiment"""
 
-    geogrid: GeogridConfig
-    """Configuration related to geogrid (geographical data preprocessing)."""
+    geogrid: GeogridConfig = field(default_factory=GeogridConfig)
+    """Configuration related to geogrid (geographical data preprocessing). WRF only."""
 
     perturbations: PerturbationsConfig
     """Configuration related to perturbation of the initial conditions."""
@@ -1042,8 +1221,11 @@ class Config(DataClassTOMLMixin):
     postprocess: PostprocessConfig
     """Configuration related to wrfout postprocessing"""
 
-    wrf_namelist: dict[str, dict[str, Any]]
+    wrf_namelist: dict[str, dict[str, Any]] = field(default_factory=dict)
     """Overrides for the WRF namelist"""
+
+    icon: IconConfig | None = None
+    """Configuration for the ICON model, with `metadata.model = "icon"`"""
 
     wrf_namelist_per_member: dict[str, dict[str, dict[str, Any]]] = field(
         default_factory=dict
@@ -1076,18 +1258,37 @@ class Config(DataClassTOMLMixin):
         padding (`"member_03"`, `"member_003"`). A key that matches neither form, or names a
         member outside the ensemble, raises a ValueError instead of being silently ignored.
         """
+
+        return self._namelist_overrides_for_member(
+            self.wrf_namelist_per_member, "wrf_namelist_per_member", member
+        )
+
+    def icon_namelist_overrides_for_member(
+        self, member: int
+    ) -> dict[str, dict[str, Any]]:
+        """Like `wrf_namelist_overrides_for_member`, for `[icon.namelist_per_member]`"""
+
+        if self.icon is None:
+            return {}
+        return self._namelist_overrides_for_member(
+            self.icon.namelist_per_member, "icon.namelist_per_member", member
+        )
+
+    def _namelist_overrides_for_member(
+        self, per_member: dict[str, dict[str, dict[str, Any]]], section: str, member: int
+    ) -> dict[str, dict[str, Any]]:
         overrides: dict[str, dict[str, Any]] = {}
-        for key, groups in self.wrf_namelist_per_member.items():
+        for key, groups in per_member.items():
             match = re.fullmatch(r"(?:member_)?(\d+)", key)
             if match is None:
                 raise ValueError(
-                    f"Invalid key '{key}' in [wrf_namelist_per_member], "
+                    f"Invalid key '{key}' in [{section}], "
                     "expected a member index like '3' or 'member_03'"
                 )
             key_member = int(match.group(1))
             if key_member >= self.assimilation.n_members:
                 raise ValueError(
-                    f"Key '{key}' in [wrf_namelist_per_member] refers to member {key_member}, "
+                    f"Key '{key}' in [{section}] refers to member {key_member}, "
                     f"but the ensemble has {self.assimilation.n_members} members (0-"
                     f"{self.assimilation.n_members - 1})"
                 )
@@ -1096,11 +1297,35 @@ class Config(DataClassTOMLMixin):
                     overrides[name] = overrides.get(name, {}) | group
         return overrides
 
+    @property
+    def is_icon(self) -> bool:
+        return self.metadata.model == "icon"
+
     def check(self) -> None:
         """
         Checks the configuration. Raises a ValueError for settings that are not supported
         and logs a warning for likely mistakes.
         """
+
+        if self.is_icon:
+            self._check_icon()
+            return
+
+        missing = [
+            name
+            for name, value in (
+                ("domain_control", self.domain_control),
+                ("data", self.data),
+                ("wrf_namelist", self.wrf_namelist or None),
+                ("directories.wrf_root", self.directories.wrf_root),
+                ("directories.wps_root", self.directories.wps_root),
+            )
+            if value is None
+        ]
+        if missing:
+            raise ValueError(
+                f"The configuration has no {', '.join(missing)}, needed to run WRF"
+            )
 
         physics = self.wrf_namelist.get("physics", {})
         dynamics = self.wrf_namelist.get("dynamics", {})
@@ -1148,6 +1373,46 @@ class Config(DataClassTOMLMixin):
                     "Use 'THM' instead."
                 )
 
+
+    def _check_icon(self) -> None:
+        """`check` for `metadata.model = "icon"`"""
+
+        if self.icon is None:
+            raise ValueError('metadata.model = "icon" needs an [icon] section')
+        if self.directories.icon_root is None:
+            raise ValueError('metadata.model = "icon" needs directories.icon_root')
+        if self.segments.enabled:
+            raise ValueError("[segments] are not supported with ICON")
+        if self.perturbations.variables:
+            raise ValueError(
+                "[perturbations] are not supported with ICON, use per-member initial and "
+                "boundary conditions (%MEMBER%) and ICON's own ensemble perturbations"
+            )
+
+        # ICON looks for boundary files at the start of a run plus multiples of the
+        # boundary interval, so every cycle has to start on a boundary time
+        update = self.time_control.boundary_update_interval
+        lengths = {self.time_control.analysis_interval}
+        lengths |= {
+            cycle.duration for cycle in self.time_control.cycles.values() if cycle.duration
+        }
+        for length in sorted(lengths):
+            if length % update != 0:
+                raise ValueError(
+                    f"A cycle of {length} minutes is not a multiple of "
+                    f"time_control.boundary_update_interval ({update} minutes). ICON can "
+                    "only start a cycle at a time for which there is a boundary file."
+                )
+
+        for group in ("grid_nml", "extpar_nml", "limarea_nml", "initicon_nml"):
+            reserved = RESERVED_ICON_NAMELIST_KEYS[group] & set(
+                self.icon.namelist.get(group, {})
+            )
+            if reserved:
+                raise ValueError(
+                    f"[icon.namelist.{group}] sets {', '.join(sorted(reserved))}, "
+                    "which wrf-ensembly fills in from the [icon] section"
+                )
 
     def _check_segments(self) -> None:
         """The parts of `check` for `[segments]`, called only if they are enabled"""

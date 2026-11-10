@@ -1,0 +1,413 @@
+# WRF-Ensembly configuration template for the ICON model (limited-area mode, NWP physics)
+#
+# Paths starting with /path/to must be changed. See docs/icon.md for how the pieces
+# fit together.
+
+[metadata]
+name = "my_icon_experiment"
+description = "Description of this experiment"
+model = "icon"
+
+[environment]
+# [environment.universal]   # Applied to all commands
+# [environment.icon]        # Applied to ICON
+# [environment.dart]        # Applied to DART
+
+[directories]
+icon_root = "/path/to/icon-build"   # Has bin/icon and externals/ecrad/data
+dart_root = "/path/to/DART"         # With models/icon/work built
+scratch_root = "./scratch"          # Relative paths are inside the experiment directory
+
+[time_control]
+start = 2026-09-13T00:00:00Z
+end   = 2026-09-14T00:00:00Z
+boundary_update_interval = 180  # Minutes between the lateral boundary files
+output_interval = 60            # Minutes between forecast output files
+analysis_interval = 360         # Minutes between assimilation cycles. Must be a
+                                # multiple of boundary_update_interval.
+
+[assimilation]
+n_members = 20
+filter_mpi_tasks = 1
+half_window_length_minutes = 30
+use_inflation = false
+# Variables of the analysis that go back into ICON. temp, pres, u, v and the moisture
+# variables go through ICON's analysis file; anything else (e.g. aerosol tracers)
+# must be in the first guess file and is updated there.
+state_variables = ["u", "v", "temp", "pres", "qv"]
+
+[icon]
+grid_file   = "/path/to/grid_DOM01.nc"
+extpar_file = "/path/to/grid_DOM01_external_parameter.nc"
+# Written by `preprocess icon-icbc` from the IFS GRIB files, or bring your own. Use
+# %MEMBER% in these three paths for a different set of files per member.
+ifs_grib            = "/path/to/ifs_grib"
+initial_conditions  = "/path/to/icbc/ifs_initial_DOM01.nc"
+boundary_conditions = "/path/to/icbc"
+boundary_filename   = "ifs_<y><m><d>_<h>_lbc_ICON.nc"
+dwd_grib_definitions = "/path/to/definitions.edzw-2.40.0-3"
+# Forecast output on model levels, native grid. This is what gets postprocessed.
+output_variables = [
+  "u", "v", "w", "temp", "pres", "qv", "qc", "qi",
+  "pres_sfc", "pres_msl", "t_2m", "td_2m", "u_10m", "v_10m", "tot_prec", "clct",
+]
+
+# Random noise on the initial state of the first cycle, a quick way to get an ensemble
+# out of one set of initial conditions (for testing, it has no spatial structure)
+# initial_noise = 0.002
+
+# Interpolation to a regular lat/lon grid during postprocessing
+[icon.regrid]
+method = "linear"                   # nearest, linear or conservative
+method_overrides = { "tot_prec|rain_.*|snow_.*" = "conservative" }
+# resolution = 0.1                  # Degrees; default: the spacing of the ICON grid
+# bounds = [10.0, 35.0, 30.0, 45.0] # west, east, south, north; default: the whole grid
+
+# -- ICON ATMOSPHERE NAMELIST --
+# The grid, external parameters, initial and boundary data, dates and the output
+# streams above are filled in by wrf-ensembly.
+[icon.namelist.parallel_nml]
+nproma = 32
+num_io_procs = 1
+num_prefetch_proc = 1       # Required: ICON reads the boundary files asynchronously
+
+[icon.namelist.run_nml]
+iforcing = 3                # NWP physics
+ltestcase = false
+ldynamics = true
+ltransport = true
+dtime = 60.0                # Rule of thumb: 6 s per km of grid spacing
+num_lev = 50
+msg_level = 10
+
+[icon.namelist.grid_nml]
+lredgrid_phys = false
+
+[icon.namelist.extpar_nml]
+itopo = 1
+n_iter_smooth_topo = 1
+hgtdiff_max_smooth_topo = 750.0
+heightdiff_threshold = 2250.0
+
+[icon.namelist.initicon_nml]
+zpbl1 = 500.0
+zpbl2 = 1000.0
+
+[icon.namelist.nwp_phy_nml]
+inwp_gscp = 2
+inwp_convection = 1
+inwp_radiation = 4          # ecRad
+inwp_cldcover = 1
+inwp_turb = 1
+inwp_satad = 1
+inwp_sso = 1
+inwp_gwd = 1
+inwp_surface = 1
+latm_above_top = true
+ldetrain_conv_prec = true
+efdt_min_raylfric = 7200.0
+itype_z0 = 2
+icapdcycl = 3
+icpl_aero_conv = 0
+icpl_aero_gscp = 0
+dt_rad = 720.0
+dt_conv = 180.0
+dt_sso = 360.0
+dt_gwd = 360.0
+
+[icon.namelist.nwp_tuning_nml]
+itune_albedo = 1
+
+[icon.namelist.turbdiff_nml]
+tkhmin = 0.75
+tkmmin = 0.75
+pat_len = 750.0
+rat_sea = 0.8
+ltkesso = true
+frcsmot = 0.2
+imode_frcsmot = 2
+itype_sher = 0
+ltkeshs = false
+a_hshr = 0.0
+icldm_turb = 1
+
+[icon.namelist.lnd_nml]
+ntiles = 3
+lseaice = true
+llake = true
+
+[icon.namelist.radiation_nml]
+irad_o3 = 0
+irad_aero = 0
+albedo_type = 2
+
+[icon.namelist.nonhydrostatic_nml]
+iadv_rhotheta = 2
+ivctype = 2
+itime_scheme = 4
+exner_expol = 0.333
+vwind_offctr = 0.2
+damp_height = 15000.0
+rayleigh_coeff = 0.75
+divdamp_fac = 0.004
+divdamp_order = 24
+divdamp_type = 3
+igradp_method = 3
+l_zdiffu_t = true
+thslp_zdiffu = 0.02
+thhgtd_zdiffu = 125.0
+htop_moist_proc = 22500.0
+hbot_qvsubstep = 22500.0
+
+[icon.namelist.sleve_nml]
+min_lay_thckn = 20.0
+top_height = 22000.0
+stretch_fac = 0.9
+decay_scale_1 = 4000.0
+decay_scale_2 = 2500.0
+decay_exp = 1.2
+flat_height = 16000.0
+
+[icon.namelist.dynamics_nml]
+divavg_cntrwgt = 0.50
+lcoriolis = true
+
+[icon.namelist.transport_nml]
+ctracer_list = "12345"
+ivadv_tracer = [3, 3, 3, 3, 3]
+itype_hlimit = [3, 4, 4, 4, 4]
+ihadv_tracer = [52, 2, 2, 2, 2]
+llsq_svd = true
+beta_fct = 1.005
+
+[icon.namelist.diffusion_nml]
+hdiff_order = 4
+itype_vn_diffu = 2
+itype_t_diffu = 2
+hdiff_efdt_ratio = 24.0
+hdiff_smag_fac = 0.025
+lhdiff_vn = true
+lhdiff_temp = true
+
+[icon.namelist.interpol_nml]
+nudge_zone_width = 8
+lsq_high_ord = 3
+l_intp_c2l = true
+l_mono_c2l = true
+rbf_vec_scale_c = -1.0
+rbf_vec_scale_v = -1.0
+rbf_vec_scale_e = -1.0
+
+# ICON's own perturbations of physics parameters. Every member gets its own seed
+# (gribout_nml: perturbationNumber = member number + 1). Try a single run first: with
+# icon-2026.04 and ZONDA external parameters this corrupted memory on our system.
+# [icon.namelist.ensemble_pert_nml]
+# use_ensemble_pert = true
+# timedep_pert = 2
+
+# Per-member namelist overrides, like [wrf_namelist_per_member]
+# [icon.namelist_per_member.member_03.nwp_phy_nml]
+# inwp_gscp = 1
+
+[observations]
+boundary_width = 0
+boundary_error_factor = 2.5
+boundary_error_width = 1.0
+
+[validation]
+
+[validation.first_departures]
+
+[perturbations]
+
+[slurm]
+sbatch_command = "sbatch --parsable"
+command_prefix = ""
+mpirun_command = "srun"     # Runs as `<mpirun_command> -n <cores> icon`
+env_modules = []
+pre_commands = []
+
+[slurm.directives.default]
+nodes = 1
+cpus-per-task = 1
+
+[slurm.directives.advance_model]
+ntasks-per-node = 32
+
+[slurm.directives.preprocess]
+ntasks-per-node = 1
+cpus-per-task = 32
+
+[slurm.directives.make_analysis]
+ntasks-per-node = 1
+
+[slurm.directives.postprocess]
+ntasks-per-node = 4
+
+[postprocess]
+compression = "zlib"
+compression_level = 4
+shuffle = true
+significant_digits = 3
+significant_digits_overrides = { "longitude" = 6, "latitude" = 6, "geopotential_height" = 6 }
+quantize_mode = "GranularBitRound"
+compute_ensemble_mean = true
+compute_ensemble_sd = true
+keep_per_member = false
+processors = []
+
+[plots.forecast_vs_analysis]
+variables = []
+
+[plots.forecasts]
+variables = []
+
+# -- DART NAMELIST --
+# The complete input.nml of DART's filter. `filter_nml.ens_size` and the inflation
+# restart flags are set by wrf-ensembly.
+[dart_namelist.filter_nml]
+async = 0
+obs_sequence_in_name = "obs_seq.out"
+obs_sequence_out_name = "obs_seq.final"
+input_state_file_list = "input_list.txt"
+output_state_file_list = "output_list.txt"
+init_time_days = -1
+init_time_seconds = -1
+first_obs_days = -1
+first_obs_seconds = -1
+last_obs_days = -1
+last_obs_seconds = -1
+num_output_state_members = 0
+num_output_obs_members = 20
+output_interval = 1
+num_groups = 1
+distributed_state = true
+compute_posterior = true
+output_forward_op_errors = false
+output_timestamps = true
+trace_execution = true
+stages_to_write = ["output"]
+output_members = true
+output_mean = true
+output_sd = true
+write_all_stages_at_end = false
+inf_flavor = [0, 0]
+inf_initial_from_restart = [false, false]
+inf_sd_initial_from_restart = [false, false]
+inf_initial = [1.0, 1.0]
+inf_lower_bound = [1.0, 1.0]
+inf_upper_bound = [1000000.0, 1000000.0]
+inf_damping = [0.9, 1.0]
+inf_sd_initial = [0.6, 0.0]
+inf_sd_lower_bound = [0.6, 0.0]
+inf_sd_max_change = [1.05, 1.05]
+
+# State variables are read from the members' first guess files: netCDF name, DART
+# quantity, minimum, maximum, UPDATE or NO_COPY_BACK. The winds must be u and v on
+# cells, ICON turns their analysis into the edge-normal wind itself. ICON's qv is a
+# specific humidity. Variables that the filter updates must also be in
+# assimilation.state_variables.
+[dart_namelist.model_nml]
+template_file = "icon_template.nc"
+grid_file = "icon_grid.nc"
+height_file = "icon_heights.nc"
+assimilation_period_days = 0
+assimilation_period_seconds = 21600
+boundary_width = 4          # Reject observations this close (in cell rows) to the lateral boundary
+sfc_elev_max_diff = -1.0
+debug = 0
+variables = [
+  "u",        "QTY_U_WIND_COMPONENT",  "NA",  "NA", "UPDATE",
+  "v",        "QTY_V_WIND_COMPONENT",  "NA",  "NA", "UPDATE",
+  "temp",     "QTY_TEMPERATURE",       "NA",  "NA", "UPDATE",
+  "pres",     "QTY_PRESSURE",          "NA",  "NA", "UPDATE",
+  "qv",       "QTY_SPECIFIC_HUMIDITY", "0.0", "NA", "UPDATE",
+  "pres_sfc", "QTY_SURFACE_PRESSURE",  "NA",  "NA", "NO_COPY_BACK",
+  "t_2m",     "QTY_2M_TEMPERATURE",    "NA",  "NA", "NO_COPY_BACK",
+  "u_10m",    "QTY_10M_U_WIND_COMPONENT", "NA", "NA", "NO_COPY_BACK",
+  "v_10m",    "QTY_10M_V_WIND_COMPONENT", "NA", "NA", "NO_COPY_BACK",
+]
+
+[dart_namelist.obs_kind_nml]
+assimilate_these_obs_types = [
+  "RADIOSONDE_TEMPERATURE",
+  "RADIOSONDE_U_WIND_COMPONENT",
+  "RADIOSONDE_V_WIND_COMPONENT",
+  "RADIOSONDE_SPECIFIC_HUMIDITY",
+]
+
+[dart_namelist.assim_tools_nml]
+cutoff = 0.05
+sort_obs_inc = false
+spread_restoration = false
+sampling_error_correction = false
+adaptive_localization_threshold = -1
+output_localization_diagnostics = false
+# The ICON interface needs both of these to be true
+convert_all_state_verticals_first = true
+convert_all_obs_verticals_first = true
+print_every_nth_obs = 0
+
+[dart_namelist.location_nml]
+horiz_dist_only = false
+vert_normalization_pressure = 6666666.7
+vert_normalization_height = 5000000.0
+vert_normalization_level = 2666.7
+vert_normalization_scale_height = 10.0
+approximate_distance = false
+nlon = 71
+nlat = 36
+output_box_info = false
+
+[dart_namelist.quality_control_nml]
+input_qc_threshold = 3.0
+outlier_threshold = 3.0
+enable_special_outlier_code = false
+
+[dart_namelist.cov_cutoff_nml]
+select_localization = 1
+
+[dart_namelist.reg_factor_nml]
+select_regression = 1
+input_reg_file = "time_mean_reg"
+save_reg_diagnostics = false
+reg_diagnostics_file = "reg_diagnostics"
+
+[dart_namelist.obs_sequence_nml]
+write_binary_obs_sequence = false
+
+[dart_namelist.utilities_nml]
+TERMLEVEL = 1
+module_details = false
+logfilename = "dart_log.out"
+nmlfilename = "dart_log.nml"
+write_nml = "file"
+
+[dart_namelist.ensemble_manager_nml]
+layout = 1
+tasks_per_node = 32
+
+[dart_namelist.state_vector_io_nml]
+
+[dart_namelist.mpi_utilities_nml]
+
+[dart_namelist.probit_transform_nml]
+
+[dart_namelist.algorithm_info_nml]
+qceff_table_filename = ""
+
+[dart_namelist.xyz_location_nml]
+
+[dart_namelist.obs_def_gps_nml]
+max_gpsro_obs = 100000
+
+[dart_namelist.gocart_optics_nml]
+optical_properties_file = "GOCART_AOD_optical_properties.csv"
+
+[dart_namelist.obs_def_GOCART_AOD_nml]
+debug = false
+
+# -- EXTRA FILES TO COPY INTO DART DIRECTORY --
+# [[extra_dart_files]]
+# source = "/path/to/file"
+# destination_name = "file"  # Optional; defaults to source filename
