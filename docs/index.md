@@ -13,6 +13,7 @@ The following features are available:
 - Applying custom post-processing scripts on forecasts and analysis files
 - Doing everything in SLURM jobs
 - Handling observation data (indexing and running DART's `obs_converters`)
+- Running the same cycle with the [ICON](icon.md) model instead of WRF
 
 ## Project Status
 

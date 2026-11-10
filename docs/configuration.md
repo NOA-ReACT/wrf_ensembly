@@ -74,6 +74,7 @@ description = "A description of what this experiment does"
 |-------|------|-------------|
 | `name` | string | **Required.** Name of the experiment |
 | `description` | string | **Required.** Description of the experiment |
+| `model` | string | Which model the experiment runs: `wrf` or `icon`. With `icon`, the `[domain_control]`, `[data]`, `[geogrid]` and `[wrf_namelist]` sections are not used and an `[icon]` section is required, see [ICON](icon.md). *Default: `wrf`* |
 
 ## Directories
 
@@ -89,9 +90,10 @@ scratch_root = "./scratch"
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `wrf_root` | Path | **Required.** Root directory of the WRF model. Should contain the `run` directory with `real.exe` compiled |
-| `wps_root` | Path | **Required.** Root directory of WPS. Should contain the `geogrid.exe`, `metgrid.exe` and `ungrib.exe` executables |
-| `dart_root` | Path | **Required.** Root directory of DART. Should contain a `models/wrf` directory, compiled |
+| `wrf_root` | Path | **Required for WRF.** Root directory of the WRF model. Should contain the `run` directory with `real.exe` compiled |
+| `wps_root` | Path | **Required for WRF.** Root directory of WPS. Should contain the `geogrid.exe`, `metgrid.exe` and `ungrib.exe` executables |
+| `icon_root` | Path | **Required for ICON.** The ICON build directory, with `bin/icon` |
+| `dart_root` | Path | **Required.** Root directory of DART. Should contain a `models/wrf` (or `models/icon`) directory, compiled |
 | `scratch_root` | Path | Scratch directory for temporarily storing model output files before post-processing. If relative, will be inside the experiment directory. `{{exp}}` is replaced by `metadata.name`, so an env config shared between experiments can say `/scratch/me/{{exp}}` and still give each its own scratch. *Default: `./scratch`* |
 
 ## Domain Control
@@ -684,6 +686,7 @@ dart = { DART_DEBUG = "1" }
 |-------|------|-------------|
 | `universal` | dict | Environment variables applied to all commands |
 | `wrf` | dict | Environment variables applied only to WRF/WPS commands |
+| `icon` | dict | Environment variables applied only to ICON commands |
 | `dart` | dict | Environment variables applied only to DART commands |
 
 ## WRF Namelist

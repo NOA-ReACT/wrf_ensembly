@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 WRF-Ensembly is a Python toolkit for conducting Ensemble Data Assimilation experiments using WRF/WRF-CHEM and NCAR DART. It acts as "glue" between WRF and DART, managing the cycling assimilation workflow through a series of CLI commands. Everything is configured through a single TOML file per experiment.
 
+The ICON model (limited-area, NWP physics) is supported next to WRF, selected with `metadata.model = "icon"`. See "ICON Support" below and `docs/icon.md`.
+
 ## Development Commands
 
 ### Environment Setup
@@ -72,7 +74,7 @@ wrf-ensembly $EXPERIMENT_PATH group command
 
 **Experiment Module (`wrf_ensembly/experiment/`)**
 - `Experiment`: Main class orchestrating experiment operations
-- `ExperimentPaths`: Manages directory structure and paths
+- `ExperimentPaths`: Manages directory structure and paths (`dart_work_dir` is `models/<metadata.model>/work`)
 - `ExperimentState` (`state_store.py`): file-based status store under `status/`
 - `ExperimentStateMachine` (`state_machine.py`): derives cycle state from the state store
 - `MemberStatus` (`dataclasses.py`): per-member status dataclass
@@ -168,6 +170,21 @@ experiment_dir/
 4. **External tool wrappers**: `external.py` provides wrappers for CDO, NCO operators
 5. **Click decorators**: `@pass_experiment_path` injects experiment path from context
 6. **Environment management**: `EnvironmentConfig` in config handles env vars per tool (WRF/DART/universal)
+
+## ICON Support
+
+There is no model class hierarchy: the code that differs for ICON lives in `wrf_ensembly/icon/` and is reached through `if cfg.is_icon` branches in `Experiment` (`advance_member`, `filter`, `cycle_member`, `update_bc`, `clean_restart_files`) and in the commands (`ensemble setup`/`analysis`, `experiment copy-model`, `preprocess`). WRF-only config sections (`domain_control`, `data`, `wrf_namelist`, `directories.wrf_root`/`wps_root`) are optional in the dataclasses and required by `Config.check()` for WRF.
+
+- `icon/namelists.py`: `icon_master.namelist` and the atmosphere namelist from `[icon]`; names of the files in a member's run directory and of the output streams
+- `icon/model.py`: member setup (links), running ICON (success = `finish.status` is `OK`), the analysis files, cycling
+- `icon/preprocess.py`: IFS GRIB to IC/LBC on the ICON grid with CDO (`preprocess icon-icbc`)
+- `icon/regrid.py`: triangular grid to regular lat/lon (nearest, linear, conservative), as cached sparse weights
+- `icon/processor.py`: `IconPostProcessor`, the first step of the postprocess pipeline instead of `XWRFPostProcessor`
+- `model_files.py`: names of the model output files for code shared by both models
+
+Cycling does not touch restart files. Each member writes a first guess file (`fg_<date>.nc`, ICON's `dwd_fg_*` groups) at the end of a cycle, DART reads its prior from it, `ensemble analysis` writes an analysis file (`ana_<date>.nc` with temp, pres, u, v, moisture), and the next cycle starts with `init_mode = 1` from both. ICON turns the u/v analysis into its edge-normal wind and rebuilds rho/theta_v. Cycle 0 starts from IFS data (`init_mode = 2`). Consequences: cycles must be multiples of `boundary_update_interval` long (ICON anchors boundary file times at the run start), surface tiles restart from tile averages every cycle (`ltile_coldstart`, netCDF has no tile metadata), and `[perturbations]`/`[segments]` are rejected.
+
+DART needs `models/icon` (branch `icon` of the fork): state on cell centres, heights from `z_ifc`, barycentric interpolation between cell centres. Tests run `advance_member` with `tests/fake_icon.py` instead of the model.
 
 ## WRF-CHEM Support
 

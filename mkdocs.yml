@@ -37,3 +37,4 @@ nav:
     - Observations: observations.md
     - Postprocessing: postprocess.md
     - WRF-Chem: wrf-chem.md
+    - ICON: icon.md
