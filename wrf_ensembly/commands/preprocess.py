@@ -15,6 +15,8 @@ from rich.table import Table
 from wrf_ensembly import config, cycling, experiment, external, utils, wrf
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
+from wrf_ensembly.icon import model as icon_model
+from wrf_ensembly.icon import preprocess as icon_preprocess
 
 
 def check_is_member_option_is_required(
@@ -29,6 +31,11 @@ def check_is_member_option_is_required(
 
     cfg_path = ctx.obj["experiment_path"] / "config.toml"
     cfg = config.read_config(cfg_path)
+    if cfg.is_icon:
+        raise click.UsageError(
+            "This is a WRF/WPS step. With ICON, use `preprocess icon-icbc`."
+        )
+    assert cfg.data is not None
     if cfg.data.per_member_meteorology and value is None:
         raise click.BadParameter(
             "You need to specify the --member option when using per_member_meteorology"
@@ -57,6 +64,9 @@ def setup(experiment_path: Path, only_namelist: bool):
 
     logger.setup("preprocess-setup", experiment_path)
     exp = experiment.Experiment(experiment_path)
+    if exp.cfg.is_icon:
+        logger.info("Nothing to set up for ICON, continue with `preprocess icon-icbc`")
+        return
 
     if not only_namelist:
         shutil.copytree(exp.paths.work_wrf, exp.paths.work_preprocessing_wrf)
@@ -677,3 +687,71 @@ def clean(experiment_path: Path):
     logger.info(f"Removing {exp.paths.work_preprocessing}")
     shutil.rmtree(exp.paths.work_preprocessing)
     exp.paths.work_preprocessing.mkdir(parents=True, exist_ok=True)
+
+
+@preprocess_cli.command()
+@click.option(
+    "--member",
+    type=int,
+    help="Only this member. Without it, all members if the paths have %MEMBER%.",
+)
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=1, max=None),
+    default=4,
+    show_default=True,
+    help="How many files to convert at the same time",
+)
+@click.option("--overwrite", is_flag=True, help="Convert files that exist already too")
+@pass_experiment_path
+def icon_icbc(experiment_path: Path, member: int | None, jobs: int, overwrite: bool):
+    """
+    Makes the ICON initial and boundary conditions from IFS GRIB files.
+
+    Reads the GRIB files in `icon.ifs_grib`, and writes `icon.initial_conditions` and
+    one file per boundary time in `icon.boundary_conditions`, on the ICON grid. Needs
+    CDO and the ecCodes tools.
+    """
+
+    logger.setup("preprocess-icon-icbc", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+    icon = exp.cfg.icon
+    if icon is None:
+        logger.error('This command is for experiments with metadata.model = "icon"')
+        sys.exit(1)
+    if icon.ifs_grib is None:
+        logger.error("icon.ifs_grib is not set, there's nothing to convert")
+        sys.exit(1)
+
+    per_member = any(
+        "%MEMBER%" in str(path)
+        for path in (icon.ifs_grib, icon.initial_conditions, icon.boundary_conditions)
+    )
+    if member is not None:
+        members = [member]
+    elif per_member:
+        members = list(range(exp.cfg.assimilation.n_members))
+    else:
+        members = [0]
+
+    for member_i in members:
+        if per_member:
+            logger.info(f"Member {member_i}")
+        try:
+            icon_preprocess.prepare(
+                grib_dir=icon_model.for_member(icon.ifs_grib, member_i),
+                grid_file=icon.grid_file,
+                initial_conditions=icon_model.for_member(
+                    icon.initial_conditions, member_i
+                ),
+                boundary_dir=icon_model.for_member(icon.boundary_conditions, member_i),
+                boundary_filename=icon.boundary_filename,
+                start=exp.cfg.time_control.start,
+                end=exp.cfg.time_control.end,
+                dwd_definitions=icon.dwd_grib_definitions,
+                jobs=jobs,
+                overwrite=overwrite,
+            )
+        except icon_preprocess.PreprocessError as err:
+            logger.error(str(err))
+            sys.exit(1)

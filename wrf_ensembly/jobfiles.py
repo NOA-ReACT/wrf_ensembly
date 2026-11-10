@@ -39,6 +39,9 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
     exp.paths.jobfiles.mkdir(parents=True, exist_ok=True)
 
     base_cmd = f"{exp.cfg.slurm.command_prefix} wrf-ensembly {exp.paths.experiment_path.resolve()} preprocess {{subcommand}}"
+    if exp.cfg.is_icon:
+        return _write_preprocess_jobfile(exp, [_build_command(base_cmd, "icon-icbc")])
+
     commands = [
         _build_command(base_cmd, "setup"),
         _build_command(base_cmd, "geogrid"),
@@ -76,6 +79,10 @@ def generate_preprocess_jobfile(exp: experiment.Experiment) -> Path:
             ]
         )
 
+    return _write_preprocess_jobfile(exp, commands)
+
+
+def _write_preprocess_jobfile(exp: experiment.Experiment, commands: list[str]) -> Path:
     jobfile = exp.paths.jobfiles / "preprocess.sh"
     jobfile.parent.mkdir(parents=True, exist_ok=True)
 
