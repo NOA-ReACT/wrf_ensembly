@@ -79,6 +79,14 @@ wrf-ensembly $EXPERIMENT_PATH group command
 - `ExperimentStateMachine` (`state_machine.py`): derives cycle state from the state store
 - `MemberStatus` (`dataclasses.py`): per-member status dataclass
 
+**Models (`wrf_ensembly/models/`)**
+`Experiment` owns the workflow (current cycle, member status, running the filter, planning segments) and asks `exp.model` for everything that depends on the model. Do not add `if cfg.is_icon` branches to shared code: add a method to `Model` instead.
+- `base.py`: the `Model` interface: `install`, `setup_member`, `preprocess_job`, `run_member`, output file names, `first_processor`, `prepare_filter`, `make_analysis`, `cycle_member`, `update_bc`, `clean_old_state`. Perturbations and the segment helpers (`member_initial_state`, `prepare_member_boundaries`, `remove_cycle_output`) are optional and only WRF has them.
+- `wrf.py`: `WrfModel`: running wrf.exe, both cycling modes, boundaries, perturbations, the file handling of segments
+- `icon.py`: `IconModel`
+- `domain.py` (next to the package): `Domain` with `WrfDomain` and `IconDomain`, as `exp.domain`: map projection, extent, which observations are inside (`locate`)
+- What stays outside: `Config.check()` validates per model, and the WRF-only CLI commands (`preprocess geogrid` etc.) refuse to run for ICON themselves.
+
 **Commands (`wrf_ensembly/commands/`)**
 Commands are organized by workflow phase:
 - `experiment.py`: Create, setup, cycle info
@@ -143,7 +151,8 @@ experiment_dir/
 **Segments** (`[segments]`, restart mode only): members run several cycles as one WRF run and only stop at cycles with an `obs/cycle_NNN.obs_seq`, in `keep_restart_files_for_cycles`, at `--run-until`, at the end, or when `max_walltime` is reached. The cycle stays the bookkeeping unit; the segment is an overlay read from plans in `status/segments/` (no extra cycle state).
 - `segments.py`: the pure planner (`plan_segment`, `find_stops`, `checkpoint_interval`, `shorten`)
 - `checkpoints.py`: restart files written during a segment; `CheckpointWatcher` confirms them from rsl.out.0000 (`Timing for Writing restart`) and prunes old ones while wrf.exe runs
-- In `Experiment`: `advance_member` runs the segment, `file_segment_outputs` sorts wrfouts into their cycles, `find_resume_point` continues a killed member from a confirmed checkpoint, `finish_segment` moves the pointer from the first to the last cycle (first step of the analysis job), `reset_segment`
+- In `Experiment` (planning and state): `advance_member`, `plan_segment`, `finish_segment` moves the pointer from the first to the last cycle (first step of the analysis job), `reset_segment`
+- In `WrfModel` (files): `run_member` runs the segment, `file_segment_outputs` sorts wrfouts into their cycles, `find_resume_point` continues a killed member from a confirmed checkpoint
 - Tests run `advance_member` with `tests/fake_wrf.py` instead of wrf.exe
 
 **WRF Operations (`wrf.py`)**
@@ -173,14 +182,13 @@ experiment_dir/
 
 ## ICON Support
 
-There is no model class hierarchy: the code that differs for ICON lives in `wrf_ensembly/icon/` and is reached through `if cfg.is_icon` branches in `Experiment` (`advance_member`, `filter`, `cycle_member`, `update_bc`, `clean_restart_files`) and in the commands (`ensemble setup`/`analysis`, `experiment copy-model`, `preprocess`). WRF-only config sections (`domain_control`, `data`, `wrf_namelist`, `directories.wrf_root`/`wps_root`) are optional in the dataclasses and required by `Config.check()` for WRF.
+ICON is `IconModel` (`models/icon.py`) and `IconDomain` (`domain.py`), thin layers over the code in `wrf_ensembly/icon/`. See "Models" above. WRF-only config sections (`domain_control`, `data`, `wrf_namelist`, `directories.wrf_root`/`wps_root`) are optional in the dataclasses and required by `Config.check()` for WRF.
 
 - `icon/namelists.py`: `icon_master.namelist` and the atmosphere namelist from `[icon]`; names of the files in a member's run directory and of the output streams
 - `icon/model.py`: member setup (links), running ICON (success = `finish.status` is `OK`), the analysis files, cycling
 - `icon/preprocess.py`: IFS GRIB to IC/LBC on the ICON grid with CDO (`preprocess icon-icbc`)
 - `icon/regrid.py`: triangular grid to regular lat/lon (nearest, linear, conservative), as cached sparse weights
 - `icon/processor.py`: `IconPostProcessor`, the first step of the postprocess pipeline instead of `XWRFPostProcessor`
-- `model_files.py`: names of the model output files for code shared by both models
 
 Cycling does not touch restart files. Each member writes a first guess file (`fg_<date>.nc`, ICON's `dwd_fg_*` groups) at the end of a cycle, DART reads its prior from it, `ensemble analysis` writes an analysis file (`ana_<date>.nc` with temp, pres, u, v, moisture), and the next cycle starts with `init_mode = 1` from both. ICON turns the u/v analysis into its edge-normal wind and rebuilds rho/theta_v. Cycle 0 starts from IFS data (`init_mode = 2`). Consequences: cycles must be multiples of `boundary_update_interval` long (ICON anchors boundary file times at the run start), surface tiles restart from tile averages every cycle (`ltile_coldstart`, netCDF has no tile metadata), and `[perturbations]`/`[segments]` are rejected.
 
