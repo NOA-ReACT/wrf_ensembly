@@ -13,14 +13,14 @@ Experiments follow the general 'Setup, Preprocessing, Assimilation, Postprocessi
 
 ## Cycling
 
-WRF Ensembly is a cycling assimilation system based on [NCAR DART](https://dart.ucar.edu). With *cycling*, we refer to the act of running a forward run of the NWP model and then using its output as input for the next forward run. One *cycle* of an *experiment* refers to one forward run and the subsequent assimilation.
+WRF Ensembly is a cycling assimilation system based on [NCAR DART](https://dart.ucar.edu). The model is [WRF](./wrf.md) (or WRF-Chem) or [ICON](./icon.md), chosen with `metadata.model` in the configuration. With *cycling*, we refer to the act of running a forward run of the model and then using its output as input for the next forward run. One *cycle* of an *experiment* refers to one forward run and the subsequent assimilation.
 
 ```mermaid
 flowchart LR
-  nwp[WRF] -->|forward run| forecast[("Forecast")]
+  nwp[Model] -->|forward run| forecast[("Forecast")]
   forecast --> dart[DART]
   dart -->|Assimilation| analysis[("Analysis")]
-  analysis -->|As IC/BC| nwp
+  analysis -->|Start of the next cycle| nwp
 
   observations[("Observations")] --> dart
 ```
@@ -30,108 +30,20 @@ Since the system is an **Ensemble** assimilation system, the forward run is actu
 Optionally, a cycle can use the forecast to move forward, in case the analysis doesn't
 exist. For example, when there aren't any data to assimilate.
 
-How a member continues into the next cycle depends on `assimilation.cycling_mode`, see
-[Cycling modes](./configuration.md#cycling-modes) for the settings.
+### What is the same for both models and what is not
 
-### `wrfinput` mode: a fresh start every cycle
+The experiment directory, the commands of a cycle (`advance-member`, `filter`, `analysis`, `cycle`), the status tracking, the observations, the SLURM jobs and the layout of the postprocessed output are the same for WRF and ICON. What differs is where the initial and boundary conditions come from and how a member continues from the analysis:
 
-WRF's output doesn't include everything needed to start the model (SST, for example, is
-not advanced by the model but is needed to initialise it). So real.exe makes initial and
-boundary conditions for every cycle's start, and at the end of each cycle the analysis is
-combined with the ones for the next cycle:
+| | WRF, `wrfinput` mode | WRF, `restart` mode | ICON |
+| --- | --- | --- | --- |
+| Initial and boundary conditions | WPS and real.exe, for every cycle | WPS and real.exe, once | IFS data interpolated to the grid, once |
+| The filter reads the prior from | wrfout at the end of the cycle | wrfout at the end of the cycle | First guess file at the end of the cycle |
+| The next cycle starts from | A fresh wrfinput with the analysis' `cycled_variables` | The member's restart file with the analysis' `state_variables` | The first guess and an analysis file, combined by ICON |
+| Boundaries after the analysis | `update-bc` | `update-bc` (increment only) | Nothing to do |
+| Several cycles in one run ([segments](./wrf.md#segments)) | No | Yes | No |
+| `[perturbations]` | Yes | Yes | No, see [ensemble spread](./icon.md#things-to-know) |
 
-```mermaid
-flowchart TB
-WPS --> c0[(IC/BC for cycle 0)]
-WPS --> c1[(IC/BC for cycle 1)]
-WPS --> c2[(IC/BC for cycle 2)]
-
-c0 -->|WRF & DART| a0[Analysis for cycle 0]
-a0 --> cc1[Combined IC/BC for cycle 1]
-c1 --> cc1
-
-cc1 -->|WRF & DART| a1[Analysis for cycle 1]
-a1 --> cc2[Combined IC/BC for cycle 2]
-c2 --> cc2
-```
-
-Only the `cycled_variables` come from the analysis; everything else is fresh from real.exe.
-WRF starts cold every cycle, so physics state that isn't in the wrfinput (cloud droplet
-number, TKE, accumulated fields, ...) starts over each time.
-
-### `restart` mode: members continue from their own restart file
-
-real.exe runs once, for the whole experiment: it makes the first cycle's wrfinput and one
-wrfbdy for the whole period. Every member writes a WRF restart file at the end of each
-cycle, which holds its complete state, and starts the next cycle from it:
-
-```mermaid
-flowchart TB
-WPS --> c0[(wrfinput for cycle 0)]
-WPS --> bdy[(wrfbdy for the whole experiment)]
-
-c0 -->|WRF| r0[(Restart file at the end of cycle 0)]
-r0 -->|DART| a0[Analysis for cycle 0]
-a0 -->|state_variables written into the restart file| r0a[(Initial state for cycle 1)]
-r0a -->|WRF| r1[(Restart file at the end of cycle 1)]
-bdy -.->|records of each cycle, plus the analysis increment at the edges| r0a
-```
-
-`ensemble cycle` writes only the analysis' `state_variables` into the restart file and
-rebalances pressure and density; everything else carries over as WRF left it. Each member
-gets the boundary records of its cycle from the long wrfbdy, and `ensemble update-bc` adds
-the analysis increment at the domain edges to them. When a cycle has no observations,
-the restart file is used as it is, so the run continues as if it had never stopped (with
-the exceptions below).
-
-#### What a restart doesn't carry over exactly
-
-A WRF restart is close to exact but not bitwise. Differences are tiny compared to
-ensemble spread, but they show up when comparing runs:
-
-- Fields WRF doesn't write to restart files start over at 0, for example `EDUST1`-`EDUST5`
-  and `TOT_EDUST` with GOCART dust, which then hold the emissions since the last restart
-  instead of since the experiment start. Fields that are restarted, like `RAINNC` and the
-  deposition fluxes, keep counting from the experiment start.
-- With the adaptive time step, WRF-Chem stores the time of its last chemistry step in
-  whole seconds, so the first chemistry step after a restart is up to a second too long.
-  This shifts OC/BC between their hydrophobic and hydrophilic forms slightly at every
-  restart. Dust and sea salt are not affected.
-- The meteorology can drift apart at round-off level after some restarts (seen with
-  WRF-Chem and aerosol-aware microphysics, starting at the lateral boundary), and grow
-  where clouds form or not. It isn't predictable which restarts do this.
-
-[Segments](#segments) avoid most restarts, so they also avoid most of this.
-
-### Segments
-
-In the `restart` cycling mode, moving forward with the forecast changes nothing in the
-model state, yet each stop still costs restart I/O and a round trip through the queue.
-With [`[segments]`](./configuration.md#segments) enabled, the members run several cycles
-as one WRF run, a *segment*, and only stop where it's needed:
-
-- at a cycle with an observation file in `obs/` (where the filter runs), so run
-  `observations prepare-cycles` before starting the experiment;
-- at the cycles in `assimilation.keep_restart_files_for_cycles`;
-- at the `--run-until` cycle of `slurm run-experiment`;
-- at the last cycle;
-- or earlier, if the run would not fit in `segments.max_walltime`.
-
-The cycle stays the unit of everything else: each cycle still gets its own forecasts,
-status files and postprocessing, so commands that take a cycle work as before. A segment
-is planned when it is about to start (by `ensemble setup` and `ensemble cycle`) and the
-plan is stored in `status/segments/`. `ensemble plan-segment` shows it, or plans it again
-with `--replan` as long as no member has started.
-
-While a segment runs, the experiment stays at its first cycle. Afterwards, every member
-has sorted its output into the cycles it belongs to, and `ensemble finish-segment` (the
-first step of the analysis job) marks the inner cycles complete and moves the experiment
-to the last one, where filter, analysis and cycle run as usual.
-
-Members write a restart file every `checkpoint_interval_hours` along the way. If a
-member job dies, `run-experiment` resubmits it as usual and it continues from its newest
-checkpoint that WRF finished writing. `ensemble reset-cycle` on any cycle of the segment
-resets the whole segment, deleting its output and checkpoints, and plans it again.
+The details are on the page of each model: [WRF](./wrf.md), [ICON](./icon.md).
 
 ## Experiment Directory Structure
 
@@ -141,28 +53,28 @@ The experiment directory is the main directory where all data and configuration 
   - `data/` - Input files & final output files
     - `analysis/`
     - `diagnostics/` - DART obs_seq.out files, IC/BC perturbations
-    - `forecasts/` - Postprocessed wrfout files
-    - `initial_boundary/` - wrfinput and wrfbdy files
+    - `forecasts/` - Postprocessed model output
+    - `initial_boundary/` - Initial and boundary conditions (WRF: wrfinput and wrfbdy files)
   - `jobfiles/` - SLURM jobfiles
   - `logs/` - Log files, one subdirectory per executed command
     - `slurm/` - stdout of SLURM jobs
   - `obs/` - Observations (.toml and .obs_seq)
-  - `scratch/` - Temporary files (but also raw wrfout)
+  - `scratch/` - Temporary files (but also the raw model output)
     - `analysis/`
     - `dart/` - DART output files (netCDF only w/ state vars.)
-    - `forecasts/` - raw wrfout files from model
+    - `forecasts/` - raw output files from the model (wrfout, or ICON's `icon_*.nc` and first guess files)
     - `postprocess/` - Used during post-processing
     - `restart/` - WRF restart files per cycle and member (`restart` cycling mode), and
       the checkpoints of a running segment with `checkpoints.json`
-  - `work/` - WRF/WPS executables and working directories
-    - `ensemble/` - One subdirectory per ensemble, contains wrf.exe
-    - `preprocessing/` - A copy of WRF and WPS used to generate the IC/BC
-    - `WPS/` - The WPS build used for the experiment
-    - `WRF/` - The WRF build used for the experiment
+  - `work/` - Model executables and working directories
+    - `ensemble/` - One subdirectory per member, the model runs in it
+    - `preprocessing/` - WRF only: a copy of WRF and WPS used to generate the IC/BC
+    - `WPS/` - WRF only: the WPS build used for the experiment
+    - `WRF/` - WRF only: the WRF build used for the experiment
   - `status/` - Experiment status, see [Experiment status tracking](#experiment-status-tracking)
   - `config.toml` - Configuration file for the experiment
 
-The `scratch/` directory can get pretty large in size because of the wrfout files. You can set move this directory outside of the experiment path, possibly on a different mountpoint. This is to accomodate HPC systems that provide a larger scratch mountpoint.
+The `scratch/` directory can get pretty large in size because of the raw model output. You can set move this directory outside of the experiment path, possibly on a different mountpoint. This is to accomodate HPC systems that provide a larger scratch mountpoint.
 
 
 ## Logging
@@ -187,21 +99,21 @@ The whole abstraction is entirely optional. WRF-Ensembly will use any `obs_seq.c
 
 ## Configuration
 
-Experiments are configured through the `config.toml` file, in [TOML format](https://toml.io/en/). Currently, this includes all WRF-Ensembly settings and the WRF/WPS namelists. DART configuration is not handled. More information in the [Configuration](./configuration.md) section.
+Experiments are configured through the `config.toml` file, in [TOML format](https://toml.io/en/). This includes all WRF-Ensembly settings, the namelists of the model (WRF and WPS, or ICON) and the DART namelist. More information in the [Configuration](./configuration.md) section.
 
 
 ## Postprocessing
 
-In the typical WRF-Ensembly workflow, we don't use the raw wrfout files. The following steps are followed before you get the output **forecast**/**analysis** files:
+In the typical WRF-Ensembly workflow, we don't use the raw model output. The following steps are followed before you get the output **forecast**/**analysis** files:
 
-1. Use [xwrf](https://github.com/xarray-contrib/xwrf) to make the files a bit more convenient (shorter dimension names, some diagnostics computed, CF-compliant attributes added). Remove any uneeded variables to save space.
+1. Bring the files to a common layout: dimensions `t, z, y, x`, CF-compliant names and attributes, some diagnostics computed. For WRF this is done with [xwrf](https://github.com/xarray-contrib/xwrf); ICON output is interpolated from its triangular grid to a regular lat/lon grid. Remove any uneeded variables to save space.
 2. Optionally, apply any external processors on the files.
 3. Concatenate all files into a single file, one per cycle and member.
 4. Compute the ensemble statistics (mean and standard deviation), leaving you with two files per cycle.
 
 During the final steps, the files are also compressed using a netCDF-compatible algorithm (zstd is recommended, but zlib is more widely available) and the variables are 'packed' to avoid storing too many insignificant digits. Both these processes are optional and configurable (see the `[postprocess]` section of the [Configuration](./configuration.md#postprocess)). The user can select whether to store only the ensemble statistics or all member files, the first cutting down the output size significantly.
 
-Because there are many tools that use raw wrfout files, the above is all optional. You can find the wrfout files inside the `scratch/` directory.
+Because there are many tools that use the raw output files, the above is all optional. You can find them inside the `scratch/` directory.
 
 More information about postprocessing is available in the [Postprocessing](./postprocess.md) section, including how the processing pipeline is setup.
 
@@ -209,7 +121,7 @@ More information about postprocessing is available in the [Postprocessing](./pos
 ## HPC intergration (SLURM)
 
 For use in HPC environments, WRF-Ensembly heavily relies on SLURM for job scheduling. This is an optional convenience feature, as you can completely use WRF-Ensembly without a scheduling system.
-Jobfiles can be generated for many time-intensive tasks (i.e. pre-processing with WPS or postprocessing with WRF-Ensembly) and for running the assimilation experiment. In this last scenario, WRF-ensembly uses dependencies to run the assimilation/cycle step after the model has advanced, which then queues the next cycle. The example below shows a flowchart for an experiment with 4 members. Each box represents a SLURM job.
+Jobfiles can be generated for many time-intensive tasks (i.e. pre-processing or postprocessing with WRF-Ensembly) and for running the assimilation experiment. In this last scenario, WRF-ensembly uses dependencies to run the assimilation/cycle step after the model has advanced, which then queues the next cycle. The example below shows a flowchart for an experiment with 4 members. Each box represents a SLURM job.
 
 ```mermaid
 flowchart TB
@@ -234,17 +146,17 @@ filter_2 --> advance_c2_3[Run model member #3]
 filter_2 --> advance_c2_4[Run model member #4]
 ```
 
-This feature allows the user to run experiments fully parallelized, with each WRF execution taking place in a different node (as long as there are available resources), while only requiring N+2 queued jobs at any time, where N is the number of members. This is useful in systems where there are max-queued job limits.
+This feature allows the user to run experiments fully parallelized, with each model run taking place in a different node (as long as there are available resources), while only requiring N+2 queued jobs at any time, where N is the number of members. This is useful in systems where there are max-queued job limits.
 
 If for any reason the experiment is interrupted, it can be resumed without re-running any completed steps.
 
-With [segments](#segments), each "Run model member" job runs a whole segment, and its
+With [segments](./wrf.md#segments), each "Run model member" job runs a whole segment, and its
 time limit follows the segment's length.
 
 
 ## Experiment status tracking
 
-The status of the experiment is tracked through the `status/` directory, which stores the current cycle, which members have been advanced (i.e. WRF successfully completed), whether the assimilation filter has been completed, and some statistics about how long it took to advance each member. There is a set of commands available for working with it (`wrf-ensembly status`), described in the [Status](./usage.md#status) section.
+The status of the experiment is tracked through the `status/` directory, which stores the current cycle, which members have been advanced (i.e. the model successfully completed), whether the assimilation filter has been completed, and some statistics about how long it took to advance each member. There is a set of commands available for working with it (`wrf-ensembly status`), described in the [Status](./usage.md#status) section.
 
 The layout is one small file per fact:
 
@@ -274,9 +186,9 @@ ls $EXPERIMENT/status/cycles/cycle_012/members | wc -l
 rm $EXPERIMENT/status/cycles/cycle_012/members/member_07.json
 ```
 
-If the status and the actual model output have drifted apart (for example a job was killed between WRF finishing and the result being recorded), `wrf-ensembly $EXPERIMENT status reconcile` rebuilds the member advancement of a cycle from the forecast files on disk. Pass `--dry-run` first to see what it would change.
+If the status and the actual model output have drifted apart (for example a job was killed between the model finishing and the result being recorded), `wrf-ensembly $EXPERIMENT status reconcile` rebuilds the member advancement of a cycle from the forecast files on disk. Pass `--dry-run` first to see what it would change.
 
 
 # What to read next
 
-The [Installation](./installation.md) page details how to get WRF-Ensembly installed on your system, including dependencies or for development. The [Usage](./usage.md) page details all commands available in WRF-Ensembly and their usage, including on how to setup your first experiment. The [Configuration](./configuration.md) page details how to configure your experiment, including the WRF/WPS namelists. Information about observations is available in the [Observations](./observations.md) page.
+The [Installation](./installation.md) page details how to get WRF-Ensembly installed on your system, including dependencies or for development. The [Usage](./usage.md) page details all commands available in WRF-Ensembly and their usage, including on how to setup your first experiment. The [Configuration](./configuration.md) page details how to configure your experiment, including the namelists. The [WRF](./wrf.md) and [ICON](./icon.md) pages describe what is specific to each model. Information about observations is available in the [Observations](./observations.md) page.

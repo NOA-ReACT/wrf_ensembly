@@ -1,33 +1,42 @@
 # Postprocessing
 
-WRF Ensembly provides a postprocessing pipeline for transforming raw WRF output files into analysis-ready datasets (at least in the author's opinion). The postprocessing system uses a streaming architecture that processes ensemble members one at a time, computes statistics on-the-fly, and writes final output files directly without intermediate files.
+WRF Ensembly provides a postprocessing pipeline for transforming the raw output files of the model (WRF or ICON) into analysis-ready datasets (at least in the author's opinion). The postprocessing system uses a streaming architecture that processes ensemble members one at a time, computes statistics on-the-fly, and writes final output files directly without intermediate files.
 
 ## Overview
 
-The postprocessing pipeline transforms raw `wrfout` files through a unified streaming process:
+The pipeline is the same for both models except for its first step, which brings the model's files to a common layout: dimensions `(t, z, y, x)` and CF names. Everything after that (custom processors, statistics, compression, the validation tools and the plots) works on this layout and does not know which model the data came from.
+
+| | WRF | ICON |
+| --- | --- | --- |
+| Raw files | `wrfout_d01_*` | `icon_*.nc` on the triangular grid |
+| First step | `XWRFPostProcessor` | `IconPostProcessor` |
+| `x`, `y` | Metres in the domain's map projection | Longitude and latitude in degrees |
+| `variables_to_keep` matches | WRF and xwrf names (`U`, `wind_east`, ...) | ICON names, with a few renamed (see [ICON](icon.md#postprocessing)) |
+
+The pipeline transforms the raw output files through a unified streaming process:
 
 1. **Streaming Processing** - For each output timestep, processes all ensemble members through the configured processor pipeline, accumulates statistics (ensemble mean and standard deviation) using Welford's algorithm, and writes results directly to final NetCDF files
 2. **Optional Compression** - Applies NCO compression filters to final output files
-3. **Cleanup** - Removes raw wrfout files to save disk space
+3. **Cleanup** - Removes the raw output files to save disk space
 
 ## File Transformations and Output Paths
 
-The postprocessing pipeline transforms raw WRF output files in several key ways, making them more suitable for analysis and visualization while reducing file sizes.
+The postprocessing pipeline transforms the raw output files in several key ways, making them more suitable for analysis and visualization while reducing file sizes. The transformations of the first step are listed here for WRF; for ICON, see [ICON](icon.md#postprocessing).
 
 ### Key Transformations
 
-**Coordinate Standardization:**
+**Coordinate Standardization (WRF):**
 - Time dimension renamed from `XTIME` to `t` with proper CF-compliant attributes
 - Latitude/longitude coordinates renamed from `XLAT`/`XLONG` to `latitude`/`longitude`
 - Standardized coordinate attributes (`standard_name`, `axis`, `units`)
 
-**Data Processing:**
+**Data Processing (WRF):**
 - **Destaggering**: WRF's staggered grids are destaggered to regular grids
 - **Diagnostic variables**: New variables computed (e.g., `air_density`, `air_pressure`, `geopotential_height`)
 - **Wind transformation**: Grid-relative winds (`U`, `V`) converted to earth-relative (`wind_east`, `wind_north`)
 - **Variable filtering**: Only specified variables retained based on `variables_to_keep` configuration
 
-**File Structure:**
+**File Structure (both models):**
 - Ensemble statistics computed: `*_mean` and `*_sd` files for each time step
 - Temporal concatenation: Individual time files combined into single files per cycle
 - Compression applied: Lossless compression and optional quantization reduce file sizes
@@ -41,10 +50,12 @@ The postprocessing system creates files in several locations within your experim
 ```
 EXPERIMENT_PATH/scratch/
 ├── analysis/cycle_XXX/member_YY/
-│   └── wrfout_d01_YYYY-MM-DD_HH:MM:SS    # Raw WRF analysis files
+│   └── wrfout_d01_YYYY-MM-DD_HH:MM:SS    # Raw analysis files
 └── forecasts/cycle_XXX/member_YY/
-    └── wrfout_d01_YYYY-MM-DD_HH:MM:SS    # Raw WRF forecast files
+    └── wrfout_d01_YYYY-MM-DD_HH:MM:SS    # Raw forecast files
 ```
+
+With ICON the files are called `icon_<date>.nc`, and the same directories also hold the first guess (`fg_<date>.nc`) and analysis (`ana_<date>.nc`) files that the cycling uses. Those are not postprocessed.
 
 **Output Files (data directory):**
 ```
@@ -82,7 +93,7 @@ For complete configuration details, see the [Configuration documentation](config
 wrf-ensembly EXPERIMENT_PATH postprocess print-variables-to-keep
 ```
 
-Prints which variables will be kept in the wrfout files after postprocessing. This is useful to check if the variables you want to keep are actually kept or check how the regex filters are applied.
+WRF only. Prints which variables will be kept in the wrfout files after postprocessing. This is useful to check if the variables you want to keep are actually kept or check how the regex filters are applied.
 
 The variables are defined in the `PostprocessConfig.variables_to_keep` configuration option. This command requires that cycle 0 output for member 0 exists.
 
@@ -117,7 +128,7 @@ Runs the complete postprocessing pipeline for a single cycle using a streaming a
 - `forecast_sd_cycle_XXX.nc` - Forecast ensemble standard deviation (all timesteps)
 - `analysis_mean_cycle_XXX.nc` - Analysis ensemble mean (all timesteps)
 - `analysis_sd_cycle_XXX.nc` - Analysis ensemble standard deviation (all timesteps)
-- `{forecast,analysis}_ensemble_cycle_XXX.nc` - Per-member data, only with `keep_per_member = true`, or with `keep_per_member = "analysis_cycles"` for cycles that have analysis wrfout files in `scratch/analysis/`
+- `{forecast,analysis}_ensemble_cycle_XXX.nc` - Per-member data, only with `keep_per_member = true`, or with `keep_per_member = "analysis_cycles"` for cycles that have analysis files in `scratch/analysis/`
 
 For single-member experiments (n_members=1), only the mean files are created (no standard deviation). If no analysis is done for a cycle (no DA), no analysis files are generated.
 
@@ -160,7 +171,7 @@ Cleans up the scratch directory for the given cycle to save disk space. This com
 
 **Options:**
 - `--cycle CYCLE` - Cycle to clean (uses current cycle if not specified)
-- `--remove-wrfout` - Remove raw wrfout files (default: true)
+- `--remove-wrfout` - Remove the raw forecast output files (default: true). With ICON, the first guess and analysis files stay, the next cycle starts from them; `ensemble cycle` deletes those when they are not needed anymore
 
 ## Streaming Architecture
 
@@ -174,7 +185,7 @@ The postprocessing system uses a streaming architecture implemented in the `wrf_
 
 For each output timestep in a cycle, the pipeline:
 
-1. **Opens each member's wrfout file** sequentially (one at a time)
+1. **Opens each member's output file** sequentially (one at a time)
 2. **Applies the processor pipeline** to transform the data
 3. **Updates running statistics** using Welford's algorithm for numerically stable mean/variance computation
 4. **Writes the timestep** to the output files (mean and standard deviation)
@@ -224,19 +235,23 @@ Benefits:
 
 ## Data Processor Pipeline
 
-The heart of the postprocessing system is the data processor pipeline, which applies a series of transformations to each WRF output file. The pipeline is highly configurable and extensible through a plugin system.
+The heart of the postprocessing system is the data processor pipeline, which applies a series of transformations to each model output file. The pipeline is highly configurable and extensible through a plugin system.
 
 ### Built-in Processors
 
 #### XWRFPostProcessor
 
-The `XWRFPostProcessor` is automatically applied as the first step in every pipeline. It performs essential transformations including:
+The `XWRFPostProcessor` is automatically applied as the first step in every pipeline of a WRF experiment. It performs essential transformations including:
 
 - **Air density computation** - Calculates air density from model variables
 - **xWRF postprocessing** - Applies destaggering and diagnostic computations
 - **Coordinate standardization** - Renames dimensions and coordinates to standard names
 - **Variable filtering** - Removes unused variables and filters based on `variables_to_keep`
 - **Metadata cleanup** - Fixes coordinate attributes and removes serialization artifacts
+
+#### IconPostProcessor
+
+The first step in every pipeline of an ICON experiment, instead of `XWRFPostProcessor`. It interpolates the output from the triangular grid to a regular lat/lon grid (`[icon.regrid]`), averages half-level variables to full levels, turns the vertical around so that `z = 0` is the lowest model level, adds `geopotential_height` and renames a few variables to the names the validation tools use. See [ICON](icon.md#postprocessing).
 
 #### ScriptProcessor
 
@@ -370,7 +385,7 @@ The pipeline stops on any processor error. To debug issues:
 2. Test processors individually with small datasets
 3. Use the `print-variables-to-keep` command to verify variable filtering
 4. Try `--only-last-timestep` to test the pipeline on a single timestep before processing the full cycle
-5. Check that raw wrfout files exist and are readable in the scratch directory
+5. Check that the raw output files exist and are readable in the scratch directory
 
 ## Integration with SLURM
 

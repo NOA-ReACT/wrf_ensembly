@@ -1,5 +1,5 @@
 site_name: WRF Ensembly
-site_description: Documentation for WRF Ensembly, a WRF/DART assimilation toolkit
+site_description: Documentation for WRF Ensembly, a toolkit for ensemble assimilation with DART and WRF or ICON
 repo_url: https://github.com/NOA-ReACT/wrf_ensembly
 theme:
   name: terminal
@@ -36,5 +36,9 @@ nav:
     - Configuration: configuration.md
     - Observations: observations.md
     - Postprocessing: postprocess.md
+  - Models:
+    - WRF: wrf.md
     - WRF-Chem: wrf-chem.md
     - ICON: icon.md
+  - Development:
+    - Model interface: model-interface.md

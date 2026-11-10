@@ -19,6 +19,7 @@ Available templates:
 | `default` | Minimal starting point with all required fields and sensible defaults. Use this as a blank slate. |
 | `aris_chem_4.5.2` | WRF-CHEM v4.5.2 configuration for the ARIS HPC cluster. Covers the North Atlantic domain at 30 km resolution with dust/sea salt aerosols. |
 | `iridium_chem_4.6.0` | WRF-CHEM v4.6.0 configuration for the Iridium cluster. Smaller domain suitable for development runs. |
+| `icon` | Starting point for an [ICON](icon.md) experiment (`metadata.model = "icon"`). |
 
 Templates are TOML files stored in `wrf_ensembly/config_templates/`. You can inspect them directly for reference.
 
@@ -39,26 +40,29 @@ Switch environments by changing the symlink target.
 
 ## Configuration Structure
 
-The configuration file is organized into the following main sections:
+`metadata.model` selects the model, `wrf` (default) or `icon`. Most sections are used with both. The sections that belong to one model are required for it and not used with the other:
 
-- **[metadata](#metadata)** - Basic experiment information
-- **[directories](#directories)** - Paths to model installations and data
-- **[domain_control](#domain-control)** - Grid and projection settings
-- **[time_control](#time-control)** - Experiment timing and cycle configuration
-- **[data](#data)** - Input data locations and settings
-- **[assimilation](#assimilation)** - Ensemble and DART configuration
-- **[observations](#observations)** - Observation processing settings
-- **[validation](#validation)** - Validation and first-departure analysis
-- **[geogrid](#geogrid)** - Geographical data preprocessing
-- **[perturbations](#perturbations)** - Initial condition perturbation settings
-- **[segments](#segments)** - Running several cycles as one WRF run (restart mode)
-- **[slurm](#slurm)** - SLURM job configuration
-- **[postprocess](#postprocess)** - Post-processing and output settings
-- **[plots](#plots)** - Diagnostic plot configuration
-- **[environment](#environment)** - Environment variables
-- **[wrf_namelist](#wrf-namelist)** - WRF namelist overrides
-- **[dart_namelist](#dart-namelist)** - The complete DART `input.nml`
-- **[extra_dart_files](#extra-dart-files)** - Extra files to copy into the DART directory
+| Section | Used with | What it is |
+|---------|-----------|------------|
+| [metadata](#metadata) | Both | Basic experiment information, which model to run |
+| [directories](#directories) | Both | Paths to model installations and data |
+| [time_control](#time-control) | Both | Experiment timing and cycle configuration |
+| [assimilation](#assimilation) | Both | Ensemble and DART configuration |
+| [observations](#observations) | Both | Observation processing settings |
+| [validation](#validation) | Both | Validation and first-departure analysis |
+| [slurm](#slurm) | Both | SLURM job configuration |
+| [postprocess](#postprocess) | Both | Post-processing and output settings |
+| [plots](#plots) | Both | Diagnostic plot configuration |
+| [environment](#environment) | Both | Environment variables |
+| [dart_namelist](#dart-namelist) | Both | The complete DART `input.nml` |
+| [extra_dart_files](#extra-dart-files) | Both | Extra files to copy into the DART directory |
+| [domain_control](#domain-control) | WRF | Grid and projection settings |
+| [data](#data) | WRF | Input data locations and settings |
+| [geogrid](#geogrid) | WRF | Geographical data preprocessing |
+| [wrf_namelist](#wrf-namelist) | WRF | WRF namelist overrides |
+| [perturbations](#perturbations) | WRF | Initial condition perturbation settings |
+| [segments](#segments) | WRF | Running several cycles as one WRF run (restart mode) |
+| [icon](#icon) | ICON | Grid, input data, namelists and regridding |
 
 ## Metadata
 
@@ -98,7 +102,7 @@ scratch_root = "./scratch"
 
 ## Domain Control
 
-Grid configuration and map projection settings.
+*WRF only.* Grid configuration and map projection settings. With ICON, the domain is the grid file (`icon.grid_file`).
 
 ```toml
 [domain_control]
@@ -148,10 +152,10 @@ output_interval = 30
 |-------|------|-------------|
 | `start` | datetime | **Required.** Start timestamp of the experiment |
 | `end` | datetime | **Required.** End timestamp of the experiment |
-| `boundary_update_interval` | int | Time between incoming real data (lateral boundary conditions) in minutes. *Default: 180* |
+| `boundary_update_interval` | int | Time between incoming real data (lateral boundary conditions) in minutes. With ICON, every cycle must be a multiple of this long. *Default: 180* |
 | `output_interval` | int | Time between output (history) files in minutes. *Default: 60* |
 | `analysis_interval` | int | Time between analysis/assimilation cycles in minutes. *Default: 360* |
-| `runtime_io` | [string] | Runtime I/O options for WRF. Creates a text file in each member directory for `iofields_filename`. See [WRF I/O documentation](https://github.com/wrf-model/WRF/blob/master/doc/README.io_config) |
+| `runtime_io` | [string] | *WRF only.* Runtime I/O options for WRF. Creates a text file in each member directory for `iofields_filename`. See [WRF I/O documentation](https://github.com/wrf-model/WRF/blob/master/doc/README.io_config) |
 | `cycles` | dict | Per-cycle configuration overrides. Keys are cycle numbers (0-indexed) |
 
 ### Per-Cycle Configuration
@@ -165,7 +169,7 @@ You can override certain settings for specific cycles:
 
 ## Data
 
-Input data locations and processing settings.
+*WRF only.* Input data locations and processing settings. The input data of ICON are set in [`[icon]`](#icon).
 
 ```toml
 [data]
@@ -217,18 +221,18 @@ use_inflation = false
 | Field | Type | Description |
 |-------|------|-------------|
 | `n_members` | int | **Required.** Number of ensemble members |
-| `state_variables` | [string] | **Required.** Variables to include in the state vector for assimilation. Use `THM`, not `T`: WRF starts from `THM` and ignores changes to `T` |
-| `cycling_mode` | string | `"wrfinput"` or `"restart"`, see [Cycling modes](#cycling-modes). *Default: "wrfinput"* |
-| `cycled_variables` | [string] | Variables to carry forward from the previous cycle. Required (non-empty) with `cycling_mode = "wrfinput"`, ignored with `"restart"` |
-| `keep_restart_files` | bool | With `cycling_mode = "restart"`, keep every cycle's restart files in `scratch/restart` instead of deleting the ones no cycle can be rerun from. *Default: false* |
-| `keep_restart_files_for_cycles` | [int] | With `cycling_mode = "restart"`, cycles whose restart files (written at the cycle's end) are never deleted, e.g. to start another experiment from there with `ensemble setup-from-other-experiment`. *Default: []* |
+| `state_variables` | [string] | **Required.** Variables to include in the state vector for assimilation, by their name in the model's files. WRF: use `THM`, not `T`, WRF starts from `THM` and ignores changes to `T`. ICON: see [state variables](icon.md#things-to-know) |
+| `cycling_mode` | string | *WRF only.* `"wrfinput"` or `"restart"`, see [Cycling modes](#cycling-modes). *Default: "wrfinput"* |
+| `cycled_variables` | [string] | *WRF only.* Variables to carry forward from the previous cycle. Required (non-empty) with `cycling_mode = "wrfinput"`, ignored with `"restart"` |
+| `keep_restart_files` | bool | With `cycling_mode = "restart"`, keep every cycle's restart files in `scratch/restart` instead of deleting the ones no cycle can be rerun from. With ICON, the same for the first guess and analysis files. *Default: false* |
+| `keep_restart_files_for_cycles` | [int] | With `cycling_mode = "restart"`, cycles whose restart files (written at the cycle's end) are never deleted, e.g. to start another experiment from there with `ensemble setup-from-other-experiment`. With ICON, cycles whose first guess and analysis files are never deleted. *Default: []* |
 | `filter_mpi_tasks` | int | Number of MPI tasks for DART filter. If != 1, filter runs with MPI. *Default: 1* |
 | `half_window_length_minutes` | int | Half-length of the observation window in minutes. Observations within this window around the analysis time are used. *Default: 30* |
 | `use_inflation` | bool | Whether to manage DART inflation files between cycles (sets `inf_initial_from_restart`/`inf_sd_initial_from_restart` appropriately). You still need to configure inflation in the DART namelist. *Default: false* |
 
 ### Cycling modes
 
-How each cycle's initial conditions are built:
+*WRF only.* ICON has one way of cycling, see [how a cycle works](icon.md#how-a-cycle-works). How each cycle's initial conditions are built:
 
 - **`wrfinput`**: real.exe makes a `wrfinput`/`wrfbdy` pair for every cycle
   (`preprocess real --cycle N`). `ensemble cycle` copies the `cycled_variables` from the
@@ -251,18 +255,18 @@ How each cycle's initial conditions are built:
   Accumulated fields (`RAINNC`, deposition fluxes, ...) and `XTIME` keep counting from
   the start of the experiment instead of restarting every cycle. A few things are not
   carried over exactly (for example `EDUST1`-`EDUST5`, which aren't in the restart file),
-  see [what a restart doesn't carry over](./core-concepts.md#what-a-restart-doesnt-carry-over-exactly).
+  see [what a restart doesn't carry over](./wrf.md#what-a-restart-doesnt-carry-over-exactly).
   With `restart` mode you can also run several cycles as one WRF run, see
   [Segments](#segments).
 
 ## Segments
 
-In the `restart` cycling mode, a cycle without observations leaves the model state as
+*WRF only.* In the `restart` cycling mode, a cycle without observations leaves the model state as
 it is, but stopping there still costs: the members write and read a restart file, their
 jobs end, the analysis job runs `cycle` and `update-bc`, and new member jobs wait in the
 queue. On an HPC that is several minutes per stop. With segments, the members run
 several cycles as one WRF run and only stop where they have to. See
-[Segments](./core-concepts.md#segments) for how this works.
+[Segments](./wrf.md#segments) for how this works.
 
 ```toml
 [segments]
@@ -404,7 +408,7 @@ Each regime entry (`[[validation.first_departures.regimes]]`):
 
 ## Geogrid
 
-Geographical data preprocessing settings.
+*WRF only.* Geographical data preprocessing settings.
 
 ```toml
 [geogrid]
@@ -417,7 +421,7 @@ table = "GEOGRID.TBL.ARW_CHEM"
 
 ## Perturbations
 
-Initial condition perturbation settings for ensemble generation.
+*WRF only.* Initial condition perturbation settings for ensemble generation. The configuration is rejected if this section has variables with ICON, see [ensemble spread](icon.md#things-to-know) for what to use there.
 
 ```toml
 [perturbations]
@@ -589,7 +593,7 @@ without either, and it requires `keep_per_member = true`.
 
 ### Data Processors
 
-WRF Ensembly supports custom data processors for post-processing model output. The built-in `XWRFProcessor` (which applies CF-compliance diagnostics via xwrf) is always applied first.
+WRF Ensembly supports custom data processors for post-processing model output. The first step is always the model's own: `XWRFPostProcessor` for WRF (CF-compliance and diagnostics via xwrf), `IconPostProcessor` for ICON (interpolation to a regular lat/lon grid, see [`[icon.regrid]`](icon.md#postprocessing)). Custom processors run after it and see the same layout for both models.
 
 #### Custom Processors
 
@@ -678,6 +682,9 @@ universal = { OMP_NUM_THREADS = "1", MALLOC_TRIM_THRESHOLD = "536870912" }
 # Applied only to WRF/WPS commands
 wrf = { WRF_EM_CORE = "1" }
 
+# Applied only to ICON
+icon = { OMP_NUM_THREADS = "4" }
+
 # Applied only to DART commands
 dart = { DART_DEBUG = "1" }
 ```
@@ -691,7 +698,7 @@ dart = { DART_DEBUG = "1" }
 
 ## WRF Namelist
 
-WRF namelist overrides and per-member customizations.
+*WRF only.* WRF namelist overrides and per-member customizations. For ICON, see `icon.namelist` in [`[icon]`](#icon).
 
 The run times, `interval_seconds`, `history_interval` and output paths are generated from
 `[time_control]` (including per-cycle overrides in `[time_control.cycles]`), so don't set
@@ -724,9 +731,52 @@ You can override any WRF namelist variable by specifying it in the appropriate s
 
 For per-member customizations, use the `wrf_namelist_per_member` section keyed by member. Members are numbered from 0, and the key can be either the member index (`"3"`) or the member directory name (`member_03`; any zero padding is accepted). Per-member overrides are applied on top of `[wrf_namelist]`. A key that isn't a valid member, or names a member outside `assimilation.n_members`, is an error.
 
+## ICON
+
+*ICON only*, required with `metadata.model = "icon"`. The [ICON](icon.md) page explains how these are used.
+
+```toml
+[icon]
+grid_file = "/path/to/grid_DOM01.nc"
+extpar_file = "/path/to/extpar_DOM01.nc"
+ifs_grib = "/path/to/ifs_grib"
+initial_conditions = "/path/to/icbc/ifs_init_ICON.nc"
+boundary_conditions = "/path/to/icbc/lbc"
+
+[icon.namelist.run_nml]
+dtime = 60.0
+
+[icon.namelist_per_member.member_03.nwp_phy_nml]
+inwp_gscp = 2
+
+[icon.regrid]
+method = "linear"
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `grid_file` | Path | **Required.** The ICON grid file (e.g. from ZONDA) |
+| `extpar_file` | Path | **Required.** The external parameters file that belongs to the grid |
+| `initial_conditions` | Path | **Required.** Initial conditions for the first cycle: IFS data interpolated horizontally to the ICON grid, as made by `preprocess icon-icbc`. `%MEMBER%` becomes the two-digit member number, for a different file per member |
+| `boundary_conditions` | Path | **Required.** Directory with the lateral boundary files, one per `time_control.boundary_update_interval` for the whole experiment. `%MEMBER%` works here too |
+| `boundary_filename` | string | Name of the boundary files, with ICON's keywords (`latbc_filename`). *Default: `"ifs_<y><m><d>_<h>_lbc_ICON.nc"`* |
+| `boundary_variables` | dict | ICON's internal variable names and what they are called in the boundary files. *Default: the names of files made from IFS data* |
+| `ifs_grib` | Path | Directory with the IFS GRIB files from MARS, the input of `preprocess icon-icbc`. `%MEMBER%` works here too |
+| `dwd_grib_definitions` | Path | DWD's ecCodes definitions, needed to read the IFS GRIB files. *Default: the `DWD_DEF` environment variable* |
+| `ecrad_data` | Path | Data directory of ecRad. *Default: `externals/ecrad/data` in `directories.icon_root`* |
+| `extra_files` | list | Other files to link into each member's run directory (`source`, `destination_name`), e.g. ART XML files |
+| `output_variables` | [string] | Variables (or `group:` names) of the forecast output, written every `time_control.output_interval`. This is what gets postprocessed |
+| `first_guess_variables` | [string] | What goes in the first guess file at the end of a cycle. Must hold ICON's first guess groups and all of `assimilation.state_variables`. *Default: `["group:dwd_fg_atm_vars", "group:dwd_fg_sfc_vars"]`* |
+| `initial_noise` | float | Amplitude of the random noise on the initial state of the first cycle (`pinit_amplitude`, seeded with the member number). For testing, the noise has no spatial structure. *Default: 0 (off)* |
+| `perturbation_number` | bool | Give each member its own `perturbationNumber`, which seeds ICON's ensemble perturbations (`ensemble_pert_nml`, SPPT). *Default: true* |
+| `namelist` | dict | The atmosphere namelist, as `[icon.namelist.<group>]` tables. See [Namelists](icon.md#namelists) for what is filled in and cannot be set |
+| `namelist_per_member` | dict | Overrides of `namelist` for single members, keyed like `wrf_namelist_per_member` |
+| `master_namelist` | dict | Overrides for `icon_master.namelist` |
+| `regrid` | table | Interpolation to a regular lat/lon grid during postprocessing, see [Postprocessing](icon.md#postprocessing) |
+
 ## DART Namelist
 
-The complete DART `input.nml`, with one table per namelist group. `setup-dart` (and `ensemble filter`, which runs it every cycle) writes `models/wrf/work/input.nml` from this section **alone**: the existing file in the DART directory is replaced, not merged. So you must include every group DART needs, not only the values you want to change. The usual way to start is to copy each group of your working `input.nml` into the config:
+The complete DART `input.nml`, with one table per namelist group. `setup-dart` (and `ensemble filter`, which runs it every cycle) writes `models/<model>/work/input.nml` (`models/wrf/work` or `models/icon/work` in `directories.dart_root`) from this section **alone**: the existing file in the DART directory is replaced, not merged. So you must include every group DART needs, not only the values you want to change. The usual way to start is to copy each group of your working `input.nml` into the config:
 
 ```toml
 [dart_namelist.filter_nml]

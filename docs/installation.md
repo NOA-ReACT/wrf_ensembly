@@ -32,10 +32,11 @@ uv pip install wrf_ensembly
 
 WRF-Ensembly requires the following external dependencies:
 
-- Compiled WRF and WPS. Version is not important but the latest is recommended and what is used by the developers. More info on the model [here](https://github.com/wrf-model/WRF).
-- Compiled DART. Again version is not important but all tests are done with the latest github clone. More info on DART [here](https://github.com/NCAR/DART).
+- The model you want to run:
+    - **WRF**: compiled WRF and WPS. Version is not important but the latest is recommended and what is used by the developers. More info on the model [here](https://github.com/wrf-model/WRF). See [WRF](./wrf.md).
+    - **ICON**: a compiled ICON, plus CDO and the ecCodes tools for the preprocessing. See [ICON](./icon.md) for the full list.
+- Compiled DART, with the work directory of your model built (`models/wrf/work` or `models/icon/work`). Again version is not important but all tests are done with the latest github clone. More info on DART [here](https://github.com/NCAR/DART). The ICON interface is not part of upstream DART, see [ICON](./icon.md#dart).
 - Some observation converterters have optional dependencies that are not pulled by default to either save space or because they are tricky to installed. They are documented in [Observations](./observations.md) and also when you try to run them.
-```
 
 ## Development & Contributing
 
@@ -51,4 +52,4 @@ uv will create a virtual environment for you that contains WRF-Ensembly in edita
 
 ## Read next
 
-You can either go through the [Usage](./usage.md) section to learn how to use WRF-Ensembly, or you can read about the [Core concepts](./core-concepts.md) to understand how it works. There is also a [Tutorial](./tutorial.md) that walks you through a simple experiment.
+You can either go through the [Usage](./usage.md) section to learn how to use WRF-Ensembly, or you can read about the [Core concepts](./core-concepts.md) to understand how it works. There is also a [Tutorial](./tutorial.md) that walks you through a simple experiment with WRF.

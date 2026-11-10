@@ -4,6 +4,8 @@ WRF-Ensembly provides an observation system for handling observational data in e
 
 For configuration options, see the [Configuration](configuration.md#observations) reference.
 
+Everything on this page works the same with WRF and ICON. The model only comes in where observations meet its grid: which observations are inside the domain, and the `x`/`y` coordinates used to compare them with the postprocessed output.
+
 ## Overview
 
 The observation system consists of several key components:
@@ -70,7 +72,7 @@ After observations are added to the experiment database, a few additional fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `x`, `y` | float | Projected coordinates in the WRF grid coordinate system |
+| `x`, `y` | float | Coordinates in the projection of the model domain, the same as `x` and `y` of the postprocessed output: metres in the map projection for WRF, longitude and latitude in degrees for ICON |
 | `model_forecast` | double | Model forecast equivalent value at this observation |
 | `model_analysis` | double | Model analysis equivalent value at this observation |
 | `model_forecast_spread` | double | Ensemble spread of the model forecast at this observation |
@@ -103,7 +105,7 @@ Additional instruments used by converters but not yet in `INSTRUMENT_REGISTRY` (
 
 ### Supported Quantities
 
-| Quantity | Label | Units | WRF Equivalent | DART Quantity |
+| Quantity | Label | Units | Model Equivalent | DART Quantity |
 |----------|-------|-------|----------------|---------------|
 | `LIDAR_EXTINCTION_355nm` | Lidar Extinction @ 355nm | 1/m | `EXT355` | `LIDAR_EXTINCTION_355nm` |
 | `LIDAR_EXTINCTION_532nm` | Lidar Extinction @ 532nm | 1/m | `EXT532` | `LIDAR_EXTINCTION_532nm` |
@@ -118,8 +120,10 @@ Additional instruments used by converters but not yet in `INSTRUMENT_REGISTRY` (
 | `DOD_$WVnm`, `DOD_Fine_$WVnm`, `DOD_Coarse_$WVnm` | (Fine/Coarse mode) Dust Optical Depth @ $WV nm | — | `AOD_DUST_$WV`, `AOD_DUST_FINE_$WV`, `AOD_DUST_COARSE_$WV` | `GOCART_DOD_$WVnm`, `GOCART_DOD_FINE_$WVnm`, `GOCART_DOD_COARSE_$WVnm` † |
 | `SSOD_$WVnm`, `SSOD_Fine_$WVnm`, `SSOD_Coarse_$WVnm` | (Fine/Coarse mode) Sea Salt Optical Depth @ $WV nm | — | `AOD_SEAS_$WV`, `AOD_SEAS_FINE_$WV`, `AOD_SEAS_COARSE_$WV` | `GOCART_SSOD_$WVnm`, `GOCART_SSOD_FINE_$WVnm`, `GOCART_SSOD_COARSE_$WVnm` † |
 
+The model equivalent is the name of a variable in the postprocessed output. The names here are those of WRF-Chem output and of the processors that run on it; with ICON, a variable of that name has to be in the output (or be added by a custom processor) for the validation tools to find it.
+
 The optical depths exist for every wavelength `$WV` in `OPTICAL_DEPTH_WAVELENGTHS`
-(355, 440, 500, 532, 550, 665, 870 and 1064nm), e.g. `DOD_Fine_532nm`. Their WRF
+(355, 440, 500, 532, 550, 665, 870 and 1064nm), e.g. `DOD_Fine_532nm`. Their model
 equivalents are the outputs of the extinction operator (the fine/coarse ones need its
 `compute_size_modes`), which computes them for every wavelength of its optical
 properties table: 355, 500, 532, 550 and 1064nm for the shipped tables, so the 440, 665
@@ -137,11 +141,11 @@ so they can only be assimilated if DART knows that observation type.
 
 `QuantitySpec` supports two ways to map observations to model fields:
 
-- **`model_equivalent`** — A direct WRF variable name. The system interpolates that variable to the observation location/time and uses it as-is. Example: `AOD_550nm` maps to WRF's `AOD_550`.
+- **`model_equivalent`** — The name of a variable in the postprocessed output. The system interpolates that variable to the observation location/time and uses it as-is. Example: `AOD_550nm` maps to `AOD_550`.
 
 - **`operator`** — An `OperatorSpec` for non-trivial transformations. The operator specifies:
   - `func`: A Python callable `(model_fields: dict, metadata: dict) -> ndarray` that returns model-equivalent values.
-  - `required_model_fields`: `ModelFieldSpec` list specifying which WRF variables to interpolate (with `dims=2` for 2D or `dims=3` for 3D vertical interpolation).
+  - `required_model_fields`: `ModelFieldSpec` list specifying which variables of the postprocessed output to interpolate (with `dims=2` for 2D or `dims=3` for 3D vertical interpolation).
   - `required_metadata`: Keys to extract from the observation `metadata` JSON column.
 
   The only current complex operator is `HLOS_WIND`, which projects the model's `wind_east` and `wind_north` (3D) onto the satellite's HLOS direction using the `azimuth` metadata field from Aeolus observations.
@@ -314,7 +318,7 @@ wrf-ensembly $EXP_PATH observations add /path/to/observations/*.parquet --jobs 4
 ```
 
 The `add` command performs:
-1. **Spatial Trimming** — Removes observations outside the WRF domain. Observations whose entire profile/row is outside are dropped; observations at the boundary of an array group have their value set to NaN (to preserve array reconstructability).
+1. **Spatial Trimming** — Removes observations outside the model domain (WRF: the rectangle of the grid in its projection; ICON: the triangles of the grid). Observations whose entire profile/row is outside are dropped; observations at the boundary of an array group have their value set to NaN (to preserve array reconstructability).
 2. **Temporal Trimming** — Filters to the experiment's cycling time range.
 3. **Density Reduction** — Applies superobs, temporal binning, or stride thinning if configured.
 4. **Database Storage** — Inserts trimmed observations into the experiment's DuckDB database at `obs/observations.duckdb`.
@@ -494,7 +498,7 @@ WRF-Ensembly includes tools to compare model output against observations (first 
 wrf-ensembly $EXP_PATH validation interpolate-model
 ```
 
-This reads the processed wrfout files (forecast mean and analysis mean), interpolates them to each observation's location, time, and vertical level, and stores the results in the `model_forecast` and `model_analysis` columns in DuckDB. Requires completed `postprocess` runs.
+This reads the postprocessed files (forecast mean and analysis mean), interpolates them to each observation's location, time, and vertical level, and stores the results in the `model_forecast` and `model_analysis` columns in DuckDB. Requires completed `postprocess` runs.
 
 ### First Departures Analysis
 
@@ -548,7 +552,7 @@ spatial_resolution = 1.0
 | `cycle-info CYCLE [--as-json]` | Detailed per-file stats for a specific cycle |
 | `plot-cycle CYCLE [--dpi]` | Quick-look maps per instrument.quantity of a cycle's window, straight from the DB: assimilated values and errors, status of every obs (assimilated / held out / rejected), O-B once interpolated |
 | `plot-cycle-locations CYCLE` | Plot observation locations for a cycle on a map |
-| `plot-compare-obs-to-grid CYCLE [--center-lat] [--center-lon] [--window-size] [--instrument] [--quantity] [--keep-only-good-qc]` | Plot observations overlaid on the WRF grid (useful for tuning superobbing) |
+| `plot-compare-obs-to-grid CYCLE [--center-lat] [--center-lon] [--window-size] [--instrument] [--quantity] [--keep-only-good-qc]` | Plot observations overlaid on the model grid (useful for tuning superobbing) |
 | `plot FILENAME [--dpi] [--vmin] [--vmax] [--ylim] [--qc] [--no-robust] [--with-model]` | Plot observations from a specific file; `--with-model` produces O-B panels |
 
 ### Validation Commands (`wrf-ensembly $EXP_PATH validation`)
@@ -592,7 +596,7 @@ Add entries to `INSTRUMENT_REGISTRY` and `QUANTITY_REGISTRY` in `wrf_ensembly/ob
 ),
 ```
 
-**Add the quantity with a direct WRF mapping (simplest case):**
+**Add the quantity with a direct mapping to a model variable (simplest case):**
 ```python
 "MY_QUANTITY": QuantitySpec(
     label="My Quantity [unit]",
@@ -600,14 +604,14 @@ Add entries to `INSTRUMENT_REGISTRY` and `QUANTITY_REGISTRY` in `wrf_ensembly/ob
     cmap="viridis",
     vmin=0,
     vmax=1,
-    model_equivalent="WRF_VARIABLE_NAME",  # exact WRF field name
+    model_equivalent="VARIABLE_NAME",  # name in the postprocessed output
     dart_quantity="DART_QUANTITY_NAME",     # DART obs type string
 ),
 ```
 
 **Add the quantity with a complex observation operator (multi-field case):**
 
-If the observation cannot be directly mapped to a single WRF variable (e.g., a projected wind component), define an operator instead of `model_equivalent`:
+If the observation cannot be directly mapped to a single model variable (e.g., a projected wind component), define an operator instead of `model_equivalent`:
 
 ```python
 # In wrf_ensembly/observations/operators/my_operator.py:

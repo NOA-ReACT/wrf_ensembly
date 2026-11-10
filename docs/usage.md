@@ -16,6 +16,8 @@ Commands are grouped by their functionality in the following sections:
 
 For a new experiment, you will typically start with creating it and copying the model ([experiment management](#experiment-management)), then preprocess the input data ([preprocessing](#preprocessing)), preprocess observations ([observations](#observations)), run the ensemble ([ensemble management](#ensemble-management)), and finally postprocess the results ([postprocessing](#postprocessing)). You can check the experiment status at any time using the [status](#status) commands. If you are using SLURM, you can also find commands for that in the [SLURM](#slurm) section (preprocess, run ensemble, postprocess).
 
+The commands are the same for WRF and ICON unless a section says otherwise. A command that does not apply to the experiment's model stops with an error, or does nothing where that is the right thing (e.g. `ensemble update-bc` with ICON).
+
 All commands will take the path to the experiment directory as the first argument. This directory will contain the model data, input and output forecasts, configuration and anything else related to the experiment. It must be writable by the current user.
 
 ## Experiment Management
@@ -45,6 +47,11 @@ All commands will take the path to the experiment directory as the first argumen
     :depth: 2
 
 ## Preprocessing
+
+Making the initial and boundary conditions depends on the model:
+
+- **WRF**: `setup`, `geogrid`, `ungrib`, `metgrid`, `real`, and optionally `interpolate-chem` for WRF-Chem. `icbc-status` and `clean` are for WRF as well. See [WRF](wrf.md#preprocessing).
+- **ICON**: `icon-icbc` only. See [ICON](icon.md#preprocessing).
 
 ::: mkdocs-click
     :module: wrf_ensembly.commands.preprocess
@@ -86,6 +93,12 @@ All commands will take the path to the experiment directory as the first argumen
     :module: wrf_ensembly.commands.preprocess
     :command: interpolate_chem
     :prog_name: wrf-ensembly EXPERIMENT_PATH preprocess interpolate-chem
+    :depth: 2
+
+::: mkdocs-click
+    :module: wrf_ensembly.commands.preprocess
+    :command: icon_icbc
+    :prog_name: wrf-ensembly EXPERIMENT_PATH preprocess icon-icbc
     :depth: 2
 
 ::: mkdocs-click
@@ -160,6 +173,8 @@ Observations are first converted to the WRF-Ensembly parquet format with the sep
 
 ## Ensemble Management
 
+`advance-member`, `filter`, `analysis` and `cycle` are one cycle, for any model. WRF only: `plan-segment` and `finish-segment` ([segments](wrf.md#segments)), `generate-perturbations` and `apply-perturbations` ([perturbations](configuration.md#perturbations)), `setup-from-other-experiment`.
+
 ::: mkdocs-click
     :module: wrf_ensembly.commands.ensemble
     :command: setup
@@ -233,6 +248,8 @@ Observations are first converted to the WRF-Ensembly parquet format with the sep
     :depth: 2
 
 ## Postprocessing
+
+`print-variables-to-keep` is for WRF only.
 
 ::: mkdocs-click
     :module: wrf_ensembly.commands.postprocess
