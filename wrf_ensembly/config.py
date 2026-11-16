@@ -391,6 +391,35 @@ class SegmentsConfig:
 
 
 @dataclass
+class FieldReplacementConfig:
+    """
+    Replacing fields of the members' initial state with values from files you provide,
+    e.g. OH from a global model that simulates it better than our chemistry does.
+
+    `<directory>/cycle_NNN.nc` holds the values for the start of cycle NNN. `ensemble
+    cycle` writes them into the next cycle's initial state, after the analysis, so they
+    override it. For cycle 0, run `ensemble replace-fields` after setting up the members.
+    Cycles without a file are left alone. With `[segments]`, the cycle before each file
+    becomes a segment stop so it can be applied.
+
+    Each variable in `variables` has to be in the file, either with exactly the shape of
+    the field in the wrfinput/restart file, e.g. `(Time, bottom_top, south_north,
+    west_east)`, applied to all members, or with a leading `member` dimension of size
+    `n_members`, one value per member.
+    """
+
+    enabled: bool = False
+    """Replace fields when cycling"""
+
+    directory: Path = Path("replace")
+    """Where the `cycle_NNN.nc` files are, relative to the experiment directory"""
+
+    variables: list[str] = field(default_factory=list)
+    """Which fields to replace (plain WRF names, e.g. `BACKG_OH`). Other variables in the
+    files are ignored."""
+
+
+@dataclass
 class TemporalBinConfig:
     """Configuration for temporal binning of one instrument/quantity pair."""
 
@@ -1066,6 +1095,11 @@ class Config(DataClassTOMLMixin):
     segments: SegmentsConfig = field(default_factory=SegmentsConfig)
     """Running several cycles as one WRF run, in the `restart` cycling mode"""
 
+    field_replacement: FieldReplacementConfig = field(
+        default_factory=FieldReplacementConfig
+    )
+    """Replacing fields of the initial state with values from files, when cycling"""
+
     def wrf_namelist_overrides_for_member(
         self, member: int
     ) -> dict[str, dict[str, Any]]:
@@ -1136,6 +1170,11 @@ class Config(DataClassTOMLMixin):
 
         if self.segments.enabled:
             self._check_segments()
+
+        if self.field_replacement.enabled and not self.field_replacement.variables:
+            raise ValueError(
+                "field_replacement is enabled but field_replacement.variables is empty"
+            )
 
         # WRF v4 initialises its prognostic temperature from THM. T in wrfinput/wrfout is a
         # diagnostic (dry potential temperature) that WRF does not read back.

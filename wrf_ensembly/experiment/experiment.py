@@ -19,6 +19,7 @@ from wrf_ensembly import (
     config,
     cycling,
     external,
+    field_replacement,
     obs_sequence,
     perturbations,
     rebalance,
@@ -840,6 +841,25 @@ class Experiment:
             i for i in range(len(self.cycles)) if self.paths.obs_seq_path(i).exists()
         }
 
+    def field_replacement_cycles(self) -> set[int]:
+        """Cycles with a field replacement file, empty if `[field_replacement]` is off"""
+
+        if not self.cfg.field_replacement.enabled:
+            return set()
+        return {
+            i
+            for i in range(len(self.cycles))
+            if self.paths.field_replacement_path(i).exists()
+        }
+
+    def field_replacement_stops(self) -> set[int]:
+        """
+        Cycles a segment has to stop at for field replacement: the ones before a cycle
+        with a file, since `cycle` writes it into the next cycle's initial state
+        """
+
+        return {i - 1 for i in self.field_replacement_cycles() if i > 0}
+
     def segment_rate(self, before_cycle: int) -> tuple[float, str]:
         """
         Wall clock seconds per simulated hour to size segments with, and where the number
@@ -885,6 +905,7 @@ class Experiment:
             self.observation_cycles(),
             set(self.cfg.assimilation.keep_restart_files_for_cycles),
             run_until,
+            field_replacement_stops=self.field_replacement_stops(),
         )
         rate, rate_source = self.segment_rate(first)
         plan = segments.plan_segment(
@@ -1008,6 +1029,16 @@ class Experiment:
             raise ExperimentStateError(
                 f"Cycle(s) {', '.join(map(str, inside))} got observations after segment "
                 f"{plan} was planned, so they were not assimilated. Reset it with "
+                f"`ensemble reset-cycle --cycle {plan.first}` to run it again with the "
+                "new stops."
+            )
+        inside = sorted(
+            i + 1 for i in self.field_replacement_stops() if plan.first <= i < plan.last
+        )
+        if inside:
+            raise ExperimentStateError(
+                f"Cycle(s) {', '.join(map(str, inside))} got a field replacement file "
+                f"after segment {plan} was planned, so it was not applied. Reset it with "
                 f"`ensemble reset-cycle --cycle {plan.first}` to run it again with the "
                 "new stops."
             )
@@ -1260,6 +1291,8 @@ class Experiment:
                 logger.info(f"Member {member_i}: Copying {name}")
                 nc_icbc[name][:] = nc_analysis[name][:]
 
+            self.replace_member_fields(member_i, next_cycle_i, nc_icbc)
+
             # Add experiment name to attributes
             nc_icbc.experiment_name = self.cfg.metadata.name
 
@@ -1311,30 +1344,88 @@ class Experiment:
                     "cycle. Add the flag and rebuild WRF."
                 )
 
-        if not use_forecast:
-            analysis_file = (
-                self.paths.scratch_analysis_path(self.current_cycle_i)
-                / f"member_{member_i:02d}"
-                / f"wrfout_d01_{end:%Y-%m-%d_%H:%M:%S}"
-            )
-            if not analysis_file.exists():
-                raise FileNotFoundError(analysis_file)
-            with (
-                netCDF4.Dataset(analysis_file, "r") as nc_analysis,  # type: ignore
-                netCDF4.Dataset(initial_state, "r+") as nc_restart,  # type: ignore
-            ):
+        replacing = self.paths.field_replacement_path(next_cycle_i).exists()
+        if not use_forecast or (self.cfg.field_replacement.enabled and replacing):
+            with netCDF4.Dataset(initial_state, "r+") as nc_restart:  # type: ignore
                 before = rebalance.balanced_fields(nc_restart)
-                written = restart.write_state(
-                    nc_restart, nc_analysis, self.cfg.assimilation.state_variables
-                )
+                if not use_forecast:
+                    self._write_analysis(member_i, nc_restart)
+                # After the analysis, so the replaced fields override it
+                self.replace_member_fields(member_i, next_cycle_i, nc_restart)
+                # An exact no-op where the state didn't change
                 rebalance.rebalance(nc_restart, before)
                 nc_restart.experiment_name = self.cfg.metadata.name
-            logger.info(
-                f"Member {member_i}: Wrote the analysis ({', '.join(written)}) into "
-                f"{initial_state.name} and rebalanced it"
-            )
+            logger.info(f"Member {member_i}: Rebalanced {initial_state.name}")
 
         self.prepare_member_boundaries(member_i, next_cycle_i)
+
+    def _write_analysis(self, member_i: int, nc_restart: netCDF4.Dataset) -> None:
+        """Writes the analysis of the current cycle into a member's open restart file"""
+
+        end = self.current_cycle.end
+        analysis_file = (
+            self.paths.scratch_analysis_path(self.current_cycle_i)
+            / f"member_{member_i:02d}"
+            / f"wrfout_d01_{end:%Y-%m-%d_%H:%M:%S}"
+        )
+        if not analysis_file.exists():
+            raise FileNotFoundError(analysis_file)
+        with netCDF4.Dataset(analysis_file, "r") as nc_analysis:  # type: ignore
+            written = restart.write_state(
+                nc_restart, nc_analysis, self.cfg.assimilation.state_variables
+            )
+        logger.info(
+            f"Member {member_i}: Wrote the analysis ({', '.join(written)}) into "
+            f"{Path(nc_restart.filepath()).name}"
+        )
+
+    def replace_member_fields(
+        self, member_i: int, cycle_i: int, nc_target: netCDF4.Dataset
+    ) -> list[str]:
+        """
+        Writes the fields of `cycle_i`'s field replacement file into a member's initial
+        state for that cycle, already open for writing (see `field_replacement.py`). Does
+        nothing if `[field_replacement]` is off or the cycle has no file. In a restart
+        file, the caller rebalances afterwards.
+
+        Returns:
+            The replaced fields
+        """
+
+        source_path = self.paths.field_replacement_path(cycle_i)
+        if not self.cfg.field_replacement.enabled or not source_path.exists():
+            return []
+        with netCDF4.Dataset(source_path, "r") as nc_source:  # type: ignore
+            replaced = field_replacement.replace_fields(
+                nc_target,
+                nc_source,
+                self.cfg.field_replacement.variables,
+                member_i,
+                self.cfg.assimilation.n_members,
+            )
+        logger.info(
+            f"Member {member_i}: Replaced {', '.join(replaced)} from {source_path}"
+        )
+        return replaced
+
+    def replace_fields_current_cycle(self, member_i: int) -> list[str]:
+        """
+        `replace_member_fields` for the member's initial state of the current cycle, as
+        it is in its directory. For the first cycle, which `cycle` doesn't prepare, or to
+        apply a file that was added after cycling. Rebalances restart files.
+        """
+
+        cycle_i = self.current_cycle_i
+        initial_state = self.member_initial_state(member_i, cycle_i)
+        if not initial_state.exists():
+            raise FileNotFoundError(initial_state)
+        is_restart = self.cfg.assimilation.cycling_mode == "restart" and cycle_i > 0
+        with netCDF4.Dataset(initial_state, "r+") as nc_target:  # type: ignore
+            before = rebalance.balanced_fields(nc_target) if is_restart else None
+            replaced = self.replace_member_fields(member_i, cycle_i, nc_target)
+            if is_restart and replaced:
+                rebalance.rebalance(nc_target, before)
+        return replaced
 
     def set_wrf_environment(self):
         """

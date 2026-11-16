@@ -6,7 +6,7 @@ from pathlib import Path
 import click
 import netCDF4
 
-from wrf_ensembly import config, experiment, perturbations, utils
+from wrf_ensembly import config, experiment, field_replacement, perturbations, utils
 from wrf_ensembly.click_utils import GroupWithStartEndPrint, pass_experiment_path
 from wrf_ensembly.console import logger
 from wrf_ensembly.experiment import ExperimentStateError, StateTransition
@@ -422,6 +422,113 @@ def advance_member(
     logger.info(f"{n_advanced}/{exp.cfg.assimilation.n_members} members advanced")
     if n_advanced >= exp.cfg.assimilation.n_members:
         logger.info("All members advanced - ready for filter")
+
+
+@ensemble_cli.command()
+@click.option(
+    "--jobs",
+    type=click.IntRange(min=0, max=None),
+    help="How many members to process in parallel",
+)
+@click.option(
+    "--check",
+    is_flag=True,
+    help="Only check the files of all cycles against member 0's initial state",
+)
+@pass_experiment_path
+def replace_fields(experiment_path: Path, jobs: int | None, check: bool):
+    """
+    Replaces fields of the members' initial state for the current cycle with the
+    cycle's `[field_replacement]` file. `cycle` does this for every later cycle, so run
+    it for the first one, after setting up and perturbing the members. Update the
+    boundary conditions afterwards if a replaced field is in wrfbdy.
+
+    With --check, changes nothing and checks that every cycle's file has the configured
+    variables in a shape that fits, so a bad file doesn't stop the experiment later.
+    """
+
+    logger.setup("ensemble-replace-fields", experiment_path)
+    exp = experiment.Experiment(experiment_path)
+    cycle_i = exp.current_cycle_i
+
+    if not exp.cfg.field_replacement.enabled:
+        logger.error("[field_replacement] is not enabled")
+        sys.exit(1)
+
+    if check:
+        _check_field_replacement_files(exp)
+        return
+    source = exp.paths.field_replacement_path(cycle_i)
+    if not source.exists():
+        logger.error(f"No field replacement file for cycle {cycle_i} ({source})")
+        sys.exit(1)
+
+    # The initial state is only read when a member starts
+    plan = exp.segment_of(cycle_i)
+    if exp.state.count_advanced(cycle_i) > 0 or (
+        plan is not None and exp.segment_started(plan)
+    ):
+        logger.error(
+            f"Members have already run cycle {cycle_i}, replacing fields now would have "
+            "no effect"
+        )
+        sys.exit(1)
+
+    jobs = utils.determine_jobs(jobs)
+    with ProcessPoolExecutor(max_workers=jobs) as executor:
+        for _ in executor.map(
+            exp.replace_fields_current_cycle, range(exp.cfg.assimilation.n_members)
+        ):
+            pass
+
+    logger.info(
+        f"Replaced {', '.join(exp.cfg.field_replacement.variables)} for cycle {cycle_i}"
+    )
+
+
+def _check_field_replacement_files(exp: experiment.Experiment) -> None:
+    """`replace-fields --check`: exits with an error if any cycle's file doesn't fit"""
+
+    cycles = sorted(exp.field_replacement_cycles())
+    if not cycles:
+        logger.error(f"No field replacement files in {exp.paths.field_replacement}")
+        sys.exit(1)
+    target_path = exp.member_initial_state(0, exp.current_cycle_i)
+    if not target_path.exists():
+        logger.error(f"{target_path} doesn't exist, set up the members first")
+        sys.exit(1)
+
+    failed = False
+    with netCDF4.Dataset(target_path, "r") as target:  # type: ignore
+        for i in cycles:
+            source_path = exp.paths.field_replacement_path(i)
+            try:
+                with netCDF4.Dataset(source_path, "r") as source:  # type: ignore
+                    per_member = field_replacement.check_source(
+                        source,
+                        target,
+                        exp.cfg.field_replacement.variables,
+                        exp.cfg.assimilation.n_members,
+                        check_time=False,
+                    )
+            except (OSError, ValueError) as e:
+                logger.error(f"Cycle {i}: {e}")
+                failed = True
+                continue
+            kinds = [
+                f"{name} ({'per member' if m else 'shared'})"
+                for name, m in per_member.items()
+            ]
+            logger.info(f"Cycle {i}: {', '.join(kinds)}")
+    if exp.cfg.segments.enabled and exp.field_replacement_stops():
+        logger.info(
+            "Segments stop at the end of cycle(s) "
+            + ", ".join(map(str, sorted(exp.field_replacement_stops())))
+            + " to apply them"
+        )
+    if failed:
+        sys.exit(1)
+    logger.info(f"All {len(cycles)} field replacement file(s) fit")
 
 
 @ensemble_cli.command()

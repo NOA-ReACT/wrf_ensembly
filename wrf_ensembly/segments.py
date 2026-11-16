@@ -19,6 +19,7 @@ from wrf_ensembly.cycling import CycleInformation
 
 STOP_OBSERVATIONS = "observations"
 STOP_KEEP_RESTART = "keep_restart_files_for_cycles"
+STOP_FIELD_REPLACEMENT = "field_replacement"
 STOP_RUN_UNTIL = "run_until"
 STOP_LAST_CYCLE = "last_cycle"
 STOP_WALLTIME = "walltime"
@@ -93,18 +94,23 @@ def find_stops(
     observation_cycles: set[int],
     keep_restart_cycles: set[int],
     run_until: int | None = None,
+    field_replacement_stops: set[int] = frozenset(),
 ) -> dict[int, str]:
     """
     The cycles a segment must end at, with the reason. A cycle with observations needs
     the filter at its end, a cycle in `keep_restart_files_for_cycles` a restart file at
-    its end that another experiment can start from, and `--run-until` asks to stop.
-    The last cycle is always a stop.
+    its end that another experiment can start from, a cycle in `field_replacement_stops`
+    a `cycle` step at its end to replace fields in the next one's initial state, and
+    `--run-until` asks to stop. The last cycle is always a stop.
     """
 
     stops: dict[int, str] = {}
     # In order of precedence for the reason, later ones overwrite
     if run_until is not None and 0 <= run_until < n_cycles:
         stops[run_until] = STOP_RUN_UNTIL
+    for i in field_replacement_stops:
+        if 0 <= i < n_cycles:
+            stops[i] = STOP_FIELD_REPLACEMENT
     for i in keep_restart_cycles:
         if 0 <= i < n_cycles:
             stops[i] = STOP_KEEP_RESTART
@@ -245,14 +251,19 @@ def shorten(
 
 
 def new_stop_inside(
-    plan: SegmentPlan, observation_cycles: set[int], run_until: int | None
+    plan: SegmentPlan,
+    observation_cycles: set[int],
+    run_until: int | None,
+    field_replacement_stops: set[int] = frozenset(),
 ) -> tuple[int, str] | None:
     """
     The earliest cycle before the end of a plan that has become a stop since planning
-    (an observation file appeared, or `--run-until` asks for it), with the reason
+    (an observation or field replacement file appeared, or `--run-until` asks for it),
+    with the reason
     """
 
-    inside = {i: STOP_OBSERVATIONS for i in observation_cycles if i in plan}
+    inside = {i: STOP_FIELD_REPLACEMENT for i in field_replacement_stops if i in plan}
+    inside |= {i: STOP_OBSERVATIONS for i in observation_cycles if i in plan}
     if run_until is not None and run_until in plan:
         inside.setdefault(run_until, STOP_RUN_UNTIL)
     inside.pop(plan.last, None)

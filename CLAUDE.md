@@ -144,6 +144,8 @@ experiment_dir/
 - In `Experiment`: `advance_member` runs the segment, `file_segment_outputs` sorts wrfouts into their cycles, `find_resume_point` continues a killed member from a confirmed checkpoint, `finish_segment` moves the pointer from the first to the last cycle (first step of the analysis job), `reset_segment`
 - Tests run `advance_member` with `tests/fake_wrf.py` instead of wrf.exe
 
+**Field replacement** (`[field_replacement]`, `field_replacement.py`): `replace/cycle_NNN.nc` holds fields (e.g. `BACKG_OH` from a global model) that `cycle` writes into cycle NNN's initial state after the analysis, shared or with a leading `member` dimension. `ensemble replace-fields` does it for the current cycle (needed for cycle 0); `--check` validates all files. With segments, the cycle before each file is a stop.
+
 **WRF Operations (`wrf.py`)**
 - WRF-specific utilities (namelists, file operations)
 - Handles wrfinput/wrfbdy files

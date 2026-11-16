@@ -19,3 +19,12 @@ Thus, if you are using [interpolator-for-wrfchem](https://github.com/NOA-ReACT/i
 
 To automate this behaviour, you can set `manage_chem_in` to `true` in your `config.yml` file (section `data`). This will automatically set `chem_in_opt` to the appropriate value depending on whether you are running `real.exe` or `wrf.exe`. If you set this to `false`, you will have to manually set `chem_in_opt` in your `namelist.input` file.
 
+## Replacing fields from another model
+
+Fields another model simulates better, such as OH, can be written into the members'
+initial state at every cycle with [`[field_replacement]`](./configuration.md#field-replacement).
+With GOCART (`chem_opt = 300`), OH is the background field `BACKG_OH`. It is read from
+`wrfinput_d01` and restart files whatever `chem_in_opt` is, has no lateral boundaries
+and is not changed during the run. It could also come from an `auxinput8` file
+(`wrfchemi_gocart_bg`). If that is configured, WRF overwrites the replaced values
+whenever it reads one.

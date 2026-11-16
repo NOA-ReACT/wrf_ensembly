@@ -285,11 +285,16 @@ def _fit_segment(
 ) -> SegmentPlan:
     """
     Shortens the current segment if one of its cycles became a stop since planning
-    (observations added, `--run-until`), as long as no member has started it. Exits if
+    (observations or field replacement files added, `--run-until`), as long as no member has started it. Exits if
     one has, since the segment then has to be reset.
     """
 
-    new_stop = segments.new_stop_inside(segment, exp.observation_cycles(), run_until)
+    new_stop = segments.new_stop_inside(
+        segment,
+        exp.observation_cycles(),
+        run_until,
+        field_replacement_stops=exp.field_replacement_stops(),
+    )
     if new_stop is None:
         return segment
 

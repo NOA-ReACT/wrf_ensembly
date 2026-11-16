@@ -42,6 +42,9 @@ class ExperimentPaths:
         self.obs_temp = self.obs / "temp"  # Temporary files during processing
         self.obs_db = experiment_path / "observations.duckdb"
 
+        # Fields to write into the members' initial state, see `field_replacement.py`
+        self.field_replacement = experiment_path / cfg.field_replacement.directory
+
         # Experiment status, stored as a tree of small files (see state_store.py)
         self.status = experiment_path / "status"
         self.status_experiment_file = self.status / "experiment.json"
@@ -138,6 +141,10 @@ class ExperimentPaths:
     def obs_seq_path(self, cycle: int) -> Path:
         """The observations assimilated at the end of a cycle, made by `prepare-cycles`"""
         return self.obs / f"cycle_{cycle:03d}.obs_seq"
+
+    def field_replacement_path(self, cycle: int) -> Path:
+        """The fields written into the members' initial state of a cycle (`[field_replacement]`)"""
+        return self.field_replacement / f"cycle_{cycle:03d}.nc"
 
     def member_path(self, i: int) -> Path:
         """

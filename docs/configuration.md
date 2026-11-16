@@ -289,6 +289,49 @@ With segments, a few things mean something slightly different:
 - Fields that start over at every restart (`EDUST1`-`EDUST5` and `TOT_EDUST` with
   GOCART) add up over the whole segment instead of one cycle.
 
+## Field Replacement
+
+Replaces fields of the members' initial state with values from files you provide, e.g.
+OH from a global model that simulates it better than the experiment's chemistry does.
+
+```toml
+[field_replacement]
+enabled = true
+directory = "replace"
+variables = ["BACKG_OH"]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | bool | Replace fields when cycling. *Default: false* |
+| `directory` | path | Where the files are, relative to the experiment directory. *Default: "replace"* |
+| `variables` | list[str] | Fields to replace, by their plain WRF name (`THM`, not `THM_2`). Other variables in the files are ignored. **Required** when enabled |
+
+`<directory>/cycle_NNN.nc` holds the values for the **start** of cycle NNN. Cycles
+without a file are left alone, so the files can be sparse (e.g. one per day). Each
+variable must have either:
+
+- exactly the shape of the field in the wrfinput/restart file, e.g.
+  `(Time, bottom_top, south_north, west_east)`: the same values for every member, or
+- a leading `member` dimension of size `n_members` before that: one value per member.
+  Useful for 3D fields, since every member's eta levels sit at different pressures.
+
+Missing or non-finite values are rejected. If the file has a `Times` variable, it must
+match the cycle start.
+
+`ensemble cycle` writes the fields into the next cycle's initial state after the
+analysis, so they override it. In `restart` mode the file is rebalanced afterwards, in
+case a replaced field affects pressure and density (`MU`, `PH`, `THM`, moisture). Cycle
+0 is never prepared by `cycle`, so for it run `ensemble replace-fields` after setting up
+(and perturbing) the members. Run `ensemble replace-fields --check` first to check
+every file against the members' current initial state.
+
+With `[segments]`, the cycle before each file ends a segment, so `cycle` runs there and
+the file is applied.
+
+Only the initial state is changed, not `wrfbdy`. Fields with lateral boundaries (e.g.
+chemistry species) drift back towards them from the domain edges.
+
 ## Observations
 
 Observation processing and quality control settings.
