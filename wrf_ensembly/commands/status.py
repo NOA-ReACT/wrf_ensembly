@@ -21,10 +21,32 @@ def status_cli():
 @status_cli.command()
 @pass_experiment_path
 def show(experiment_path: Path):
-    """Prints the current experiment status with a rich table showing member status and experiment state"""
+    """
+    Prints the current experiment status with a rich table showing member status and experiment state
+
+    Only reads the status files of the current cycle, so it stays fast however many
+    cycles have run (see `status runtime-stats` for the history).
+    """
 
     logger.setup("status-show", experiment_path)
     exp = experiment.Experiment(experiment_path)
+
+    # The state of a cycle is derived from its files on every access, and so is each
+    # property of the experiment that builds on it. Read it once: on Lustre every
+    # status file opened is a round trip to the metadata server.
+    cycle_state = exp.state_machine.current_cycle.current_state
+    filter_run = cycle_state in (
+        CycleState.FILTER_COMPLETE,
+        CycleState.ANALYSIS_COMPLETE,
+        CycleState.CYCLE_COMPLETE,
+    )
+    analysis_run = cycle_state in (
+        CycleState.ANALYSIS_COMPLETE,
+        CycleState.CYCLE_COMPLETE,
+    )
+    # As read when the experiment was loaded just above, so that this row always agrees
+    # with the member table below
+    all_members_advanced = all(member.advanced for member in exp.members)
 
     # Experiment State Table
     exp_table = Table(title="Experiment State")
@@ -39,12 +61,10 @@ def show(experiment_path: Path):
 
     exp_table.add_row("Current Cycle", str(exp.current_cycle_i))
     exp_table.add_row("Total Cycles", str(len(exp.cycles)))
-    exp_table.add_row(
-        "Cycle State", exp.state_machine.current_cycle.current_state.value
-    )
-    exp_table.add_row("Filter Run", "✓" if exp.filter_run else "✗")
-    exp_table.add_row("Analysis Run", "✓" if exp.analysis_run else "✗")
-    exp_table.add_row("All Members Advanced", "✓" if exp.all_members_advanced else "✗")
+    exp_table.add_row("Cycle State", cycle_state.value)
+    exp_table.add_row("Filter Run", "✓" if filter_run else "✗")
+    exp_table.add_row("Analysis Run", "✓" if analysis_run else "✗")
+    exp_table.add_row("All Members Advanced", "✓" if all_members_advanced else "✗")
 
     if exp.cfg.segments.enabled:
         segment = exp.segment_of(exp.current_cycle_i)
@@ -67,18 +87,9 @@ def show(experiment_path: Path):
     member_table = Table(title="Member Status")
     member_table.add_column("Member", justify="center", style="bold cyan")
     member_table.add_column("Advanced", justify="center")
-    member_table.add_column("Runtime Stats", justify="center")
-
-    stats_count = defaultdict(int)
-    for _, member_i in exp.state.get_all_runtime_statistics():
-        stats_count[member_i] += 1
 
     for member in exp.members:
-        member_table.add_row(
-            str(member.i),
-            "✓" if member.advanced else "✗",
-            f"{stats_count[member.i]} cycles",
-        )
+        member_table.add_row(str(member.i), "✓" if member.advanced else "✗")
 
     console = Console()
     console.print(exp_table)
