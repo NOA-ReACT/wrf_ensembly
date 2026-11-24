@@ -85,6 +85,27 @@ class DataProcessor(ABC):
 _XWRF_COMPUTATION_DEPS = {"MU", "MUB", "DNW"}
 
 
+GRID_STAGGERED_DIMS = {"x_stag": "x", "y_stag": "y", "z_stag": "z"}
+
+
+def destagger_grid(ds: xr.Dataset) -> xr.Dataset:
+    """
+    Destagger the variables on the staggered model grid (the dimensions `x_stag`,
+    `y_stag` and `z_stag` of an xWRF-postprocessed dataset), and only those.
+
+    xWRF destaggers every dimension whose name ends in `_stag`. WRF also gives that
+    suffix to dimensions that are not grid staggers: `soil_layers_stag` (SMOIS, TSLB, ZS;
+    the values are at the layer centres) and `bio_emissions_dimension_stag` (the
+    per-species deposition fluxes of WRF-Chem, one entry per chemical species).
+    Averaging neighbours along those mixes soil layers, or species. They are left as
+    they are in the file, name included.
+    """
+    dims = {
+        stag: unstag for stag, unstag in GRID_STAGGERED_DIMS.items() if stag in ds.dims
+    }
+    return ds.xwrf.destagger(dims)
+
+
 class XWRFPostProcessor(DataProcessor):
     """
     Processor that applies xWRF postprocessing operations as well as some other minor
@@ -130,7 +151,7 @@ class XWRFPostProcessor(DataProcessor):
             model_level_thickness = np.diff(height, axis=1)  # This is a numpy array
 
         # Compute more diagnostics and destagger (kept lazy at this point)
-        ds = ds.xwrf.postprocess().xwrf.destagger()
+        ds = destagger_grid(ds.xwrf.postprocess())
 
         # Filter the lazy dataset before .compute() so that dask never
         # materializes variables we don't need.
